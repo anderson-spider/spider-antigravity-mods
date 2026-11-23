@@ -60,7 +60,7 @@ export function projectPath(value: unknown): string | undefined {
   return PROJECT.test(project) && !project.split('/').some((s) => /^\.+$/.test(s)) ? project : undefined
 }
 
-/** A host name a tool input or the defaultHost option gives (`gitlab.example.com` or `localhost:8080`, with an optional port), lower-cased; never a URL. */
+/** A host name a tool input gives (`gitlab.example.com` or `localhost:8080`, with an optional port), lower-cased; never a URL. */
 export function hostName(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const host = value.trim().toLowerCase()

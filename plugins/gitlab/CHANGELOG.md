@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - 2026-11-23
+
+- Remove `GITLAB_MCP_DEFAULT_HOST` and `options.defaultHost`. Outside a GitLab repository without `host`, the server still auto-targets the sole configured host when only one host exists in `GITLAB_MCP_TOKENS`; when multiple hosts are configured, it refuses and lists the configured hosts so `host` can be passed explicitly.
+
 ## 0.2.0 - 2026-11-23
 
 - Declare `GITLAB_MCP_TOKENS` in `mcp_config.json` `variables` so Antigravity prompts for credentials natively in `/plugin` and **Customizations > Installed** instead of requiring manual shell/`launchctl` exports.

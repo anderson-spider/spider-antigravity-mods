@@ -6,7 +6,7 @@ Native plugins for [Google Antigravity](https://antigravity.google) by [anderson
 
 | Plugin | Version | Description |
 | :--- | :--- | :--- |
-| [`gitlab`](./plugins/gitlab) | `0.2.0` | Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and labels across `gitlab.com` and self-hosted GitLab instances. |
+| [`gitlab`](./plugins/gitlab) | `0.3.0` | Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and labels across `gitlab.com` and self-hosted GitLab instances. |
 
 ## Prerequisites
 

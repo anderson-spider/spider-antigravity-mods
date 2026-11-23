@@ -9,7 +9,7 @@ Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and label
 - **Smart host resolution:**
   - Inside a GitLab clone (or with an explicit `cwd`), detects host, project, and current branch from git (including `~/.ssh/config` aliases via `ssh -G`).
   - Outside a GitLab repo with a URL or explicit `host`, targets that host directly.
-  - Outside a GitLab repo without `host`, uses `GITLAB_MCP_DEFAULT_HOST` if set, or automatically targets the sole configured host when only one host is present in `GITLAB_MCP_TOKENS`. If multiple hosts exist with no default, refuses and lists the configured host names.
+  - Outside a GitLab repo without `host`, automatically targets the sole configured host when only one host is present in `GITLAB_MCP_TOKENS`. If multiple hosts are configured, refuses and lists the configured host names so `host` can be passed explicitly.
 - **Safe by default:** guarded `merge`, draft notes for reviews, and explicit opt-in (`allowOthers: true`) for writes on other people's MRs.
 
 ## Setup
@@ -35,21 +35,7 @@ Because `mcp_config.json` declares `GITLAB_MCP_TOKENS` as a plugin variable, Ant
 gitlab.com=glpat-...,gitlab.example.com=glpat-...
 ```
 
-Tokens need `api` scope (`read_api` for read-only use). When only one host is configured, it is automatically used as the default outside GitLab repositories.
-
-### Optional: default host for multiple instances
-
-Only needed when you configure 2+ hosts and call tools outside a GitLab repository without passing `host` or a GitLab URL:
-
-```bash
-export GITLAB_MCP_DEFAULT_HOST="gitlab.example.com"
-```
-
-On macOS GUI apps (such as Antigravity Desktop), also expose the variable to launched apps and reload MCP servers (or restart Antigravity):
-
-```bash
-launchctl setenv GITLAB_MCP_DEFAULT_HOST "gitlab.example.com"
-```
+Tokens need `api` scope (`read_api` for read-only use). When only one host is configured, it is automatically used outside GitLab repositories; when multiple hosts are configured, pass `host` (or a GitLab URL) outside a GitLab clone.
 
 ## Tools (`gitlab_gitlab` MCP server)
 

@@ -1,5 +1,5 @@
 import { expect, test } from './expect.ts'
-import { DEFAULT_HOST_ENV, ENV_NAME, configuredHosts, offText, parseTokens, resolveToken, type Off } from '../server/tokens.ts'
+import { ENV_NAME, configuredHosts, offText, parseTokens, resolveToken, type Off } from '../server/tokens.ts'
 
 const OPTION = 'gitlab.com=glpat-personal, gitlab.example.com=glpat-work'
 
@@ -43,5 +43,5 @@ test('every refusal names GITLAB_MCP_TOKENS, never a token, and no-host names th
   const noHost = offText('no-host', 'gitlab.other.org', ['gitlab.com', 'gitlab.example.com'])
   expect(noHost).toContain('Add gitlab.other.org=<token>')
   expect(noHost).toContain('Configured hosts: gitlab.com, gitlab.example.com.')
-  expect(noHost).toContain(DEFAULT_HOST_ENV)
+  expect(noHost).toContain('Pass host explicitly to target one of them.')
 })

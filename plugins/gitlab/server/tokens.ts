@@ -5,9 +5,6 @@
 
 export const ENV_NAME = 'GITLAB_MCP_TOKENS'
 
-/** Optional fallback host when running outside a repository with a configured GitLab remote. */
-export const DEFAULT_HOST_ENV = 'GITLAB_MCP_DEFAULT_HOST'
-
 export type Off = 'no-tokens' | 'bad-tokens' | 'no-host'
 
 /** Printable ASCII with no space, comma or `=`, so the header cannot be broken by what was pasted. */
@@ -67,7 +64,7 @@ export function offText(off: Off, host?: string, configured?: readonly string[])
     case 'no-host': {
       const base = `No token configured for ${host ?? 'this host'}. Add ${host ?? '<host>'}=<token> to ${ENV_NAME}.`
       if (configured && configured.length > 0) {
-        return `${base} Configured hosts: ${configured.join(', ')}. Pass host explicitly or set ${DEFAULT_HOST_ENV} to target one of them.`
+        return `${base} Configured hosts: ${configured.join(', ')}. Pass host explicitly to target one of them.`
       }
       return base
     }
