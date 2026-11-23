@@ -16,4 +16,4 @@ Out of scope: Antigravity itself, GitLab, and external services called by the pl
 
 ## Secrets
 
-Plugins read tokens only from the user's environment (or local `mcp_config.json` overrides), never from this repository. Never commit tokens, internal host names, or work data, including in tests and examples — use placeholders such as `gitlab.example.com` and `group/project`.
+Plugins read tokens only from Antigravity plugin variables or the user's environment, never from this repository. Never commit tokens, internal host names, or work data, including in tests and examples — use placeholders such as `gitlab.example.com` and `group/project`.

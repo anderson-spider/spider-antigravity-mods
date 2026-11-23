@@ -1,4 +1,4 @@
-// The gitlab MCP server: started by Antigravity from mcp_config.json, inheriting credentials from the user's environment.
+// The gitlab MCP server: started by Antigravity from mcp_config.json, receiving credentials from plugin variables or the user's environment.
 import { createInterface } from 'node:readline'
 import { server } from './mcp.ts'
 import { nodeDeps, resolveCwd } from './node.ts'
@@ -6,7 +6,7 @@ import { run } from './run.ts'
 import { DEFAULT_HOST_ENV, ENV_NAME } from './tokens.ts'
 import { TOOLS } from './tools.ts'
 
-/** Captured at startup from the user environment (or mcp_config.json `env`), then scrubbed from process.env. */
+/** Captured at startup from Antigravity plugin variables (or user environment), then scrubbed from process.env. */
 const options = {
   tokens: process.env[ENV_NAME] || undefined,
   defaultHost: process.env[DEFAULT_HOST_ENV] || undefined,
