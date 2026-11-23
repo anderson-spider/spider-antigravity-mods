@@ -5,7 +5,7 @@ import { GitlabError, NoProjectError, gitlab, type Fetch } from './api.ts'
 import { InputError, makeCtx, type Clock, type Ctx } from './context.ts'
 import { errorText } from './errors.ts'
 import { currentBranch, hostName, locate, projectPath, sshHostname, type Git, type Ssh } from './remote.ts'
-import { DEFAULT_HOST_ENV, ENV_NAME, configuredHosts, isSet, offText, resolveToken } from './tokens.ts'
+import { ENV_NAME, configuredHosts, isSet, offText, resolveToken } from './tokens.ts'
 
 /** What a call needs from outside: processes, the network, the environment and the clock. */
 export type Deps = {
@@ -18,7 +18,7 @@ export type Deps = {
 }
 
 /** Configuration captured at startup (or injected in tests); unset fields fall back to `deps.env`. */
-export type Options = { tokens?: unknown; defaultHost?: unknown }
+export type Options = { tokens?: unknown }
 
 export type Reply = { text: string; isError?: true }
 
@@ -32,8 +32,8 @@ function reply(text: string, isError = false): Reply {
 
 /**
  * Where a call goes: the host, its token and, when the host is the remote's, the remote's project. `fallback` marks a
- * remote that names no GitLab with a token (not a git repo or a host missing from tokens), where `defaultHost` or a
- * single configured host can step in.
+ * remote that names no GitLab with a token (not a git repo or a host missing from tokens), where a single configured
+ * host can step in.
  */
 type Target = { host: string; token: string; current?: string } | { error: string; fallback?: 'no-repo' | 'no-host' }
 
@@ -64,7 +64,7 @@ async function fromRemote(git: Git, ssh: Ssh, tokens: unknown): Promise<Target> 
   return { host, token: access.token, current: where.project }
 }
 
-/** A host named by the `host` input, `defaultHost`, or single-host auto-default, and its token. */
+/** A host named by the `host` input or single-host auto-default, and its token. */
 async function onHost(git: Git, ssh: Ssh, tokens: unknown, host: string): Promise<Target> {
   const access = resolveToken(tokens, host)
   if (access.off !== undefined) return { error: offText(access.off, host, access.hosts) }
@@ -75,8 +75,8 @@ async function onHost(git: Git, ssh: Ssh, tokens: unknown, host: string): Promis
 }
 
 /**
- * Picks the host (`host` input, else the git remote's, else `defaultHost`, else the sole configured host when only one
- * host exists) and its token, switches to `project` when given and runs the tool; the token is masked in every answer.
+ * Picks the host (`host` input, else the git remote's, else the sole configured host when only one host exists) and
+ * its token, switches to `project` when given and runs the tool; the token is masked in every answer.
  */
 export async function run(deps: Deps, tool: Tool, input: Record<string, unknown>, options: Options): Promise<Reply> {
   const { git, ssh } = deps
@@ -89,21 +89,14 @@ export async function run(deps: Deps, tool: Tool, input: Record<string, unknown>
   } else {
     target = await fromRemote(git, ssh, rawTokens)
     if ('error' in target && target.fallback) {
-      const rawDefault = isSet(options.defaultHost) ? options.defaultHost : await deps.env(DEFAULT_HOST_ENV)
-      if (isSet(rawDefault)) {
-        const named = hostName(rawDefault)
-        if (!named) return reply(`${DEFAULT_HOST_ENV} is not a valid host name (gitlab.example.com).`, true)
-        target = await onHost(git, ssh, rawTokens, named)
-      } else {
-        const available = configuredHosts(rawTokens)
-        if (available.off !== undefined) {
-          target = { error: offText(available.off) }
-        } else if (available.hosts.length === 1) {
-          target = await onHost(git, ssh, rawTokens, available.hosts[0]!)
-        } else if (target.fallback === 'no-repo') {
-          target = {
-            error: `${target.error} Pass host explicitly or set ${DEFAULT_HOST_ENV}. Configured hosts: ${available.hosts.join(', ')}.`,
-          }
+      const available = configuredHosts(rawTokens)
+      if (available.off !== undefined) {
+        target = { error: offText(available.off) }
+      } else if (available.hosts.length === 1) {
+        target = await onHost(git, ssh, rawTokens, available.hosts[0]!)
+      } else if (target.fallback === 'no-repo') {
+        target = {
+          error: `${target.error} Pass host explicitly. Configured hosts: ${available.hosts.join(', ')}.`,
         }
       }
     }

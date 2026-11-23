@@ -8,7 +8,6 @@ import type { Deps } from './run.ts'
 
 const SCRUBBED_CHILD_ENV = [
   'GITLAB_MCP_TOKENS',
-  'GITLAB_MCP_DEFAULT_HOST',
   'GITLAB_TOKEN',
   'GITLAB_PRIVATE_TOKEN',
   'GL_TOKEN',

@@ -69,7 +69,7 @@ test('a host with no token is refused by name, lists configured hosts, and sends
     const result = await $.tool.call(call(name))
     expect(result.isError, name).toBe(true)
     expect(text(result), name).toBe(
-      'No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly or set GITLAB_MCP_DEFAULT_HOST to target one of them.',
+      'No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly to target one of them.',
     )
     expect(text(result), name).not.toContain(WORK)
     expect(text(result), name).not.toContain(PERSONAL)
@@ -77,7 +77,7 @@ test('a host with no token is refused by name, lists configured hosts, and sends
   expect(sent).toEqual([])
 })
 
-test('outside a GitLab repository with 2+ hosts and no defaultHost, refuses with configured hosts and sends nothing', ON, async ($, on) => {
+test('outside a GitLab repository with 2+ hosts, refuses with configured hosts and sends nothing', ON, async ($, on) => {
   const { sent, tools, host } = world(on)
   const names = await started($, tools)
 
@@ -86,7 +86,7 @@ test('outside a GitLab repository with 2+ hosts and no defaultHost, refuses with
     const out = text(await $.tool.call(call(name)))
     expect(out, name).toMatch(/not a git repository with a GitLab remote/)
     expect(out, name).toContain('Configured hosts: gitlab.example.com, gitlab.com.')
-    expect(out, name).toContain('GITLAB_MCP_DEFAULT_HOST')
+    expect(out, name).toContain('Pass host explicitly.')
   }
   expect(sent).toEqual([])
 })
@@ -243,7 +243,7 @@ test('host is refused unsent when it is a URL or has no token, naming the host a
   expect(text(await $.tool.call({ tool: MR, action: 'list', host: 'https://gitlab.example.com', project: 47 } as never))).toBe('host must be a GitLab host name (gitlab.example.com), not a URL.')
   const missing = text(await $.tool.call({ tool: MR, action: 'list', host: 'gitlab.other.org', project: 47 } as never))
   expect(missing).toBe(
-    'No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly or set GITLAB_MCP_DEFAULT_HOST to target one of them.',
+    'No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly to target one of them.',
   )
   expect(missing).not.toContain(WORK)
   expect(sent).toEqual([])
@@ -265,37 +265,6 @@ test('host equal to the real host of an SSH alias remote keeps the remote projec
   expect(sent).toHaveLength(1)
 })
 
-test('GITLAB_MCP_DEFAULT_HOST serves a remote with no token when 2+ hosts exist; host and a GitLab remote come first', async ($, on) => {
-  const { sent, host } = world(on, { remote: GITHUB, api: { [LIST_47]: { text: '[]' }, [`${WORK_API}/merge_requests/7`]: { text: MR_JSON }, [`${PERSONAL_API}/merge_requests/7`]: { text: MR_JSON } } })
-  const tokens = `gitlab.example.com=${WORK}, gitlab.com=${PERSONAL}`
-  host.env = { GITLAB_MCP_TOKENS: tokens }
-  const list = { tool: MR, action: 'list', project: 47, labels: ['In review'], state: 'opened' } as never
-
-  expect(text(await $.tool.call(list))).toMatch(/^No token configured for github\.com\./)
-  host.env.GITLAB_MCP_DEFAULT_HOST = 'gitlab.example.com'
-  expect((await $.tool.call(list)).isError).toBeUndefined()
-  host.env.GITLAB_MCP_DEFAULT_HOST = 'https://gitlab.example.com'
-  expect(text(await $.tool.call(list))).toBe('GITLAB_MCP_DEFAULT_HOST is not a valid host name (gitlab.example.com).')
-  host.env.GITLAB_MCP_DEFAULT_HOST = 'gitlab.example.com'
-  host.remote = 'https://gitlab.com/example-user/tools.git'
-  await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)
-  host.remote = GITHUB
-  await $.tool.call({ tool: MR, action: 'get', iid: 7, host: 'gitlab.com', project: 'example-user/tools' } as never)
-
-  expect(sent.map((s) => [s.url, s.headers?.['PRIVATE-TOKEN']])).toEqual([
-    [LIST_47, WORK],
-    [`${PERSONAL_API}/merge_requests/7`, PERSONAL],
-    [`${PERSONAL_API}/merge_requests/7`, PERSONAL],
-  ])
-})
-
-test('options.defaultHost comes before env GITLAB_MCP_DEFAULT_HOST', { options: { tokens: `gitlab.example.com=${WORK}, gitlab.com=${PERSONAL}`, defaultHost: 'gitlab.com' } }, async ($, on) => {
-  const { sent, host } = world(on, { remote: GITHUB, api: { [`${PERSONAL_API}/merge_requests/7`]: { text: MR_JSON } } })
-  host.env = { GITLAB_MCP_DEFAULT_HOST: 'gitlab.example.com' }
-  await $.tool.call({ tool: MR, action: 'get', iid: 7, project: 'example-user/tools' } as never)
-  expect(sent.map((s) => s.url)).toEqual([`${PERSONAL_API}/merge_requests/7`])
-})
-
 test("an SSH alias remote uses its real host's token, found through ssh -G, and an unresolved alias says so", ON, async ($, on) => {
   const { sent, host } = world(on, { remote: 'git@work:team/app.git', api: { [`${WORK_API}/merge_requests/7`]: { text: MR_JSON } } })
   host.ssh.work = 'gitlab.example.com'
@@ -306,7 +275,7 @@ test("an SSH alias remote uses its real host's token, found through ssh -G, and 
 
   host.ssh.work = 'gitlab.other.org'
   expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toBe(
-    "The remote's host work is an SSH alias for gitlab.other.org. No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly or set GITLAB_MCP_DEFAULT_HOST to target one of them.",
+    "The remote's host work is an SSH alias for gitlab.other.org. No token configured for gitlab.other.org. Add gitlab.other.org=<token> to GITLAB_MCP_TOKENS. Configured hosts: gitlab.example.com, gitlab.com. Pass host explicitly to target one of them.",
   )
   host.remote = 'git@nowhere:team/app.git'
   expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toMatch(/If nowhere is an SSH alias from ~\/\.ssh\/config, ssh -G could not resolve it/)

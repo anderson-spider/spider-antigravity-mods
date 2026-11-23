@@ -3,17 +3,15 @@ import { createInterface } from 'node:readline'
 import { server } from './mcp.ts'
 import { nodeDeps, resolveCwd } from './node.ts'
 import { run } from './run.ts'
-import { DEFAULT_HOST_ENV, ENV_NAME } from './tokens.ts'
+import { ENV_NAME } from './tokens.ts'
 import { TOOLS } from './tools.ts'
 
 /** Captured at startup from Antigravity plugin variables (or user environment), then scrubbed from process.env. */
 const options = {
   tokens: process.env[ENV_NAME] || undefined,
-  defaultHost: process.env[DEFAULT_HOST_ENV] || undefined,
 }
 // Credentials stay in this process only: git and ssh child processes never inherit them.
 delete process.env[ENV_NAME]
-delete process.env[DEFAULT_HOST_ENV]
 
 const mcp = server({
   write: line => process.stdout.write(`${line}\n`),
