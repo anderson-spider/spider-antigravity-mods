@@ -1,0 +1,28 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "gitlab",
+  "displayName": "GitLab",
+  "version": "0.1.0",
+  "description": "Work on GitLab merge requests, pipelines, jobs, comments, draft notes, and labels on gitlab.com and self-hosted GitLab instances.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "anderson-spider",
+    "url": "https://github.com/anderson-spider"
+  },
+  "homepage": "https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/gitlab",
+  "repository": "https://github.com/anderson-spider/spider-antigravity-mods",
+  "license": "MIT",
+  "keywords": [
+    "gitlab",
+    "self-hosted",
+    "merge-requests",
+    "pipelines",
+    "ci",
+    "mcp"
+  ],
+  "suggestedPrompts": [
+    "List my open merge requests and check which ones have failing pipelines",
+    "Check the merge status and unresolved comments of this branch's MR",
+    "Inspect the failing job log from the latest pipeline"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "spider-antigravity-mods",
+  "private": true,
+  "description": "Plugins for Google Antigravity by anderson-spider: each plugin under plugins/ is a self-contained Antigravity plugin.",
+  "license": "MIT",
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "validate": "pnpm -r --if-present validate",
+    "check": "pnpm test && pnpm typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
