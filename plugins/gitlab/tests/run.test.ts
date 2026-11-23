@@ -118,7 +118,7 @@ test('when only a single host is configured, it auto-defaults outside a GitLab r
 
 test('unset GITLAB_MCP_TOKENS says where to set it (even outside a git repository)', async ($, on) => {
   const { sent, host } = world(on)
-  const expected = 'GITLAB_MCP_TOKENS is not set. Export GITLAB_MCP_TOKENS as host=token pairs (for example gitlab.com=glpat-...) in your environment or plugin mcp_config.json and reload MCP.'
+  const expected = "GITLAB_MCP_TOKENS is not set. Configure GITLAB_MCP_TOKENS as host=token pairs (for example gitlab.com=glpat-...) in Antigravity's plugin settings (/plugin or Customizations) or your environment and reload MCP."
   expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toBe(expected)
   host.remote = ''
   expect(text(await $.tool.call({ tool: id('gitlab_user') } as never))).toBe(expected)

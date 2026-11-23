@@ -16,35 +16,40 @@ Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and label
 
 ### 1. Install the plugin
 
-Clone `spider-antigravity-mods` and symlink `plugins/gitlab` into Antigravity's global plugins directory:
+Install directly with the Antigravity CLI:
 
 ```bash
-git clone https://github.com/anderson-spider/spider-antigravity-mods.git
-ln -s "$(pwd)/spider-antigravity-mods/plugins/gitlab" ~/.gemini/config/plugins/gitlab
+agy plugin install https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/gitlab
 ```
 
-### 2. Configure credentials
+Re-run the same command to update an existing installation in place, or run `agy plugin uninstall gitlab` to remove it.
 
-Export `GITLAB_MCP_TOKENS` in your user environment with comma- or whitespace-separated `host=token` pairs. Tokens need `api` scope (`read_api` for read-only use).
+### 2. Enable and configure credentials
 
-**macOS / Linux (shell profile):**
+Because `mcp_config.json` declares `GITLAB_MCP_TOKENS` as a plugin variable, Antigravity installs `gitlab` disabled until you enter your token(s):
+
+1. Open `/plugin` in the CLI or **Customizations > Installed** in Antigravity Desktop.
+2. Enable **GitLab** and fill in `GITLAB_MCP_TOKENS` with comma- or whitespace-separated `host=token` pairs:
+
+```text
+gitlab.com=glpat-...,gitlab.example.com=glpat-...
+```
+
+Tokens need `api` scope (`read_api` for read-only use). When only one host is configured, it is automatically used as the default outside GitLab repositories.
+
+### Optional: default host for multiple instances
+
+Only needed when you configure 2+ hosts and call tools outside a GitLab repository without passing `host` or a GitLab URL:
 
 ```bash
-export GITLAB_MCP_TOKENS="gitlab.com=glpat-...,gitlab.example.com=glpat-..."
-# Optional: only needed when you configure 2+ hosts and want a default outside GitLab repos
 export GITLAB_MCP_DEFAULT_HOST="gitlab.example.com"
 ```
 
-On macOS GUI apps (such as Antigravity Desktop), also make the variables visible to launched apps:
+On macOS GUI apps (such as Antigravity Desktop), also expose the variable to launched apps and reload MCP servers (or restart Antigravity):
 
 ```bash
-launchctl setenv GITLAB_MCP_TOKENS "gitlab.com=glpat-...,gitlab.example.com=glpat-..."
 launchctl setenv GITLAB_MCP_DEFAULT_HOST "gitlab.example.com"
 ```
-
-Alternatively, you can pass `GITLAB_MCP_TOKENS` (and optionally `GITLAB_MCP_DEFAULT_HOST`) in your local `mcp_config.json` `env` block, though keeping tokens out of tracked files is recommended.
-
-Reload MCP servers (or restart Antigravity) after setting environment variables.
 
 ## Tools (`gitlab_gitlab` MCP server)
 
@@ -65,7 +70,16 @@ Every tool accepts an optional `cwd` (absolute repository path) to override or s
 - Writes on MRs authored by someone else are refused without `allowOthers: true`.
 - `merge` requires an explicit `iid` and full head `sha`, refuses drafts/conflicts/unresolved blocking discussions/non-open MRs, and requires `allowProtectedTarget: true` for `release*` or protected branches other than `main`, `master`, or `develop`.
 
-## Tests & Validation
+## Development & Validation
+
+For local development with live reloads, clone `spider-antigravity-mods` and symlink `plugins/gitlab` into Antigravity's global plugins directory:
+
+```bash
+git clone https://github.com/anderson-spider/spider-antigravity-mods.git
+ln -s "$(pwd)/spider-antigravity-mods/plugins/gitlab" ~/.gemini/config/plugins/gitlab
+```
+
+Run tests, typechecks, and strict manifest validation from `plugins/gitlab`:
 
 ```bash
 node --test 'tests/*.test.ts'

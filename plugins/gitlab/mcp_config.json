@@ -5,7 +5,17 @@
       "args": [
         "${PLUGIN_ROOT}/server/main.ts"
       ],
-      "env": {}
+      "env": {
+        "GITLAB_MCP_TOKENS": "${GITLAB_MCP_TOKENS}"
+      },
+      "variables": [
+        {
+          "name": "GITLAB_MCP_TOKENS",
+          "title": "GitLab Tokens (host=token)",
+          "description": "Comma- or space-separated host=token pairs (for example gitlab.com=glpat-...,gitlab.example.com=glpat-...). Tokens need api scope (or read_api for read-only).",
+          "link": "https://docs.gitlab.com/user/profile/personal_access_tokens/"
+        }
+      ]
     }
   }
 }

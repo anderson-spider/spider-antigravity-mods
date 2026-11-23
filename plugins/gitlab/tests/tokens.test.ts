@@ -15,6 +15,7 @@ test('parseTokens reads host=token pairs separated by commas or whitespace, host
 test('parseTokens tells an absent value from a malformed one', () => {
   expect(parseTokens(undefined)).toEqual({ off: 'no-tokens' })
   expect(parseTokens(' , ')).toEqual({ off: 'no-tokens' })
+  expect(parseTokens('${GITLAB_MCP_TOKENS}')).toEqual({ off: 'no-tokens' })
   for (const bad of [5, 'glpat-only', '=glpat-x', 'gitlab.com=', 'gitlab.com=a=b', 'a b.com=x', 'h=x,h=y', 'h/x=t']) {
     expect(parseTokens(bad), String(bad)).toEqual({ off: 'bad-tokens' })
   }

@@ -17,10 +17,14 @@ const HOST = /^[a-z0-9.-]+(:\d{1,5})?$/
 /** Present: a string with something other than whitespace. */
 export const isSet = (value: unknown): boolean => value !== undefined && value !== null && !(typeof value === 'string' && !value.trim())
 
+/** Unexpanded Antigravity variable placeholder (for example `${GITLAB_MCP_TOKENS}` when enabled before filling variables). */
+const UNEXPANDED_PLACEHOLDER = /^\$\{[A-Z0-9_]+\}$/
+
 /** The host-to-token map: pairs separated by commas or whitespace. Any malformed pair refuses the whole value. */
 export function parseTokens(value: unknown): { tokens: Map<string, string>; off?: undefined } | { tokens?: undefined; off: 'no-tokens' | 'bad-tokens' } {
   if (value === undefined || value === null) return { off: 'no-tokens' }
   if (typeof value !== 'string') return { off: 'bad-tokens' }
+  if (UNEXPANDED_PLACEHOLDER.test(value.trim())) return { off: 'no-tokens' }
   const pairs = value.split(/[\s,]+/).filter(Boolean)
   if (pairs.length === 0) return { off: 'no-tokens' }
   const tokens = new Map<string, string>()
@@ -57,7 +61,7 @@ export function resolveToken(
 export function offText(off: Off, host?: string, configured?: readonly string[]): string {
   switch (off) {
     case 'no-tokens':
-      return `${ENV_NAME} is not set. Export ${ENV_NAME} as host=token pairs (for example gitlab.com=glpat-...) in your environment or plugin mcp_config.json and reload MCP.`
+      return `${ENV_NAME} is not set. Configure ${ENV_NAME} as host=token pairs (for example gitlab.com=glpat-...) in Antigravity's plugin settings (/plugin or Customizations) or your environment and reload MCP.`
     case 'bad-tokens':
       return `${ENV_NAME} is not a valid list of host=token pairs (comma- or whitespace-separated).`
     case 'no-host': {
