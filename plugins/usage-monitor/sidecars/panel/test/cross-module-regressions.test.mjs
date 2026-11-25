@@ -466,13 +466,17 @@ test('BUG-09, BUG-14 & BUG-15: SemVer 2.0 prerelease/build ordering, future-only
   assert.equal(claudePool.weeklyRemainingPct, 80);
 
   const prevLang = i18nStore.getState().language;
-  setI18nLanguage('zh-CN');
   try {
-    assert.equal(formatCountdown(new Date(nowMs + 30_000).toISOString(), nowMs), '<1分钟后重置');
-    assert.equal(formatCountdown('1969-12-31T23:59:59Z', nowMs), '未知重置时间');
+    setI18nLanguage('en-US');
+    assert.equal(formatCountdown(new Date(nowMs + 30_000).toISOString(), nowMs), 'Resets in <1m');
+    assert.equal(formatCountdown('1969-12-31T23:59:59Z', nowMs), 'Unknown reset');
     assert.equal(formatUsd(0.0004, { precise: true }), '<$0.001');
     assert.equal(formatUsd(12.34, { unpricedCalls: 1, compactPending: true }), '$12.34');
-    assert.equal(speedReasonText('short_timing'), '耗时过短 (<0.5s)');
+    assert.equal(speedReasonText('short_timing'), 'Too brief (<0.5s)');
+    setI18nLanguage('pt-BR');
+    assert.equal(formatCountdown(new Date(nowMs + 30_000).toISOString(), nowMs), 'Reinicia em <1m');
+    assert.equal(formatCountdown('1969-12-31T23:59:59Z', nowMs), 'Reset desconhecido');
+    assert.equal(speedReasonText('short_timing'), 'Muito curto (<0,5s)');
   } finally {
     setI18nLanguage(prevLang);
   }
@@ -1081,17 +1085,17 @@ test('P0 audit fixes: main.mjs import isolation, standalone lsAddr, dual-window 
   const { buildStructurePreviewTelemetry } = await import(
     '../src/components/settings/structurePreviewMock.js'
   );
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('pt-BR');
   assert.equal(
     buildStructurePreviewTelemetry().runningConversations[0].mainActivity.label,
-    '生成中'
+    'Gerando'
   );
   setI18nLanguage('en-US');
   assert.equal(
     buildStructurePreviewTelemetry().runningConversations[0].mainActivity.label,
     'Generating'
   );
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('pt-BR');
 
   const structureTabSrc = fs.readFileSync(
     new URL('../src/views/settings/SettingsStructureTab.js', import.meta.url),
@@ -1126,6 +1130,9 @@ test('P1 audit fixes: shared third-party pool & route single-source, pure frozen
   const { BRIDGE_API_ROUTE_DEFS } = await import('../shared/window-bridge-protocol.mjs');
 
   assert.equal(normalizeI18nLanguage('system'), 'auto');
+  assert.equal(normalizeI18nLanguage('zh-CN'), 'auto');
+  assert.equal(normalizeI18nLanguage('pt'), 'pt-BR');
+  assert.equal(normalizeI18nLanguage('en'), 'en-US');
   assert.equal(typeof isEquivalentTelemetry, 'function');
   assert.equal(BRIDGE_API_ROUTE_DEFS.length, 5);
   assert.deepEqual(
@@ -1208,12 +1215,12 @@ test('P2 audit fixes: standalone sqlite/proto-wire primitives, structured liveAc
   const varState = { off: 0 };
   assert.equal(protoWire.readProtoVarint(new Uint8Array([0xac, 0x02]), varState), 300n);
 
-  // 2. Bilingual dictionary 100% key parity
-  const { I18N_MESSAGES_ZH_CN } = await import('../src/i18n/zh-CN.js');
+  // 2. Bilingual dictionary 100% key parity (en-US & pt-BR)
+  const { I18N_MESSAGES_PT_BR } = await import('../src/i18n/pt-BR.js');
   const { I18N_MESSAGES_EN_US } = await import('../src/i18n/en-US.js');
-  const zhKeys = Object.keys(I18N_MESSAGES_ZH_CN).sort();
+  const ptKeys = Object.keys(I18N_MESSAGES_PT_BR).sort();
   const enKeys = Object.keys(I18N_MESSAGES_EN_US).sort();
-  assert.deepEqual(enKeys, zhKeys);
+  assert.deepEqual(enKeys, ptKeys);
 
   // 3. Structured liveActivity, agent badges/labels, turn media, and en-US SVG charts (zero Chinese leakage)
   const { createMockDom } = await import('./mock-dom.mjs');
@@ -1375,7 +1382,11 @@ test('P2 audit fixes: standalone sqlite/proto-wire primitives, structured liveAc
     assert.equal(slotCtx.usedPct, 25);
     assert.equal(slotCtx.tps, 64.5);
 
-    setI18nLanguage('zh-CN');
+    setI18nLanguage('pt-BR');
+    assert.equal(formatLiveActivityLabel(waitCmdAct), 'Aguardando aprovação · Executar comando');
+    assert.equal(/[\u4e00-\u9fff]/.test(lineChart.el.textContent), false);
+    assert.equal(/[\u4e00-\u9fff]/.test(fitChart.el.textContent), false);
+    setI18nLanguage('auto');
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;

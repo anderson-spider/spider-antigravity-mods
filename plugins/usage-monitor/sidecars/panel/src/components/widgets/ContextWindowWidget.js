@@ -15,7 +15,7 @@ import {
 } from '../../core/domPatch.js';
 import { formatTokens, resolveModelDisplayInfo } from '../../core/formatters.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
-import { getEffectiveLocale, isEnglishLocale, t } from '../../i18n/index.js';
+import { getEffectiveLocale, t } from '../../i18n/index.js';
 import {
   formatAgentBadgeText,
   formatAgentLabel,

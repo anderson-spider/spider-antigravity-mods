@@ -1063,9 +1063,10 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.equal(def.modernUi, true);
   assert.equal(def.experimentalModernUi, true);
 
-  // Upgrading from v1.5.2 settings.json (with experimentalModernUi: false and no modernUi key) enables modernUi=true
+  // Upgrading from legacy settings.json (with legacy zh-CN language, experimentalModernUi: false and no modernUi key) normalizes language to auto and enables modernUi=true
   const hFrom152 = backendHarness({ settings: { language: 'zh-CN', experimentalModernUi: false } });
   const loadedFrom152 = hFrom152.loadSettings();
+  assert.equal(loadedFrom152.language, 'auto');
   assert.equal(loadedFrom152.modernUi, true);
   assert.equal(loadedFrom152.experimentalModernUi, true);
   const optOutRes = hFrom152.executeSettingsAction({ modernUi: false });
@@ -1959,11 +1960,30 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     {
       slots: ['ttft', 'tps', 'quota_auto', 'context'],
       showMultiSession: true,
-      language: 'zh-CN',
+      language: 'en-US',
       color: false,
     }
   );
-  assert.equal(plainCapsule, '● 0 运行中   11.8s | 38.1 t/s | 余 57% | ◎ 17%');
+  assert.equal(plainCapsule, '● 0 active   11.8s | 38.1 t/s | 57% left | ◎ 17%');
+
+  const ptCapsule = h.formatCliStatusLineCapsule(
+    {
+      hasTelemetry: true,
+      runningCount: 2,
+      runningSubCount: 1,
+      ttft: 1.25,
+      tps: 68.4,
+      usedPct: 75,
+      quotas: { activePool: { remainingPct: 22 } },
+    },
+    {
+      slots: ['ttft', 'tps', 'quota_auto', 'context'],
+      showMultiSession: true,
+      language: 'pt-BR',
+      color: false,
+    }
+  );
+  assert.equal(ptCapsule, '● 2 ativos · 1 sub   1.3s | 68.4 t/s | 22% rest. | ◎ 75%');
 
   const ansiCapsule = h.formatCliStatusLineCapsule(
     {
@@ -1978,7 +1998,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     {
       slots: ['ttft', 'tps', 'quota_auto', 'context'],
       showMultiSession: true,
-      language: 'zh-CN',
+      language: 'en-US',
       color: true,
     }
   );
@@ -1986,7 +2006,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
   assert.equal(/\x1b\]/.test(ansiCapsule), false, 'Contains zero OSC sequences so Bubble Tea width never breaks');
   assert.equal(
     ansiCapsule.replace(/\x1b\[[0-9;]*m/g, ''),
-    '● 2 运行中 · 1 子   1.3s | 68.4 t/s | 余 22% | ◎ 75%'
+    '● 2 active · 1 sub   1.3s | 68.4 t/s | 22% left | ◎ 75%'
   );
 
   // Full 3-column single-line bar with left shortcuts, centered metrics, and right mode/model/effort
@@ -2003,7 +2023,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     {
       slots: ['ttft', 'tps', 'quota_auto', 'context'],
       showMultiSession: true,
-      language: 'zh-CN',
+      language: 'en-US',
       color: true,
       terminalWidth: 120,
       cycleMode: 'auto',
@@ -2014,7 +2034,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
   assert.equal(/\x1b\[48;/.test(inlineBar120), false, 'Inline 3-column bar has zero background SGR');
   const plainBar120 = inlineBar120.replace(/\x1b\[[0-9;]*m/g, '');
   assert.ok(plainBar120.startsWith('? for shortcuts  '), 'Keeps ? for shortcuts on the left');
-  assert.ok(plainBar120.includes('● 2 运行中   5.6s | 22.0 t/s | 余 54% | ◎ 2%'), 'Centers capsule metrics inline');
+  assert.ok(plainBar120.includes('● 2 active   5.6s | 22.0 t/s | 54% left | ◎ 2%'), 'Centers capsule metrics inline');
   assert.ok(plainBar120.endsWith('  auto · Gemini 4 Hydrogen · medium'), 'Renders deduplicated mode · model · effort on the right');
   assert.equal(h.cliDisplayWidth(inlineBar120), 119, 'Fits cleanly within terminalWidth - 1 without wrapping');
 
@@ -2032,7 +2052,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     {
       slots: ['ttft', 'tps', 'quota_auto', 'context'],
       showMultiSession: true,
-      language: 'zh-CN',
+      language: 'en-US',
       color: false,
       terminalWidth: 80,
       cycleMode: 'auto',
@@ -2041,7 +2061,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     }
   );
   assert.ok(h.cliDisplayWidth(inlineBar80) <= 79, 'Narrow 80-col bar never overflows terminalWidth - 1');
-  assert.ok(inlineBar80.includes('5.6s | 22.0 t/s | 余 54% | ◎ 2%'));
+  assert.ok(inlineBar80.includes('5.6s | 22.0 t/s | 54% left | ◎ 2%'));
 
   // End-to-end filesystem + subprocess verification
   const tempRoot = mkdtempSync(fileURLToPath(new URL('./.cli-statusline-', import.meta.url)));
@@ -2153,7 +2173,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     writeFileSync(
       join(dataDir, 'settings.json'),
       JSON.stringify({
-        language: 'zh-CN',
+        language: 'en-US',
         showTopbarMultiSession: true,
         enableCliStatusLine: true,
         topbarCapsuleSlots: ['ttft', 'tps', 'quota_auto', 'context'],
@@ -2187,7 +2207,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
       input: stdinPayload,
       encoding: 'utf8',
     }).trim();
-    assert.equal(capsuleOut, '● 0 运行中   1.8s | 38.1 t/s | 余 57% | ◎ 17%');
+    assert.equal(capsuleOut, '● 0 active   1.8s | 38.1 t/s | 57% left | ◎ 17%');
 
     // Full 3-column single-line E2E with terminal_width + cycle_mode + model + native stdin quota fallback
     const emptySnapDir = join(tempRoot, 'empty-data');
@@ -2195,7 +2215,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     writeFileSync(
       join(emptySnapDir, 'settings.json'),
       JSON.stringify({
-        language: 'zh-CN',
+        language: 'en-US',
         showTopbarMultiSession: true,
         enableCliStatusLine: true,
         topbarCapsuleSlots: ['ttft', 'tps', 'quota_auto', 'context'],
@@ -2225,7 +2245,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     assert.equal(/\x1b\[48;/.test(fullLineOut), false, 'E2E ANSI output has zero background fill');
     const plainFullLine = fullLineOut.replace(/\x1b\[[0-9;]*m/g, '');
     assert.ok(plainFullLine.startsWith('? for shortcuts  '));
-    assert.ok(plainFullLine.includes('● 1 运行中   1.8s | 38.1 t/s | 余 54% | ◎ 2%'));
+    assert.ok(plainFullLine.includes('● 1 active   1.8s | 38.1 t/s | 54% left | ◎ 2%'));
     assert.ok(plainFullLine.endsWith('  auto · Gemini 4 Hydrogen · medium'));
     assert.equal(h.cliDisplayWidth(fullLineOut), 129);
 
@@ -2236,7 +2256,7 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
         input: stdinPayload,
         encoding: 'utf8',
       }).trim();
-      assert.equal(cmdCapsuleOut, '● 0 运行中   1.8s | 38.1 t/s | 余 57% | ◎ 17%');
+      assert.equal(cmdCapsuleOut, '● 0 active   1.8s | 38.1 t/s | 57% left | ◎ 17%');
 
       const spaceDir = join(tempRoot, 'Dir With Spaces');
       mkdirSync(spaceDir, { recursive: true });
@@ -2335,7 +2355,7 @@ test('v1.5 feedback settings schema: custom token combo DSL, 3-way model display
     'cache',
   ]);
   assert.equal(h.normalizeStepTokenComboFormat('in / out / cache'), 'in:out:cache');
-  assert.equal(h.normalizeStepTokenComboFormat('上下文:输入:正文:思考:总计'), 'context:in:reply:think');
+  assert.equal(h.normalizeStepTokenComboFormat('contexto:entrada:resposta:pensamento:total'), 'context:in:reply:think');
   assert.equal(h.normalizeStepTokenComboFormat('invalid:foo'), 'context:in:cache');
 
   // 2. 3-way model display mode & legacy showUpstreamModel round-trip

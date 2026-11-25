@@ -21,6 +21,46 @@ import { getEffectiveLocale, t } from '../../i18n/index.js';
 /** 超过该自然日天数（> 90 天）时，趋势图切换为类 GitHub 每日小格子热力图 */
 export const HEATMAP_DAYS_THRESHOLD = 90;
 
+const TREND_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const TREND_WEEKDAYS_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const TREND_MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const TREND_MONTHS_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+function formatTrendSlotFullLabel(slot) {
+  const sMs = Number(slot?.startMs);
+  if (Number.isFinite(sMs) && sMs > 0) {
+    const sd = new Date(sMs);
+    if (!Number.isNaN(sd.getTime())) {
+      const isPt = getEffectiveLocale() === 'pt-BR';
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const months = isPt ? TREND_MONTHS_PT : TREND_MONTHS_EN;
+      const weekdays = isPt ? TREND_WEEKDAYS_PT : TREND_WEEKDAYS_EN;
+      const monName = months[sd.getMonth()] || '';
+      if (slot?.granularity === 'hour') {
+        const eMs = Number(slot?.endMs);
+        const ed = Number.isFinite(eMs) && eMs > sMs ? new Date(eMs) : new Date(sMs + 3600_000);
+        const startHh = `${pad2(sd.getHours())}:00`;
+        const endHh = `${pad2(ed.getHours())}:00`;
+        return isPt
+          ? `${sd.getDate()} ${monName} · ${startHh} - ${endHh}`
+          : `${monName} ${sd.getDate()} · ${startHh} - ${endHh}`;
+      }
+      const wday = weekdays[sd.getDay()] || '';
+      const nowYear = new Date().getFullYear();
+      const yearPart =
+        sd.getFullYear() !== nowYear
+          ? isPt
+            ? ` ${sd.getFullYear()}`
+            : `, ${sd.getFullYear()}`
+          : '';
+      return isPt
+        ? `${sd.getDate()} ${monName}${yearPart} (${wday})`
+        : `${monName} ${sd.getDate()}${yearPart} (${wday})`;
+    }
+  }
+  return slot?.fullLabel || slot?.label || '--';
+}
+
 let chartUidCounter = 0;
 
 function safeSlotTokens(v) {
@@ -443,7 +483,7 @@ export function createTrendAreaChart() {
   }
 
   function populateTooltipContent(slot) {
-    patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
+    patchText(tipTimeEl, formatTrendSlotFullLabel(slot));
     patchText(
       tipCallsEl,
       t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
@@ -1052,7 +1092,7 @@ export function createTrendAreaChart() {
         const tickEl = h('span', {
           className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
           text: slot.label || '',
-          title: slot.fullLabel || slot.label || '',
+          title: formatTrendSlotFullLabel(slot),
         });
         patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
         tickEl.onclick = () => showLineHoverAtIndex(tIdx);

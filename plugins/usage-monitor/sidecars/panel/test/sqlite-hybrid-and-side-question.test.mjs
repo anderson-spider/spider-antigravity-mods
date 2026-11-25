@@ -632,12 +632,12 @@ test('Hybrid SQLite+WAL mode skips trajectory RPCs for local DBs, falls back to 
     const scopedExplicitSide = resolveScopedConversation(payload, 'all', sideCid, false);
     assert.equal(scopedExplicitSide.ctxAgent.agentId, sideCid, 'explicitly selecting Side Question pill still inspects it');
 
-    // G. Verify zh-CN & en-US badge and label formatting
+    // G. Verify pt-BR & en-US badge and label formatting
     const prevLocale = i18nStore.getState().locale;
     try {
-      i18nStore.setState({ locale: 'zh-CN', hostLocale: 'zh-CN' });
-      assert.equal(formatAgentBadgeText(agents[2]), '旁1');
-      assert.equal(formatAgentLabel(agents[2]), '旁路提问 #1 · 为什么用 WAL 模式？');
+      i18nStore.setState({ locale: 'pt-BR', hostLocale: 'pt-BR' });
+      assert.equal(formatAgentBadgeText(agents[2]), 'P1');
+      assert.equal(formatAgentLabel(agents[2]), 'Pergunta paralela #1 · 为什么用 WAL 模式？');
 
       i18nStore.setState({ locale: 'en-US', hostLocale: 'en-US' });
       assert.equal(formatAgentBadgeText(agents[1]), 'S1');

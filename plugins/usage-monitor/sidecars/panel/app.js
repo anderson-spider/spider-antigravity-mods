@@ -7,7 +7,7 @@ const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEY
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
 
-const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'en-US', 'pt-BR']);
 
 const THEME_ACCENT_KEYS = Object.freeze([
   'host',
@@ -108,37 +108,31 @@ const DEFAULT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
 const STEP_TOKEN_SEGMENT_ALIASES = Object.freeze({
   context: 'context',
   ctx: 'context',
-  '上下文': 'context',
+  contexto: 'context',
   in: 'in',
   new: 'in',
   input: 'in',
-  '输入': 'in',
-  '新输入': 'in',
+  entrada: 'in',
   out: 'out',
   output: 'out',
-  '输出': 'out',
-  '总输出': 'out',
+  saida: 'out',
+  'saída': 'out',
   cache: 'cache',
   cached: 'cache',
   cache_read: 'cache',
   cacheread: 'cache',
-  '缓存': 'cache',
-  '缓存读': 'cache',
   think: 'think',
   thinking: 'think',
-  '思考': 'think',
+  pensamento: 'think',
   reply: 'reply',
   body: 'reply',
   resp: 'reply',
   response: 'reply',
   text: 'reply',
-  '正文': 'reply',
-  '回复': 'reply',
+  resposta: 'reply',
   total: 'total',
   all: 'total',
   sum: 'total',
-  '总计': 'total',
-  '总token': 'total',
 });
 
 const POPOVER_WIDTH_MODES = Object.freeze(['auto', 'custom']);
@@ -147,10 +141,10 @@ const MAX_POPOVER_WIDTH = 1080;
 const DEFAULT_POPOVER_WIDTH = 580;
 
 /**
- * 归一化界面语言枚举（默认 `'auto'`，支持 `'zh-CN'` 及 `'en-US'`）。
+ * Normalizes the UI language setting (`'auto'`, `'en-US'`, or `'pt-BR'`).
  *
  * @param {unknown} lang
- * @returns {'auto'|'zh-CN'|'en-US'}
+ * @returns {'auto'|'en-US'|'pt-BR'}
  */
 function normalizeLanguageSetting(lang) {
   const raw = String(lang ?? '').trim();
@@ -158,7 +152,7 @@ function normalizeLanguageSetting(lang) {
   const lower = raw.toLowerCase();
   if (lower === 'auto' || lower === 'system') return 'auto';
   if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
-  if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
+  if (lower === 'pt' || lower === 'pt-br' || lower.startsWith('pt-')) return 'pt-BR';
   return 'auto';
 }
 
@@ -1051,722 +1045,6 @@ function createReactiveStore(initialState) {
 return { createReactiveStore };
 })();
 
-// --- src/i18n/zh-CN.js ---
-const { I18N_MESSAGES_ZH_CN } = (() => {
-/**
- * @fileoverview Simplified Chinese (zh-CN) dictionary for Antigravity Usage & Speed Monitor.
- * Matches 100% of the existing out-of-the-box UI copy. Zero emoji characters.
- */
-
-const I18N_MESSAGES_ZH_CN = Object.freeze({
-  // Top Navigation
-  'nav.overview': '实时监控',
-  'nav.consumption': '用量统计',
-  'nav.steps': '调用明细',
-  'nav.settings': '偏好设置',
-
-  // Top Session Header
-  'header.followLatest': '跟随最新会话',
-  'header.currentWindowNamed': '当前窗口 ({title})',
-  'header.latestNamed': '最新 ({title})',
-  'header.lockedSession': '已锁定会话 ({id})',
-  'header.lockedMeta': '已锁定',
-  'header.convMetaWithSubs': '主{main} · {subs}子 (共{total}步)',
-  'header.convMetaWithSwarm': '主{main} · {swarm}蜂 (共{total}步)',
-  'header.convMetaWithSwarmAndSubs': '主{main} · {swarm}蜂 · {subs}子 (共{total}步)',
-  'header.convMetaSteps': '{count}步',
-  'header.hasUpdate': '有新版本',
-  'header.upgradeToVer': '升级 v{ver}',
-  'header.upgrading': '升级中…',
-  'header.ariaUpdate': '发现新版本，点击升级',
-  'header.ariaRefresh': '刷新数据',
-  'header.statusSyncing': '同步中',
-  'header.statusSynced': '已刷新',
-  'header.statusRetrying': '重试中',
-  'header.statusGenerating': '生成中{suffix}',
-  'header.statusQuotaCached': '额度缓存',
-  'header.statusQuotaOffline': '额度离线',
-  'header.statusLive': '监控中',
-
-  // Formatters & Common Labels
-  'fmt.pending': '待定',
-  'fmt.speedIncomplete': '计时不完整',
-  'fmt.speedCanceled': '已取消',
-  'fmt.speedError': '调用报错',
-  'fmt.speedInterrupted': '连接中断',
-  'fmt.speedCompactionTimingUnavailable': '压缩无计时',
-  'fmt.speedInvalidOutput': '无有效输出',
-  'fmt.speedInconsistent': '耗时数据异常',
-  'fmt.speedShort': '耗时过短 (<0.5s)',
-  'fmt.speedLegacy': '旧版缓存记录',
-  'fmt.sampleSteps': '{valid}/{total} 步',
-  'fmt.resetUnknown': '未知重置时间',
-  'fmt.resetSoon': '即将重置',
-  'fmt.resetUnder1m': '<1分钟后重置',
-  'fmt.resetDaysHours': '{d}天 {h}小时后重置',
-  'fmt.resetHoursMins': '{h}小时 {m}分后重置',
-  'fmt.resetMins': '{m}分钟后重置',
-  'fmt.selectTime': '选择时间',
-  'fmt.unknownModel': '模型未知',
-  'fmt.compactionSuffix': '·压缩',
-  'fmt.mainAgent': '主代理',
-  'fmt.mainBadge': '主',
-  'fmt.subAgent': '子代理',
-  'fmt.subBadge': '子{index}',
-  'fmt.subBadgeShort': '子',
-  'fmt.swarmAgent': '蜂群',
-  'fmt.swarmBadge': '蜂{index}',
-  'fmt.swarmBadgeShort': '蜂',
-  'fmt.swarmMonitorHint': '巡检',
-  'fmt.swarmNarratorHint': '旁白',
-  'fmt.sideQuestion': '旁路提问',
-  'fmt.sideBadge': '旁{index}',
-  'fmt.sideBadgeShort': '旁',
-  'fmt.selectedCount': '已选 {count} {unit}',
-  'fmt.selectedListTitle': '已选 ({count})：{names}',
-  'fmt.selectPlaceholder': '请选择',
-
-  // Capsule & Multi-Session Overlay
-  'capsule.ariaMonitor': '用量与速度监控',
-  'capsule.ariaMulti': '多会话实时信息',
-  'capsule.multiZero': '0 运行中',
-  'capsule.multiRunning': '{count} 运行中',
-  'capsule.multiRunningWithSubs': '{count} 运行 · {subs} 子',
-  'capsule.multiRunningWithSwarm': '{count} 运行 · {subs} 蜂',
-  'capsule.tpsRunning': '生成中',
-  'capsule.tpsIdle': '待命',
-  'capsule.quotaLeft': '余 {pct}%',
-  'capsule.quotaUnknown': '余 --%',
-  'capsule.newVersion': '新版本',
-  'capsule.updating': '更新中…',
-  'capsule.ariaUpdateTitle': '发现新版本，点击立即更新',
-  'capsule.hoverNewVer': '发现新版本 v{ver}',
-  'capsule.hoverNewVerGeneric': '发现新版本可用',
-  'capsule.hoverUpdateHintTopbar': '点击顶栏 v{ver} 即可更新',
-  'capsule.hoverUpdateHintComposer': '点击版本胶囊 v{ver} 即可更新',
-  'capsule.hoverUpdateHintTopbarGeneric': '点击顶栏版本胶囊即可更新',
-  'capsule.hoverUpdateHintComposerGeneric': '点击版本胶囊即可更新',
-  'multi.title': '实时运行会话',
-  'multi.ariaDialog': '多会话实时信息面板',
-  'multi.pinned': '已固定',
-  'multi.loading': '读取中...',
-  'multi.empty': '当前暂无在线运行的会话',
-  'multi.allIdle': '全部待命',
-  'multi.metaWithSubs': '{main} 主会话 · {subs} 子代理运行中',
-  'multi.metaWithSwarm': '{main} 主会话 · {subs} 蜂群运行中',
-  'multi.metaMainOnly': '{main} 个会话运行中',
-  'multi.hereTag': '本窗',
-  'multi.inspectSessionTitle': '点击在监控面板中检视会话：{title}',
-
-  // Live Overview & Widgets
-  'module.metrics': '实时指标',
-  'module.context': '上下文窗口',
-  'module.quotas': '可用额度',
-  'module.live_tasks': '实时运行任务',
-
-  // Capsule Slot Metric Options
-  'capMetric.context': '上下文占用 (%)',
-  'capMetric.tps': '输出速度 (TPS)',
-  'capMetric.ttft': '首字延迟 (TTFT)',
-  'capMetric.avg_tps': '会话均速 (Avg TPS)',
-  'capMetric.cost': '本次费用 ($)',
-  'capMetric.session_cost': '会话累计费用 ($)',
-  'capMetric.cache_hit': '缓存命中率 (%)',
-  'capMetric.session_tokens': '会话总 Token',
-  'capMetric.quota_auto': '自动紧俏额度',
-  'capMetric.gemini_5h': 'Gemini 5h 额度',
-  'capMetric.gemini_weekly': 'Gemini 周额度',
-  'capMetric.claude_5h': 'Claude 5h 额度',
-  'capMetric.claude_weekly': 'Claude 周额度',
-
-  // Overview Matrix Metric Options & Cells
-  'ovMetric.tps': '输出速度',
-  'ovMetric.ttft': '首字延迟',
-  'ovMetric.avg_tps': '平均速度',
-  'ovMetric.step_cost': '本次费用',
-  'ovMetric.session_cost': '累计费用',
-  'ovMetric.cache_hit': '缓存命中率',
-  'ovMetric.session_tokens': '会话 Token',
-  'ovMetric.context_usage': '上下文占用',
-  'ovMetric.quota_tightest': '紧俏额度',
-  'ovMetric.subAvgTtft': '均值 {val}',
-  'ovMetric.subAvgCache': '均值 {val}',
-  'ovMetric.subValidSamples': '有效 {samples}',
-  'ovMetric.subTotalCost': '累计 {cost}',
-  'ovMetric.subStepCost': '本次 {cost}',
-  'ovMetric.subInOutTokens': '入 {inTok} · 出 {outTok}',
-  'ovMetric.subCtxRatio': '{used} / {limit}',
-  'ovMetric.subQuotaPool': '{label}',
-  'ovMetric.subQuotaPending': '等待配额同步',
-
-  // Context Window Widget
-  'ctx.followActive': '跟随活跃 ({badge})',
-  'ctx.followActiveTitle': '自动展示当前正在运行或最新活跃的代理上下文窗口',
-  'ctx.expandMore': '+{count} 展开',
-  'ctx.expandMoreTitle': '展开全部 {count} 个子代理的上下文窗口胶囊',
-  'ctx.collapse': '收起',
-  'ctx.collapseTitle': '折叠多余子代理胶囊',
-  'ctx.ch.assistant': '模型回复',
-  'ctx.ch.assistantTitle': '模型推理思考、回复正文与工具调用入参',
-  'ctx.ch.toolResults': '工具结果',
-  'ctx.ch.toolResultsTitle': '文件读取、终端输出与工具执行返回内容',
-  'ctx.ch.userInput': '用户消息',
-  'ctx.ch.userInputTitle': '用户提问文本与上传附件',
-  'ctx.ch.subagent': '子代理通知',
-  'ctx.ch.subagentTitle': '子代理完成汇报与后台任务系统通知',
-  'ctx.ch.checkpoint': '压缩摘要',
-  'ctx.ch.checkpointTitle': '自动上下文压缩生成的历史摘要检查点',
-  'ctx.ch.systemPrompt': '系统提示词',
-  'ctx.ch.systemPromptTitle': '核心身份、终端沙箱、制品与环境提示词',
-  'ctx.ch.systemTools': '系统工具',
-  'ctx.ch.systemToolsTitle': '内置系统工具 Schema 定义',
-  'ctx.ch.mcpTools': 'MCP 工具',
-  'ctx.ch.mcpToolsTitle': 'MCP 外部服务工具与资源定义',
-  'ctx.ch.skills': 'Skill',
-  'ctx.ch.skillsTitle': '已挂载的 Skills 技能索引与说明',
-  'ctx.ch.userRules': '用户规则',
-  'ctx.ch.userRulesTitle': '全局与工作区自定义规则 (user_rules)',
-
-  // Quota Pools Widget
-  'quota.weeklyShort': '周限',
-  'quota.weeklyPool': '周限 ({pool})',
-  'quota.loading': '读取中...',
-  'quota.failed': '获取失败 (--%)',
-  'quota.usedAndLeft': '{reset} · 已用 {used}% (余 {rem}%)',
-  'quota.cycle5hTitle': '当前 5h 周期累计 ({pool})：{tok} Tokens · {cost} · {calls} 次调用',
-  'quota.cycleWkCustomTitle': '本周自然周累计：{tok} Tokens · {cost} · {calls} 次调用',
-  'quota.cycleWkPoolTitle': '当前周限周期累计 ({pool})：{tok} Tokens · {cost} · {calls} 次调用',
-  'quota.footTokensCustom': '本周累计: {tok} ({cost})',
-  'quota.footTokensCycle': '周期累计: {tok} ({cost})',
-  'quota.footCredits': 'AI 积分: {credits}',
-  'quota.footCallsCustom': '本周调用: {calls} 次',
-  'quota.footCallsCycle': '周期调用: {calls} 次',
-  'quota.footTipCustom': '按本机自然周（周一 00:00 起）统计',
-  'quota.footTipCycle': '按各配额池独立周限重置周期分别统计并汇总',
-  'quota.paceAhead': '▲ +{delta}% · 预期 {exp}%',
-  'quota.paceUnder': '▼ -{delta}% · 预期 {exp}%',
-  'quota.paceOnTrack': '● 节奏平稳 · 预期 {exp}%',
-  'quota.paceTooltip': '周期预期：{exp}% · 当前已用：{used}%（较匀速 {signedDelta}%，速率 {ratio}x）',
-  'quota.paceTooltipNoRatio': '周期预期：{exp}% · 当前已用：{used}%（较匀速 {signedDelta}%）',
-
-  // Live Activity Widget
-  'live.currentSession': '当前会话',
-  'live.switchSessionTitle': '点击切换查看会话：{title}',
-  'live.thinking': '推理中',
-  'live.generating': '生成中',
-  'live.running': '运行中',
-  'live.waiting': '待命中',
-  'live.killed': '已终止',
-  'live.done': '已完成',
-  'live.doneWithSteps': '已完成 ({steps} 步)',
-  'live.waitingWithSteps': '待命中 ({steps} 步)',
-  'live.killedWithSteps': '已终止 ({steps} 步)',
-  'live.subToggleRunning': '子代理 {run}/{total}',
-  'live.subToggleIdle': '子代理 ({total})',
-  'live.swarmToggleRunning': '蜂群 {run}/{total}',
-  'live.swarmToggleIdle': '蜂群 ({total})',
-  'live.subCollapseTitle': '点击收起子代理列表',
-  'live.subExpandTitle': '点击展开查看子代理缩略状态',
-
-  // Consumption View
-  'cons.rangeCycle': '周期',
-  'cons.rangeToday': '今天',
-  'cons.range24h': '1天',
-  'cons.range7d': '7天',
-  'cons.range14d': '14天',
-  'cons.range30d': '30天',
-  'cons.rangeAll': '全部',
-  'cons.rangeCustom': '自定义',
-  'cons.rangeAria': '消耗统计时间范围',
-  'cons.applyFilter': '筛选',
-  'cons.rangeTo': '至',
-  'cons.overviewTitle': '用量总览',
-  'cons.totalTokens': '总 Token',
-  'cons.estCost': '预估费用',
-  'cons.cacheHitRate': '缓存命中率',
-  'cons.callsCount': '{calls} 次',
-  'cons.cacheHitTokens': '命中 {tokens}',
-  'cons.newInput': '新输入',
-  'cons.uncachedInput': '未命中缓存输入',
-  'cons.cacheRead': '缓存读取',
-  'cons.savedCost': '节省 {cost}',
-  'cons.outputUsage': '输出用量',
-  'cons.replyAndThink': '思考 {think} · 回复 {resp}',
-  'cons.trendTitle': '用量趋势',
-  'cons.allTime': '全部时间',
-  'cons.trendHeatmapHint': '按日 ({days}天) · 悬停查看',
-  'cons.trendPointsHintHourly': '按小时 ({points}点) · 悬停查看',
-  'cons.trendPointsHintDaily': '按日 ({points}点) · 悬停查看',
-  'cons.topModels': '模型排行',
-  'cons.clientSources': '客户端来源',
-  'cons.monthlyTitle': '月度统计',
-  'cons.monthLabel': '{m}月',
-  'cons.monthFullLabel': '{year}年 {m}月',
-  'cons.hoverModelsHint': '悬停查看模型',
-  'cons.otherModelsCount': '其他 ({count})',
-  'cons.legInput': '输入',
-  'cons.legCache': '缓存',
-  'cons.legOutput': '输出',
-  'cons.legThinking': '思考',
-  'cons.footInput': '输入 ',
-  'cons.footCache': '缓存 ',
-  'cons.footOutput': '输出 ',
-  'cons.footThinking': '思考 ',
-  'cons.footCalls': '调用 ',
-
-  // Steps Detail View & Step Column Registry
-  'steps.title': '调用记录',
-  'steps.tabSteps': '按步查看 ({count})',
-  'steps.tabStepsFiltered': '按步查看 ({filtered}/{total})',
-  'steps.tabModels': '总汇总',
-  'steps.allAgents': '全部汇总',
-  'steps.allModels': '全部模型',
-  'steps.selectModel': '选择模型',
-  'steps.unitAgent': '代理',
-  'steps.unitModel': '模型',
-  'steps.lineTitle': '会话走势',
-  'steps.fitTitle': '趋势拟合',
-  'steps.modelsTitle': '模型总览',
-  'steps.modelsEmpty': '当前范围暂无模型调用记录',
-  'steps.metricTotalTokens': '总Token',
-  'steps.metricContext': '上下文',
-  'steps.metricTps': 'TPS',
-  'steps.metricTtft': '首字',
-  'steps.metricCache': '缓存',
-  'steps.metricCost': '费用',
-  'steps.badgeBackAll': '点击切回全部汇总',
-  'steps.badgeFilterAgent': '点击仅过滤查看 {agent}（按住 Ctrl/Shift 可加减多选）',
-  'steps.ctxTitle': '上下文 {ctx} · 思考 {think} · 正文 {resp}',
-  'steps.ioCacheTitle': '新输入 {inPart} · 输出 {outPart} · 缓存读 {cachePart}',
-  'steps.tokSeg.context.th': '上下文',
-  'steps.tokSeg.context.tip': '上下文',
-  'steps.tokSeg.in.th': '输入',
-  'steps.tokSeg.in.tip': '新输入',
-  'steps.tokSeg.out.th': '输出',
-  'steps.tokSeg.out.tip': '输出',
-  'steps.tokSeg.cache.th': '缓存',
-  'steps.tokSeg.cache.tip': '缓存读',
-  'steps.tokSeg.think.th': '思考',
-  'steps.tokSeg.think.tip': '思考',
-  'steps.tokSeg.reply.th': '正文',
-  'steps.tokSeg.reply.tip': '正文',
-  'steps.tokSeg.total.th': '总计',
-  'steps.tokSeg.total.tip': '总计',
-  'steps.modelCallsShare': '{calls}次 · {pct}%',
-  'steps.modelCallsOnly': '{calls}次',
-  'steps.modelsSummaryPrefix': '{count} 模型 · ',
-  'steps.modelPerfFoot': '均速 {tps} · 首字 {ttft} · 缓存 {cache}%',
-  'steps.modelSplitFoot': '输入 {inTok} · 缓存 {cacheTok} · 思考 {thinkTok} · 输出 {respTok}',
-  'steps.fitActiveCardTitle': '{title}（已纳入上方趋势拟合，按住 Ctrl/Shift 点击可多选对比）',
-  'steps.fitInactiveCardTitle': '点击在上方拟合图查看 {text}（按住 Ctrl/Shift 点击可多选同图对比）',
-  'steps.turnMediaOnly': '[图片/附件提问]',
-  'steps.turnMediaSuffix': '[附图]',
-  'steps.anomalyTag.timeout': '超时{n}',
-  'steps.anomalyTag.rate_limit': '限流{n}',
-  'steps.anomalyTag.capacity': '503×{n}',
-  'steps.anomalyTag.capacitySingle': '503',
-  'steps.anomalyTag.disconnect': '断连{n}',
-  'steps.anomalyTag.upstream': '500×{n}',
-  'steps.anomalyTag.upstreamSingle': '500',
-  'steps.anomalyTag.model_output': '纠偏{n}',
-  'steps.anomalyTag.safety': '过滤{n}',
-  'steps.anomalyTag.auth_or_model': '受限{n}',
-  'steps.anomalyTag.error': '报错{n}',
-  'steps.anomalyTag.mixed': '异常{n}',
-  'steps.anomalyKind.timeout': '流空闲 / 连接超时',
-  'steps.anomalyKind.rate_limit': '429 限流 / 配额耗尽',
-  'steps.anomalyKind.capacity': '503 上游算力不足',
-  'steps.anomalyKind.disconnect': '连接中断 / 断流',
-  'steps.anomalyKind.upstream': '上游 5xx 内部错误',
-  'steps.anomalyKind.model_output': '模型输出 / 工具参数无效',
-  'steps.anomalyKind.safety': '内容安全过滤',
-  'steps.anomalyKind.auth_or_model': '请求受限 / 模型不可用',
-  'steps.anomalyKind.error': '调用异常',
-  'steps.anomalyKind.canceled': '用户取消',
-  'steps.anomalyStepTitle': '#{step} · 异常 {count} 次',
-  'steps.anomalyDelayPart': '退避 {sec}s',
-  'steps.compactionStepTitle': '#{step} · 自动压缩',
-  'steps.compactionSummaryRow': '输入 {input} → 摘要输出 {output}',
-  'steps.compactionDetailHint': '系统自动触发的上下文压缩步骤，用于折叠历史对话以释放窗口空间',
-  'steps.compactionAnomalyHint': '该步骤同时为系统自动压缩步骤',
-  'steps.anomalyTerminalTag': '中止',
-  'steps.anomalyModelTitle': '{model} · 异常 {count} 次',
-  'steps.anomalyModelSub': '涉及 {steps} 步',
-  'steps.anomalyModelKindRow': '{kind}：{count} 次',
-  'steps.anomalyModelClickHint': '点击前往「按步查看」筛选异常步',
-  'steps.anomalySummaryMeta': '异常 {count} 次（{steps} 步）',
-  'steps.anomalyFilterLabel': '仅看异常 ({count})',
-  'steps.anomalyFilterAll': '返回全部步骤',
-
-  // Step Table Columns (Headers & Option Labels)
-  'stepCol.step.th': '步序',
-  'stepCol.step.opt': '调用步序 (#)',
-  'stepCol.time.th': '时间',
-  'stepCol.time.opt': '调用时间 (HH:mm:ss)',
-  'stepCol.model.th': '模型',
-  'stepCol.model.opt': '调用模型',
-  'stepCol.tps.th': '速度',
-  'stepCol.tps.opt': '输出速度 (TPS)',
-  'stepCol.ttft.th': '首字',
-  'stepCol.ttft.opt': '首字延迟 (TTFT)',
-  'stepCol.duration.th': '耗时',
-  'stepCol.duration.opt': '端到端耗时 (s)',
-  'stepCol.tokens_combo.th': '上下文 / 思考 / 正文',
-  'stepCol.tokens_combo.opt': '上下文 / 思考 / 正文 (组合)',
-  'stepCol.tokens_io_cache.th': '输入 / 输出 / 缓存',
-  'stepCol.tokens_io_cache.opt': '输入 / 输出 / 缓存 (组合)',
-  'stepCol.tokens_custom.opt': '自定义组合 ({fmt})',
-  'stepCol.input_tokens.th': '新输入',
-  'stepCol.input_tokens.opt': '新输入 Token',
-  'stepCol.cache_tokens.th': '缓存读',
-  'stepCol.cache_tokens.opt': '缓存读取 Token',
-  'stepCol.output_tokens.th': '总输出',
-  'stepCol.output_tokens.opt': '总输出 Token',
-  'stepCol.cache.th': '缓存',
-  'stepCol.cache.opt': '缓存命中率 (%)',
-  'stepCol.cost.th': '费用',
-  'stepCol.cost.opt': '单步费用 ($)',
-
-  // Preferences (3-Tab Modular Settings)
-  'settings.subTab.general': '常规',
-  'settings.subTab.structure': '结构',
-  'settings.subTab.account': '账号',
-  'settings.subTab.other': '其他',
-  'settings.subTab.aria': '偏好设置分类切换',
-  'settings.account.current': '当前账号',
-  'settings.account.signedOut': '未登录',
-  'settings.account.unknown': '暂未获取账号状态',
-  'settings.account.email': '账号邮箱',
-  'settings.account.credential': 'OAuth 凭证',
-  'settings.account.importHint': '粘贴 Antigravity 的刷新令牌或含 refresh_token 的 OAuth JSON。插件会验证账号邮箱，并在本机加密保存。',
-  'settings.account.save': '导入凭证',
-  'settings.account.capture': '保存当前凭证',
-  'settings.account.reload': '刷新列表',
-  'settings.account.switch': '切换',
-  'settings.account.remove': '移除',
-  'settings.account.active': '当前使用',
-  'settings.account.written': '凭证已写入',
-  'settings.account.pending': '已写入 {email} 的凭证，等待宿主更新。如果一直未更新，请重开当前 Antigravity。',
-  'settings.account.savedCredentials': '已保存的凭证',
-  'settings.account.empty': '暂无已保存的凭证。',
-  'settings.account.loading': '正在读取已保存的凭证…',
-  'settings.account.saved': '凭证已保存。',
-  'settings.account.removed': '已移除保存的凭证。',
-  'settings.account.switched': '已切换账号，正在刷新当前额度。',
-  'settings.account.switching': '正在替换凭证并确认宿主账号…',
-  'settings.account.verifying': '正在验证凭证所属账号…',
-  'settings.account.loadQuota': '查额度',
-  'settings.account.loadingQuota': '正在查询此凭证的额度…',
-  'settings.account.emptyCredentialQuota': '这个账号暂无可显示的额度池。',
-  'settings.account.quota': '额度池剩余',
-  'settings.account.quota5h': '5 小时 {percent}%',
-  'settings.account.quotaWeekly': '每周 {percent}%',
-  'settings.account.noQuota': '暂未获取当前账号的额度池。',
-  'settings.account.quotaStale': '额度刷新失败，显示的是当前账号上次获取的数据。',
-  'settings.account.unsupported': '凭证切换目前支持 Windows 上的 Antigravity 共享登录。',
-  'settings.account.invalidEmail': '请先选择一个已保存的账号。',
-  'settings.account.invalidCredential': '请输入有效的 Antigravity 个人账号 OAuth 凭证。',
-  'settings.account.credentialTooLarge': '凭证超过 Windows 凭据管理器的 2560 字节上限。',
-  'settings.account.notFound': '该凭证已移除，请刷新列表。',
-  'settings.account.noCurrentCredential': '暂时无法读取当前账号的共享凭证。',
-  'settings.account.busy': '另一个窗口正在操作凭证，请稍后重试。',
-  'settings.account.storeFailed': '凭证操作失败，请重试。',
-  'settings.account.rollbackFailed': '凭证写入和回滚均失败。请在 Antigravity 中确认当前账号后再继续。',
-  'settings.account.credentialAccessDenied': 'Windows 拒绝访问凭据管理器。请在当前 Windows 用户会话中打开 Antigravity 后重试。',
-  'settings.account.credentialChanged': '这份凭证已在其他窗口更新，请刷新列表后重试。',
-  'settings.account.credentialRejected': 'Google 未接受此凭证。请检查令牌是否属于 Antigravity 且仍然有效。',
-  'settings.account.identityMismatch': '凭证所属账号与宿主或保存的账号不一致。请重新导入该凭证。',
-  'settings.account.oauthClientUnavailable': '未能从本机 Antigravity 读取 OAuth 客户端配置。',
-  'settings.account.oauthUnavailable': '暂时无法完成 Google OAuth 验证，请检查网络后重试。',
-  'settings.account.quotaUnavailable': '暂时无法取得此账号的额度，请稍候重试。',
-  'settings.saving': '保存中…',
-  'settings.saved': '已保存',
-  'settings.saveFailed': '保存失败',
-  'settings.resetDone': '已恢复默认',
-  'settings.resetBtn': '恢复默认',
-
-  // Preferences -> General Tab
-  'settings.gen.appearanceTitle': '界面与外观',
-  'settings.gen.language': '界面语言',
-  'settings.gen.langZh': '简体中文',
-  'settings.gen.langEn': 'English',
-  'settings.gen.langAuto': '跟随系统',
-  'settings.gen.themeAccent': '主题色',
-  'settings.gen.accentHost': '跟随宿主',
-  'settings.gen.accentBlue': '经典蓝',
-  'settings.gen.accentEmerald': '翡翠绿',
-  'settings.gen.accentAmber': '琥珀橙',
-  'settings.gen.accentViolet': '鸢尾紫',
-  'settings.gen.accentCyan': '青碧色',
-  'settings.gen.accentRose': '玫瑰红',
-  'settings.gen.fontScale': '字体大小',
-  'settings.gen.fontSm': '小',
-  'settings.gen.fontMd': '标准',
-  'settings.gen.fontLg': '大',
-  'settings.gen.fontXl': '特大',
-  'settings.gen.fontHint': '等比缩放侧边栏与展开面板字号，顶栏及输入框内嵌胶囊保持紧凑定高',
-  'settings.gen.modernUi': '现代化 UI',
-  'settings.gen.modernUiOff': '关闭',
-  'settings.gen.modernUiOn': '开启',
-  'settings.gen.modernUiHint': '去除大部分线框，采用柔和分层底色及更流畅的现代过渡动画',
-  'settings.gen.updateTitle': '版本更新',
-  'settings.gen.updateMode': '更新方式',
-  'settings.gen.updateManual': '仅提示新版本，手动更新',
-  'settings.gen.updateAuto': '自动更新',
-  'settings.gen.updateOff': '关闭更新',
-  'settings.gen.pricingLabel': '价格表',
-  'settings.gen.versionLabel': '当前版本',
-  'settings.gen.modelCount': '{count} 个模型',
-  'settings.gen.srcRemote': '云端同步',
-  'settings.gen.srcLocal': '本地文件',
-  'settings.gen.srcDefault': '内置默认',
-  'settings.gen.syncAt': '更新于 {time}',
-  'settings.gen.pubAt': '发布于 {date}',
-  'settings.gen.defaultPricing': '默认价格',
-  'settings.gen.syncBtn': '更新价格表',
-  'settings.gen.syncingBtn': '更新中…',
-  'settings.gen.syncingMsg': '正在同步价格表…',
-  'settings.gen.syncedMsg': '价格表已更新 ({count} 个模型)',
-  'settings.gen.syncFallbackMsg': '连接超时，使用本地价格表',
-  'settings.gen.checkUpdateBtn': '检查更新',
-  'settings.gen.checkingBtn': '检查中…',
-  'settings.gen.checkingMsg': '正在检查新版本…',
-  'settings.gen.checkFailedMsg': '检查失败：{err}',
-  'settings.gen.upToDateMsg': '当前已是最新版本 (v{ver})',
-  'settings.gen.downloadingMsg': '正在下载更新…',
-  'settings.gen.updatedRestartMsg': '更新完成，正在重启面板…',
-  'settings.gen.updateSkippedMsg': '未执行更新',
-  'settings.gen.updateFailedMsg': '更新失败',
-  'settings.gen.canUpgradeSub': '可升级至 v{ver} ({mode})',
-  'settings.gen.upgradeToBtn': '升级至 v{ver}',
-  'settings.gen.manualUpgradeBtn': '手动升级 v{ver}',
-  'settings.gen.updateOffSub': '已关闭更新提醒 ({mode})',
-  'settings.gen.latestSub': '已是最新 ({mode})',
-
-  // Preferences -> Structure Tab
-  'settings.str.thirdTabAria': '结构子菜单切换',
-  'settings.str.tabMount': '挂载胶囊',
-  'settings.str.tabHover': '鼠标悬浮窗',
-  'settings.str.tabOverview': '实时监控布局',
-  'settings.str.tabSteps': '调用明细字段',
-  'settings.str.previewMountSidebarHint': '当前为仅侧边栏模式，主窗口不挂载胶囊；切回顶部栏或输入框挂载后将按上方样式呈现',
-  'settings.str.mountSection': '挂载胶囊',
-  'settings.str.mountBadge': '{count}/5 项',
-  'settings.str.mountMode': '面板挂载方式',
-  'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
-  'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
-  'settings.str.mountSidebar': '仅侧边栏',
-  'settings.bridge.restartTitle': '已自动补齐启动参数，重启一次即可启用悬浮胶囊',
-  'settings.bridge.ctxRestartTitle': '已自动补齐启动参数，重启一次即可激活上下文覆写',
-  'settings.bridge.restartBody': '已自动为快捷方式、自启项及协议关联写入 --remote-debugging-port=0（后续通过常规快捷方式打开均自动生效）。点击下方按钮即可退出后台进程并立即生效。',
-  'settings.bridge.readOnlyTitle': '公共桌面快捷方式受权限保护，授权重启即可生效',
-  'settings.bridge.ctxReadOnlyTitle': '公共桌面快捷方式受权限保护，授权重启即可激活上下文覆写',
-  'settings.bridge.readOnlyBody': '个人启动项已配好，但公共桌面或开始菜单快捷方式需管理员权限修改。点击下方按钮并在系统弹窗中确认授权，即可一次性修补公共图标并带参重开（后续日常打开均自动生效）。',
-  'settings.bridge.macTitle': '当前会话未开启调试端口，一键重开即可启用挂载',
-  'settings.bridge.ctxMacTitle': '当前会话未开启调试端口，一键重开即可激活上下文覆写',
-  'settings.bridge.noPortTitle': '未检测到本地调试端口，主窗口挂载暂未生效',
-  'settings.bridge.unreachableTitle': '本地调试端口未就绪，主窗口挂载暂未生效',
-  'settings.bridge.ctxTitle': '未连通本地调试通道，上下文窗口覆写暂未注入',
-  'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动补齐快捷方式参数、退出托盘后台并带参重启生效。',
-  'settings.bridge.guideMac': '受 macOS 应用签名限制，从 Dock 直接冷启动默认不带调试端口参数。点击下方按钮即可一键带参重开恢复（日常仅关窗不完全退出 Cmd+Q 则持续有效）。',
-  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动写入 .desktop 启动器并重启生效。',
-  'settings.bridge.relaunchBtn': '立即重启并启用挂载',
-  'settings.bridge.relaunchAuthBtn': '授权修补并立即重启',
-  'settings.bridge.relaunchingBtn': '正在重启客户端...',
-  'settings.bridge.relaunchFailed': '自动重启失败，请从托盘退出后重试',
-  'settings.bridge.dismissAria': '暂时关闭提示',
-  'settings.bridge.copyFlagBtn': '复制 {cmd}',
-  'settings.bridge.copiedBtn': '已复制启动参数',
-  'settings.str.popoverWidthLabel': '悬浮面板宽度',
-  'settings.str.popoverWidthAuto': '自适应',
-  'settings.str.popoverWidthCustom': '指定宽度',
-  'settings.str.popoverWidthHint': '自适应模式下在调用明细等宽表格视图自动撑宽免水平滚动；指定宽度范围 440~1080 px',
-  'settings.str.multiToggle': '实时运行会话入口',
-  'settings.str.cliCapsuleToggle': 'CLI 底部状态胶囊',
-  'settings.str.show': '显示',
-  'settings.str.hide': '隐藏',
-  'settings.str.on': '开启',
-  'settings.str.off': '关闭',
-  'settings.str.capsuleSlotsLabel': '胶囊数值与顺序 (左 → 右，1~5 项，可拖拽)',
-  'settings.str.addCapsuleSlot': '添加槽位 ({count}/{max})',
-  'settings.str.hoverSection': '鼠标悬浮窗',
-  'settings.str.hoverBadgeOff': '已关闭',
-  'settings.str.hoverBadgeCount': '{count} 模块',
-  'settings.str.hoverModulesLabel': '悬浮窗展示模块 (上 → 下，0~4 项，可拖拽)',
-  'settings.str.hoverEmptyHint': '已关闭悬浮速览窗（点击胶囊仍可展开完整面板）',
-  'settings.str.addHoverModule': '添加模块 ({count}/{max})',
-  'settings.str.overviewSection': '实时监控布局',
-  'settings.str.overviewBadge': '{modCount} 模块 · {metCount} 指标',
-  'settings.str.overviewModulesLabel': '监控模块与顺序 (上 → 下，至少 1 项，可拖拽)',
-  'settings.str.addOverviewModule': '添加模块 ({count}/{max})',
-  'settings.str.overviewMetricsLabel': '第一行实时指标 (左 → 右，1~4 项，可拖拽)',
-  'settings.str.overviewMetricsInactiveHint': '当前已移出「实时指标」模块，此配置将在悬浮窗启用或重新添加模块时生效',
-  'settings.str.addOverviewMetric': '添加指标 ({count}/{max})',
-  'settings.str.quotaPaceToggle': '配额消耗节奏',
-  'settings.str.quotaPaceHint': '在 5h 与周限进度条上显示周期预期进度标记与消耗速率偏差',
-  'settings.str.stepsSection': '调用明细字段',
-  'settings.str.stepsBadge': '{count} 列',
-  'settings.str.stepTurnRailToggle': '对话轮次导轨',
-  'settings.str.stepAgentBadgeToggle': '主/子代理标识',
-  'settings.str.stepSpeedColorToggle': '输出速度多色分级',
-  'settings.str.stepTokenComboLabel': '自定义 Token 组合格式',
-  'settings.str.stepTokenComboPlaceholder': '例如 context:new:cache 或 in:out:cache',
-  'settings.str.stepTokenComboHint': '可用字段：context(上下文)、in/new(新输入)、out(输出)、cache(缓存)、think(思考)、reply(正文)、total(总计)，以 : 或 / 分隔（1~4 项）',
-  'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列，可拖拽)',
-  'settings.str.addStepCol': '添加字段 ({count}/{max})',
-  'settings.slot.dragHint': '按住上下拖动调整顺序',
-  'settings.slot.moveUp': '前移',
-  'settings.slot.moveDown': '后移',
-  'settings.slot.remove': '移除此项',
-  'settings.slot.minReached': '至少保留 {min} 项',
-  'settings.slot.alreadyAdded': '已添加',
-  'settings.mock.sessionTitle': '重构鉴权中间件与会话缓存',
-  'settings.mock.subRole': '接口审计',
-  'settings.mock.turnPromptLatest': '排查并发刷新令牌时的竞态问题，补齐单元测试',
-  'settings.mock.turnPromptPrev': '梳理路由守卫与过期会话清理逻辑',
-
-  // Preferences -> Other Tab
-  'settings.oth.modelTitle': '模型标识显示',
-  'settings.oth.modelFormat': '模型名称格式',
-  'settings.oth.modelShort': '精简代号 (如 argon-4-high)',
-  'settings.oth.modelUpstream': '原始模型 ID (如 gemini-3.8-flash-n)',
-  'settings.oth.modelUpstreamCompact': '去前缀原始 ID (如 3.8-flash-n / sonnet-4-6 / 5.4-mini)',
-  'settings.oth.orchFormat': 'Orchestrator 系列 ID',
-  'settings.oth.orchCompact': '精简代号 (如 orchestrator-argon)',
-  'settings.oth.orchFull': '原始完整 ID (如 gemini-pro-orchestrator)',
-  'settings.oth.baselineTitle': '模型上下文设置',
-  'settings.oth.ctxRiskTitle': '非官方能力风险提示',
-  'settings.oth.ctxRiskBody': 'Google 官方并未授权在 Antigravity App / IDE 中修改模型上下文上限。擅自修改可能导致 Antigravity 或 GCP 服务被禁用，甚至触发账号封禁；启用该功能即默认由你自行承担全部风险。你最好清楚自己在做什么！',
-  'settings.oth.ctxRiskAcceptBtn': '我已知晓风险，继续使用',
-  'settings.oth.ctxModel': '模型',
-  'settings.oth.ctxBaselineLabel': '上下文窗口上限',
-  'settings.oth.ctxChooseModel': '选择模型',
-  'settings.oth.ctxDefault': '跟随宿主设置',
-  'settings.oth.ctxExpensive': '{name}（消耗更多配额）',
-  'settings.oth.ctxTokens': '{count} token',
-  'settings.oth.ctxUnavailable': '{name}（当前不可用）',
-  'settings.oth.ctxConfigured': '{name} · 已设置',
-  'settings.oth.ctxConfiguredReported': '{name} · 已设置 / 最近 {reported}',
-  'settings.oth.ctxPendingBridge': '{name} · 待重启生效',
-  'settings.oth.ctxDefaultReported': '默认 · 最近 {name}',
-  'settings.oth.ctxReported': '最近一次请求由宿主报告为 {name}。',
-  'settings.oth.ctxMixed': '各推理档设置不同',
-  'settings.oth.ctxMixedHint': '该模型的推理档保留了不同的旧设置。选择一个上限即可统一。',
-  'settings.oth.ctxBaselineHint': '同一模型的推理档共享上限。插件会在启动后重新应用已保存的设置，用于之后发送的消息。',
-  'settings.oth.ctxNoModels': '宿主暂未返回可用模型。',
-  'settings.oth.ctxNoOptions': '宿主未提供此模型的上下文档位或容量，当前只能跟随宿主设置。',
-  'settings.oth.maintTitle': '缓存与重置',
-  'settings.oth.cacheLabel': '本地轨迹缓存',
-  'settings.oth.cacheDesc': '清空内存与磁盘步骤解析缓存并立即重扫全部会话',
-  'settings.oth.rebuildBtn': '重建本地轨迹缓存',
-  'settings.oth.rebuildingBtn': '重建中…',
-  'settings.oth.rebuildDone': '本地轨迹缓存已重建',
-  'settings.oth.rebuildFailed': '缓存重建失败',
-  'settings.oth.resetLabel': '恢复出厂偏好',
-  'settings.oth.resetDesc': '将常规、结构与其他分页中的所有偏好设置还原为初始默认状态',
-  'settings.oth.resetAllBtn': '恢复全部默认设置',
-  'settings.oth.resetConfirmBtn': '再次点击确认重置',
-  'settings.oth.resettingBtn': '重置中…',
-  'settings.oth.resetAllDone': '已恢复全部默认设置',
-
-  // Structured Live Activity Actions
-  'live.act.run_command': '执行命令',
-  'live.act.read_file': '读取文件',
-  'live.act.edit_file': '修改文件',
-  'live.act.write_file': '写入文件',
-  'live.act.grep_search': '搜索代码',
-  'live.act.find_file': '查找文件',
-  'live.act.read_url': '读取网页',
-  'live.act.search_web': '网页搜索',
-  'live.act.invoke_subagent': '调用子代理',
-  'live.act.send_message': '通信子代理',
-  'live.act.manage_subagents': '管理子代理',
-  'live.act.swarm_add': '派生工蜂',
-  'live.act.swarm_title': '命名蜂群',
-  'live.act.swarm_kill': '终止工蜂',
-  'live.act.swarm_model': '切换工蜂模型',
-  'live.act.swarm_channel': '蜂群频道',
-  'live.act.swarm_status': '巡检蜂群',
-  'live.act.post_message': '发布看板',
-  'live.act.read_board': '读取看板',
-  'live.act.swarm_wait': '看板待命',
-  'live.act.manage_task': '后台任务',
-  'live.act.schedule': '定时任务',
-  'live.act.ask_question': '等待用户选择',
-  'live.act.search_marketplace': '查询插件',
-  'live.act.mcp_tool': '调用 MCP',
-  'live.act.tool_call': '调用工具',
-  'live.act.thinking': '推理中',
-  'live.act.compacting': '上下文压缩',
-  'live.act.responding': '正在输出回复',
-  'live.act.waiting_subagent': '等待子代理',
-  'live.act.waiting_swarm': '等待工蜂',
-  'live.act.swarm_waiting': '待命中',
-  'live.act.swarm_killed': '已终止',
-  'live.act.starting': '启动中',
-  'live.act.done': '已完成',
-  'live.act.awaitingApproval': '等待确认 · {label}',
-  'live.act.compactionResuming': '已完成压缩，正在恢复推理',
-
-  // SVG Charts (SessionStepCharts & TrendAreaChart)
-  'chart.step.empty': '当前范围暂无可绘制的调用步骤',
-  'chart.step.excluded': '未纳入',
-  'chart.step.zeroSteps': '0 步',
-  'chart.step.stepAdd': '本步 +{tokens}',
-  'chart.step.ioSplit': '入 {inTok} · 缓 {cacheTok} · 出 {outTok}',
-  'chart.step.cacheShort': '缓存 {pct}%',
-  'chart.step.compactionCheckpoint': '上下文自动压缩检查点',
-  'chart.step.cacheHitOut': '缓存命中 {pct}% · 输出 +{outTok}',
-  'chart.step.ttftShort': '首字 {sec}s',
-  'chart.step.outAndCtx': '输出 {outTok} · 上下文 {ctxTok}',
-  'chart.step.compactionStep': '上下文压缩步',
-  'chart.step.noSpeedSample': '无测速样本',
-  'chart.step.ctxAndCache': '上下文 {ctxTok} · 缓存 {pct}%',
-  'chart.step.noTtftSample': '无首字计时样本',
-  'chart.step.cumCost': '累计 {cost}',
-  'chart.step.cacheAndStepTok': '缓存 {pct}% · 本步 {tokens}',
-  'chart.step.noSamples': '无样本',
-  'chart.step.peakShort': '峰 {val}',
-  'chart.step.peakPill': '峰值 {tag} · {val}',
-  'chart.step.stepsCount': '{count}步',
-  'chart.step.multiPrefix': '{count} 模型 · ',
-  'chart.step.sumTokens': '{prefix}累计 {tokens}',
-  'chart.step.peakTokens': '{prefix}峰值 {tokens}',
-  'chart.step.currentCtx': '当前 {tokens}',
-  'chart.step.meanTps': '{prefix}均值 {val} tok/s',
-  'chart.step.meanSec': '{prefix}均值 {val}s',
-  'chart.step.noValidSamples': '暂无有效样本',
-  'chart.step.sumCost': '{prefix}累计 {cost}',
-  'chart.fit.empty': '该模型暂无有效拟合样本',
-  'chart.fit.loess': 'LOESS 拟合',
-  'chart.fit.olsLinear': 'OLS 线性',
-  'chart.fit.olsReg': 'OLS 回归',
-  'chart.fit.observed': '观测值',
-  'chart.fit.tipFit': '拟合 {val}',
-  'chart.fit.tipObs': '观测 {val}',
-  'chart.fit.zeroSamples': '0 样本',
-  'chart.fit.peerMean': '{label} 均 {val}',
-  'chart.fit.peerCompare': '同图对比：{peers}',
-  'chart.fit.curvesCount': '{count} 条拟合线',
-  'chart.fit.multiBadge': '{steps}步 · {models} 模型对比',
-  'chart.fit.singleBadge': '{steps}步 · 均 {mean}',
-  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · 样本标准差 SD = ±{sd}',
-  'chart.trend.hmMonthYear': '{yy}年{month}月',
-  'chart.trend.hmMonthOnly': '{month}月',
-  'chart.trend.wdayMon': '一',
-  'chart.trend.wdayWed': '三',
-  'chart.trend.wdayFri': '五',
-  'chart.trend.wdaySun': '日',
-  'chart.trend.hmAria': '每日用量热力格子图',
-  'chart.trend.hmLess': '少',
-  'chart.trend.hmMore': '多',
-  'chart.trend.hmActivePeak': '活跃 {active}/{total} 天 · 峰值 {label} · {tokens}',
-  'chart.trend.hmActiveZero': '活跃 0/{total} 天',
-  'chart.trend.peakPill': '峰值 {label} · {tokens}',
-});
-return { I18N_MESSAGES_ZH_CN };
-})();
-
 // --- src/i18n/en-US.js ---
 const { I18N_MESSAGES_EN_US } = (() => {
 /**
@@ -1841,6 +1119,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.selectedCount': '{count} {unit} selected',
   'fmt.selectedListTitle': 'Selected ({count}): {names}',
   'fmt.selectPlaceholder': 'Select',
+  'fmt.unitItems': 'items',
 
   // Capsule & Multi-Session Overlay
   'capsule.ariaMonitor': 'Usage & Speed Monitor',
@@ -1964,6 +1243,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'quota.paceOnTrack': '● On pace · exp {exp}%',
   'quota.paceTooltip': 'Expected: {exp}% elapsed · Actual: {used}% ({signedDelta}% vs pace, {ratio}x burn rate)',
   'quota.paceTooltipNoRatio': 'Expected: {exp}% elapsed · Actual: {used}% ({signedDelta}% vs pace)',
+  'quota.activePoolFallback': 'Active Pool',
+  'quota.wkTag': 'Wk',
 
   // Live Activity Widget
   'live.currentSession': 'Current Session',
@@ -2204,8 +1485,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   // Preferences -> General Tab
   'settings.gen.appearanceTitle': 'Interface & Appearance',
   'settings.gen.language': 'Language',
-  'settings.gen.langZh': '简体中文',
   'settings.gen.langEn': 'English',
+  'settings.gen.langPt': 'Português (BR)',
   'settings.gen.langAuto': 'Follow System',
   'settings.gen.themeAccent': 'Accent Color',
   'settings.gen.accentHost': 'Host',
@@ -2483,17 +1764,736 @@ const I18N_MESSAGES_EN_US = Object.freeze({
 return { I18N_MESSAGES_EN_US };
 })();
 
-// --- src/i18n/index.js ---
-const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t } = (() => {
+// --- src/i18n/pt-BR.js ---
+const { I18N_MESSAGES_PT_BR } = (() => {
 /**
- * @fileoverview Reactive lightweight i18n engine (`zh-CN` / `en-US` / `auto`).
- * Default language is `'zh-CN'` so out-of-the-box UI matches existing behavior 100%.
+ * @fileoverview Portuguese (Brazil) (`pt-BR`) dictionary for Antigravity Usage & Speed Monitor.
+ * Zero emoji characters.
+ */
+
+const I18N_MESSAGES_PT_BR = Object.freeze({
+  // Top Navigation
+  'nav.overview': 'Ao vivo',
+  'nav.consumption': 'Uso',
+  'nav.steps': 'Etapas',
+  'nav.settings': 'Ajustes',
+
+  // Top Session Header
+  'header.followLatest': 'Seguir sessão mais recente',
+  'header.currentWindowNamed': 'Atual ({title})',
+  'header.latestNamed': 'Recente ({title})',
+  'header.lockedSession': 'Sessão fixada ({id})',
+  'header.lockedMeta': 'Fixada',
+  'header.convMetaWithSubs': 'Principal {main} · {subs} sub ({total} etapas)',
+  'header.convMetaWithSwarm': 'Principal {main} · {swarm} swarm ({total} etapas)',
+  'header.convMetaWithSwarmAndSubs': 'Principal {main} · {swarm} swarm · {subs} sub ({total} etapas)',
+  'header.convMetaSteps': '{count} etapas',
+  'header.hasUpdate': 'Atualizar',
+  'header.upgradeToVer': 'Atualizar v{ver}',
+  'header.upgrading': 'Atualizando…',
+  'header.ariaUpdate': 'Nova versão disponível, clique para atualizar',
+  'header.ariaRefresh': 'Atualizar telemetria',
+  'header.statusSyncing': 'Sincronizando',
+  'header.statusSynced': 'Sincronizado',
+  'header.statusRetrying': 'Tentando novamente',
+  'header.statusGenerating': 'Executando{suffix}',
+  'header.statusQuotaCached': 'Cota em cache',
+  'header.statusQuotaOffline': 'Cota offline',
+  'header.statusLive': 'Monitorando',
+
+  // Formatters & Common Labels
+  'fmt.pending': 'N/D',
+  'fmt.speedIncomplete': 'Tempo incompleto',
+  'fmt.speedCanceled': 'Cancelado',
+  'fmt.speedError': 'Erro na chamada',
+  'fmt.speedInterrupted': 'Interrompido',
+  'fmt.speedCompactionTimingUnavailable': 'Compactação sem tempo',
+  'fmt.speedInvalidOutput': 'Sem saída válida',
+  'fmt.speedInconsistent': 'Tempo inválido',
+  'fmt.speedShort': 'Muito curto (<0,5s)',
+  'fmt.speedLegacy': 'Cache legado',
+  'fmt.sampleSteps': '{valid}/{total} etapas',
+  'fmt.resetUnknown': 'Reset desconhecido',
+  'fmt.resetSoon': 'Reiniciando em breve',
+  'fmt.resetUnder1m': 'Reinicia em <1m',
+  'fmt.resetDaysHours': 'Reinicia em {d}d {h}h',
+  'fmt.resetHoursMins': 'Reinicia em {h}h {m}m',
+  'fmt.resetMins': 'Reinicia em {m}m',
+  'fmt.selectTime': 'Selecionar horário',
+  'fmt.unknownModel': 'Modelo desconhecido',
+  'fmt.compactionSuffix': '·compacto',
+  'fmt.mainAgent': 'Agente principal',
+  'fmt.mainBadge': 'Princ.',
+  'fmt.subAgent': 'Subagente',
+  'fmt.subBadge': 'S{index}',
+  'fmt.subBadgeShort': 'Sub',
+  'fmt.swarmAgent': 'Swarm',
+  'fmt.swarmBadge': 'W{index}',
+  'fmt.swarmBadgeShort': 'Swarm',
+  'fmt.swarmMonitorHint': 'Monitor',
+  'fmt.swarmNarratorHint': 'Narrador',
+  'fmt.sideQuestion': 'Pergunta paralela',
+  'fmt.sideBadge': 'P{index}',
+  'fmt.sideBadgeShort': 'P',
+  'fmt.selectedCount': '{count} {unit} selecionados',
+  'fmt.selectedListTitle': 'Selecionados ({count}): {names}',
+  'fmt.selectPlaceholder': 'Selecionar',
+  'fmt.unitItems': 'itens',
+
+  // Capsule & Multi-Session Overlay
+  'capsule.ariaMonitor': 'Monitor de Uso e Velocidade',
+  'capsule.ariaMulti': 'Visão geral das sessões ativas',
+  'capsule.multiZero': '0 ativas',
+  'capsule.multiRunning': '{count} ativas',
+  'capsule.multiRunningWithSubs': '{count} ativas · {subs} sub',
+  'capsule.multiRunningWithSwarm': '{count} ativas · {subs} swarm',
+  'capsule.tpsRunning': 'Executando',
+  'capsule.tpsIdle': 'Ocioso',
+  'capsule.quotaLeft': '{pct}% rest.',
+  'capsule.quotaUnknown': '--% rest.',
+  'capsule.newVersion': 'Atualizar',
+  'capsule.updating': 'Atualizando…',
+  'capsule.ariaUpdateTitle': 'Nova versão disponível, clique para atualizar',
+  'capsule.hoverNewVer': 'Atualização v{ver} disponível',
+  'capsule.hoverNewVerGeneric': 'Nova versão disponível',
+  'capsule.hoverUpdateHintTopbar': 'Clique em v{ver} na barra superior para atualizar',
+  'capsule.hoverUpdateHintComposer': 'Clique no selo v{ver} para atualizar',
+  'capsule.hoverUpdateHintTopbarGeneric': 'Clique no selo de atualização na barra superior',
+  'capsule.hoverUpdateHintComposerGeneric': 'Clique no selo de atualização para instalar',
+  'multi.title': 'Sessões ativas',
+  'multi.ariaDialog': 'Painel de sessões ativas',
+  'multi.pinned': 'Fixada',
+  'multi.loading': 'Carregando...',
+  'multi.empty': 'Nenhuma sessão em execução',
+  'multi.allIdle': 'Todas ociosas',
+  'multi.metaWithSubs': '{main} principal · {subs} subagentes ativos',
+  'multi.metaWithSwarm': '{main} principal · {subs} swarm ativos',
+  'multi.metaMainOnly': '{main} sessões ativas',
+  'multi.hereTag': 'Aqui',
+  'multi.inspectSessionTitle': 'Inspecionar sessão no monitor: {title}',
+
+  // Live Overview & Widgets
+  'module.metrics': 'Métricas ao vivo',
+  'module.context': 'Janela de contexto',
+  'module.quotas': 'Cotas disponíveis',
+  'module.live_tasks': 'Tarefas em execução',
+
+  // Capsule Slot Metric Options
+  'capMetric.context': 'Uso de contexto (%)',
+  'capMetric.tps': 'Velocidade de saída (TPS)',
+  'capMetric.ttft': 'Latência do 1º token (TTFT)',
+  'capMetric.avg_tps': 'Velocidade média (Avg TPS)',
+  'capMetric.cost': 'Custo da etapa ($)',
+  'capMetric.session_cost': 'Custo da sessão ($)',
+  'capMetric.cache_hit': 'Taxa de cache (%)',
+  'capMetric.session_tokens': 'Tokens da sessão',
+  'capMetric.quota_auto': 'Cota mais apertada',
+  'capMetric.gemini_5h': 'Cota Gemini 5h',
+  'capMetric.gemini_weekly': 'Cota semanal Gemini',
+  'capMetric.claude_5h': 'Cota Claude 5h',
+  'capMetric.claude_weekly': 'Cota semanal Claude',
+
+  // Overview Matrix Metric Options & Cells
+  'ovMetric.tps': 'Velocidade',
+  'ovMetric.ttft': 'Primeiro token',
+  'ovMetric.avg_tps': 'Velocidade média',
+  'ovMetric.step_cost': 'Custo da etapa',
+  'ovMetric.session_cost': 'Custo da sessão',
+  'ovMetric.cache_hit': 'Acerto de cache',
+  'ovMetric.session_tokens': 'Tokens da sessão',
+  'ovMetric.context_usage': 'Uso de contexto',
+  'ovMetric.quota_tightest': 'Cota mais apertada',
+  'ovMetric.subAvgTtft': 'Média {val}',
+  'ovMetric.subAvgCache': 'Média {val}',
+  'ovMetric.subValidSamples': 'Válidas {samples}',
+  'ovMetric.subTotalCost': 'Total {cost}',
+  'ovMetric.subStepCost': 'Etapa {cost}',
+  'ovMetric.subInOutTokens': 'Ent {inTok} · Saí {outTok}',
+  'ovMetric.subCtxRatio': '{used} / {limit}',
+  'ovMetric.subQuotaPool': '{label}',
+  'ovMetric.subQuotaPending': 'Aguardando sincronização de cota',
+
+  // Context Window Widget
+  'ctx.followActive': 'Seguir ativo ({badge})',
+  'ctx.followActiveTitle': 'Inspecionar automaticamente a janela de contexto do agente ativo',
+  'ctx.expandMore': '+{count} mais',
+  'ctx.expandMoreTitle': 'Expandir todos os {count} subagentes',
+  'ctx.collapse': 'Menos',
+  'ctx.collapseTitle': 'Recolher subagentes extras',
+  'ctx.ch.assistant': 'Assistente',
+  'ctx.ch.assistantTitle': 'Raciocínio, respostas e argumentos de chamadas de ferramentas',
+  'ctx.ch.toolResults': 'Resultados',
+  'ctx.ch.toolResultsTitle': 'Leituras de arquivos, saídas de terminal e resultados de ferramentas',
+  'ctx.ch.userInput': 'Entrada do usuário',
+  'ctx.ch.userInputTitle': 'Mensagens do usuário e anexos enviados',
+  'ctx.ch.subagent': 'Subagente',
+  'ctx.ch.subagentTitle': 'Relatórios de subagentes e notificações em segundo plano',
+  'ctx.ch.checkpoint': 'Checkpoint',
+  'ctx.ch.checkpointTitle': 'Resumos de checkpoints de conversa compactada',
+  'ctx.ch.systemPrompt': 'Prompt do sistema',
+  'ctx.ch.systemPromptTitle': 'Prompts principais de identidade, sandbox, artefatos e ambiente',
+  'ctx.ch.systemTools': 'Ferramentas nativas',
+  'ctx.ch.systemToolsTitle': 'Declarações de schema das ferramentas internas',
+  'ctx.ch.mcpTools': 'Ferramentas MCP',
+  'ctx.ch.mcpToolsTitle': 'Schemas de ferramentas e recursos de servidores MCP externos',
+  'ctx.ch.skills': 'Skills',
+  'ctx.ch.skillsTitle': 'Índice e instruções das Skills instaladas',
+  'ctx.ch.userRules': 'Regras do usuário',
+  'ctx.ch.userRulesTitle': 'Regras globais e do workspace definidas em user_rules',
+
+  // Quota Pools Widget
+  'quota.weeklyShort': 'Semanal',
+  'quota.weeklyPool': 'Semanal ({pool})',
+  'quota.loading': 'Carregando...',
+  'quota.failed': 'Indisponível (--%)',
+  'quota.usedAndLeft': '{reset} · Usado {used}% ({rem}% rest.)',
+  'quota.cycle5hTitle': 'Ciclo atual de 5h ({pool}): {tok} tokens · {cost} · {calls} chamadas',
+  'quota.cycleWkCustomTitle': 'Semana atual: {tok} tokens · {cost} · {calls} chamadas',
+  'quota.cycleWkPoolTitle': 'Ciclo semanal atual ({pool}): {tok} tokens · {cost} · {calls} chamadas',
+  'quota.footTokensCustom': 'Total da semana: {tok} ({cost})',
+  'quota.footTokensCycle': 'Total do ciclo: {tok} ({cost})',
+  'quota.footCredits': 'Créditos de IA: {credits}',
+  'quota.footCallsCustom': 'Chamadas na semana: {calls}',
+  'quota.footCallsCycle': 'Chamadas no ciclo: {calls}',
+  'quota.footTipCustom': 'Contabilizado desde segunda-feira às 00:00 (horário local)',
+  'quota.footTipCycle': 'Somado considerando a janela de reinício semanal de cada pool',
+  'quota.paceAhead': '▲ +{delta}% · esp {exp}%',
+  'quota.paceUnder': '▼ -{delta}% · esp {exp}%',
+  'quota.paceOnTrack': '● No ritmo · esp {exp}%',
+  'quota.paceTooltip': 'Esperado: {exp}% decorrido · Real: {used}% ({signedDelta}% vs ritmo, taxa {ratio}x)',
+  'quota.paceTooltipNoRatio': 'Esperado: {exp}% decorrido · Real: {used}% ({signedDelta}% vs ritmo)',
+  'quota.activePoolFallback': 'Pool ativo',
+  'quota.wkTag': 'Sem',
+
+  // Live Activity Widget
+  'live.currentSession': 'Sessão atual',
+  'live.switchSessionTitle': 'Alternar monitor para a sessão: {title}',
+  'live.thinking': 'Pensando',
+  'live.generating': 'Gerando',
+  'live.running': 'Executando',
+  'live.waiting': 'Aguardando',
+  'live.killed': 'Encerrado',
+  'live.done': 'Concluído',
+  'live.doneWithSteps': 'Concluído ({steps} etapas)',
+  'live.waitingWithSteps': 'Aguardando ({steps} etapas)',
+  'live.killedWithSteps': 'Encerrado ({steps} etapas)',
+  'live.subToggleRunning': 'Subagentes {run}/{total}',
+  'live.subToggleIdle': 'Subagentes ({total})',
+  'live.swarmToggleRunning': 'Swarm {run}/{total}',
+  'live.swarmToggleIdle': 'Swarm ({total})',
+  'live.subCollapseTitle': 'Recolher lista de subagentes',
+  'live.subExpandTitle': 'Expandir lista de atividades de subagentes',
+
+  // Consumption View
+  'cons.rangeCycle': 'Ciclo',
+  'cons.rangeToday': 'Hoje',
+  'cons.range24h': '24h',
+  'cons.range7d': '7d',
+  'cons.range14d': '14d',
+  'cons.range30d': '30d',
+  'cons.rangeAll': 'Tudo',
+  'cons.rangeCustom': 'Personalizado',
+  'cons.rangeAria': 'Período das estatísticas de uso',
+  'cons.applyFilter': 'Aplicar',
+  'cons.rangeTo': 'até',
+  'cons.overviewTitle': 'Resumo de uso',
+  'cons.totalTokens': 'Total de tokens',
+  'cons.estCost': 'Custo est.',
+  'cons.cacheHitRate': 'Acerto de cache',
+  'cons.callsCount': '{calls} chamadas',
+  'cons.cacheHitTokens': 'Acerto {tokens}',
+  'cons.newInput': 'Nova entrada',
+  'cons.uncachedInput': 'Entrada sem cache',
+  'cons.cacheRead': 'Leitura de cache',
+  'cons.savedCost': 'Economizado {cost}',
+  'cons.outputUsage': 'Saída',
+  'cons.replyAndThink': 'Pensam. {think} · Resp. {resp}',
+  'cons.trendTitle': 'Tendência de uso',
+  'cons.allTime': 'Todo o período',
+  'cons.trendHeatmapHint': 'Diário ({days}d) · Passe o mouse para detalhes',
+  'cons.trendPointsHintHourly': 'Por hora ({points} pts) · Passe o mouse para detalhes',
+  'cons.trendPointsHintDaily': 'Diário ({points} pts) · Passe o mouse para detalhes',
+  'cons.topModels': 'Principais modelos',
+  'cons.clientSources': 'Origens de cliente',
+  'cons.monthlyTitle': 'Detalhamento mensal',
+  'cons.monthLabel': 'M{m}',
+  'cons.monthFullLabel': 'M{m}/{year}',
+  'cons.hoverModelsHint': 'Passe o mouse para ver modelos',
+  'cons.otherModelsCount': 'Outros ({count})',
+  'cons.legInput': 'Entrada',
+  'cons.legCache': 'Cache',
+  'cons.legOutput': 'Saída',
+  'cons.legThinking': 'Pens.',
+  'cons.footInput': 'Ent ',
+  'cons.footCache': 'Cache ',
+  'cons.footOutput': 'Saí ',
+  'cons.footThinking': 'Pens ',
+  'cons.footCalls': 'Cham ',
+
+  // Steps Detail View & Step Column Registry
+  'steps.title': 'Registro de etapas',
+  'steps.tabSteps': 'Etapas ({count})',
+  'steps.tabStepsFiltered': 'Etapas ({filtered}/{total})',
+  'steps.tabModels': 'Análises',
+  'steps.allAgents': 'Todos os agentes',
+  'steps.allModels': 'Todos os modelos',
+  'steps.selectModel': 'Selecionar modelo',
+  'steps.unitAgent': 'agentes',
+  'steps.unitModel': 'modelos',
+  'steps.lineTitle': 'Linha do tempo da sessão',
+  'steps.fitTitle': 'Ajuste de tendência',
+  'steps.modelsTitle': 'Resumo por modelo',
+  'steps.modelsEmpty': 'Nenhuma chamada de modelo no escopo atual',
+  'steps.metricTotalTokens': 'Tokens',
+  'steps.metricContext': 'Contexto',
+  'steps.metricTps': 'TPS',
+  'steps.metricTtft': 'TTFT',
+  'steps.metricCache': 'Cache',
+  'steps.metricCost': 'Custo',
+  'steps.badgeBackAll': 'Clique para voltar a Todos os agentes',
+  'steps.badgeFilterAgent': 'Clique para filtrar {agent} (Ctrl/Shift+clique para multiseleção)',
+  'steps.ctxTitle': 'Contexto {ctx} · Pensamento {think} · Resposta {resp}',
+  'steps.ioCacheTitle': 'Nova ent. {inPart} · Saída {outPart} · Cache lido {cachePart}',
+  'steps.tokSeg.context.th': 'Ctx',
+  'steps.tokSeg.context.tip': 'Contexto',
+  'steps.tokSeg.in.th': 'Ent',
+  'steps.tokSeg.in.tip': 'Nova entrada',
+  'steps.tokSeg.out.th': 'Saí',
+  'steps.tokSeg.out.tip': 'Saída',
+  'steps.tokSeg.cache.th': 'Cache',
+  'steps.tokSeg.cache.tip': 'Leitura de cache',
+  'steps.tokSeg.think.th': 'Pens',
+  'steps.tokSeg.think.tip': 'Pensamento',
+  'steps.tokSeg.reply.th': 'Resp',
+  'steps.tokSeg.reply.tip': 'Resposta',
+  'steps.tokSeg.total.th': 'Total',
+  'steps.tokSeg.total.tip': 'Total',
+  'steps.modelCallsShare': '{calls} chamadas · {pct}%',
+  'steps.modelCallsOnly': '{calls} chamadas',
+  'steps.modelsSummaryPrefix': '{count} modelos · ',
+  'steps.modelPerfFoot': 'Méd {tps} · TTFT {ttft} · Cache {cache}%',
+  'steps.modelSplitFoot': 'Ent {inTok} · Cache {cacheTok} · Pens {thinkTok} · Saí {respTok}',
+  'steps.fitActiveCardTitle': '{title} (Ativo no gráfico; Ctrl/Shift+clique para comparar)',
+  'steps.fitInactiveCardTitle': 'Clique para inspecionar {text} no gráfico (Ctrl/Shift+clique para comparar)',
+  'steps.turnMediaOnly': '[Anexo de mídia]',
+  'steps.turnMediaSuffix': '[Mídia]',
+  'steps.anomalyTag.timeout': 'TO{n}',
+  'steps.anomalyTag.rate_limit': '429×{n}',
+  'steps.anomalyTag.capacity': '503×{n}',
+  'steps.anomalyTag.capacitySingle': '503',
+  'steps.anomalyTag.disconnect': 'Queda{n}',
+  'steps.anomalyTag.upstream': '500×{n}',
+  'steps.anomalyTag.upstreamSingle': '500',
+  'steps.anomalyTag.model_output': 'Erro{n}',
+  'steps.anomalyTag.safety': 'Seg{n}',
+  'steps.anomalyTag.auth_or_model': 'Rej{n}',
+  'steps.anomalyTag.error': 'Err{n}',
+  'steps.anomalyTag.mixed': 'Aviso{n}',
+  'steps.anomalyKind.timeout': 'Tempo esgotado de stream / conexão',
+  'steps.anomalyKind.rate_limit': '429 Limite de taxa / cota atingida',
+  'steps.anomalyKind.capacity': '503 Sem capacidade disponível',
+  'steps.anomalyKind.disconnect': 'Conexão reiniciada / stream interrompido',
+  'steps.anomalyKind.upstream': 'Erro interno 5xx no servidor',
+  'steps.anomalyKind.model_output': 'Saída de modelo ou tool call inválida',
+  'steps.anomalyKind.safety': 'Filtro de segurança de conteúdo',
+  'steps.anomalyKind.auth_or_model': 'Requisição / modelo rejeitado',
+  'steps.anomalyKind.error': 'Erro na chamada',
+  'steps.anomalyKind.canceled': 'Cancelado pelo usuário',
+  'steps.anomalyStepTitle': '#{step} · {count} tentativas / erros',
+  'steps.anomalyDelayPart': 'Espera {sec}s',
+  'steps.compactionStepTitle': '#{step} · Compactação automática',
+  'steps.compactionSummaryRow': 'Entrada {input} → Resumo {output}',
+  'steps.compactionDetailHint': 'Etapa automática de compactação de contexto acionada para resumir o histórico e liberar espaço na janela',
+  'steps.compactionAnomalyHint': 'Esta etapa também é uma compactação automática',
+  'steps.anomalyTerminalTag': 'Interrompido',
+  'steps.anomalyModelTitle': '{model} · {count} tentativas / erros',
+  'steps.anomalyModelSub': '{steps} etapas afetadas',
+  'steps.anomalyModelKindRow': '{kind}: {count}',
+  'steps.anomalyModelClickHint': 'Clique para filtrar etapas com anomalias',
+  'steps.anomalySummaryMeta': '{count} tentativas/erros ({steps} etapas)',
+  'steps.anomalyFilterLabel': 'Somente anomalias ({count})',
+  'steps.anomalyFilterAll': 'Mostrar todas as etapas',
+
+  // Step Table Columns (Headers & Option Labels)
+  'stepCol.step.th': 'Etapa',
+  'stepCol.step.opt': 'Número da etapa (#)',
+  'stepCol.time.th': 'Hora',
+  'stepCol.time.opt': 'Horário (HH:mm:ss)',
+  'stepCol.model.th': 'Modelo',
+  'stepCol.model.opt': 'Modelo',
+  'stepCol.tps.th': 'Veloc.',
+  'stepCol.tps.opt': 'Velocidade de saída (TPS)',
+  'stepCol.ttft.th': 'TTFT',
+  'stepCol.ttft.opt': 'Primeiro token (TTFT)',
+  'stepCol.duration.th': 'Tempo(s)',
+  'stepCol.duration.opt': 'Duração total (s)',
+  'stepCol.tokens_combo.th': 'Ctx / Pens / Resp',
+  'stepCol.tokens_combo.opt': 'Ctx / Pens / Resp (Combo)',
+  'stepCol.tokens_io_cache.th': 'Ent / Saí / Cache',
+  'stepCol.tokens_io_cache.opt': 'Ent / Saí / Cache (Combo)',
+  'stepCol.tokens_custom.opt': 'Combo personalizado ({fmt})',
+  'stepCol.input_tokens.th': 'Entrada',
+  'stepCol.input_tokens.opt': 'Tokens de nova entrada',
+  'stepCol.cache_tokens.th': 'CacheTok',
+  'stepCol.cache_tokens.opt': 'Tokens lidos do cache',
+  'stepCol.output_tokens.th': 'Saída',
+  'stepCol.output_tokens.opt': 'Total de tokens de saída',
+  'stepCol.cache.th': 'Cache',
+  'stepCol.cache.opt': 'Taxa de cache (%)',
+  'stepCol.cost.th': 'Custo',
+  'stepCol.cost.opt': 'Custo da etapa ($)',
+
+  // Preferences (3-Tab Modular Settings)
+  'settings.subTab.general': 'Geral',
+  'settings.subTab.structure': 'Estrutura',
+  'settings.subTab.account': 'Conta',
+  'settings.subTab.other': 'Outros',
+  'settings.account.current': 'Conta atual',
+  'settings.account.signedOut': 'Desconectado',
+  'settings.account.unknown': 'Status da conta indisponível',
+  'settings.account.email': 'E-mail da conta',
+  'settings.account.credential': 'Credencial OAuth',
+  'settings.account.importHint': 'Cole um refresh token do Antigravity ou JSON OAuth contendo refresh_token. O e-mail da conta é verificado e a credencial é criptografada neste dispositivo.',
+  'settings.account.save': 'Importar credencial',
+  'settings.account.capture': 'Salvar credencial atual',
+  'settings.account.reload': 'Atualizar lista',
+  'settings.account.switch': 'Trocar',
+  'settings.account.remove': 'Remover',
+  'settings.account.active': 'Em uso',
+  'settings.account.written': 'Credencial gravada',
+  'settings.account.pending': 'A credencial para {email} foi gravada. Se o Antigravity permanecer na conta anterior, reabra o aplicativo.',
+  'settings.account.savedCredentials': 'Credenciais salvas',
+  'settings.account.empty': 'Nenhuma credencial salva.',
+  'settings.account.loading': 'Carregando credenciais salvas…',
+  'settings.account.saved': 'Credencial salva.',
+  'settings.account.removed': 'Credencial salva removida.',
+  'settings.account.switched': 'Conta alternada. Atualizando a cota atual.',
+  'settings.account.switching': 'Substituindo a credencial e confirmando a conta ativa…',
+  'settings.account.verifying': 'Verificando o titular da credencial…',
+  'settings.account.loadQuota': 'Verificar cota',
+  'settings.account.loadingQuota': 'Verificando cota para esta credencial…',
+  'settings.account.emptyCredentialQuota': 'Não há pools de cota para exibir nesta conta.',
+  'settings.account.quota': 'Cota restante por pool',
+  'settings.account.quota5h': '5 horas {percent}%',
+  'settings.account.quotaWeekly': 'Semanal {percent}%',
+  'settings.account.noQuota': 'Os pools de cota estão indisponíveis para a conta atual.',
+  'settings.account.quotaStale': 'Falha ao atualizar a cota. Exibindo os últimos dados da conta atual.',
+  'settings.account.unsupported': 'A troca de credenciais atualmente oferece suporte ao login compartilhado do Antigravity no Windows.',
+  'settings.account.invalidEmail': 'Selecione uma conta salva primeiro.',
+  'settings.account.invalidCredential': 'Informe uma credencial OAuth do Antigravity válida para uma conta pessoal.',
+  'settings.account.credentialTooLarge': 'A credencial excede o limite de 2560 bytes do Gerenciador de Credenciais do Windows.',
+  'settings.account.notFound': 'Esta credencial foi removida. Atualize a lista.',
+  'settings.account.noCurrentCredential': 'A credencial compartilhada da conta atual está indisponível.',
+  'settings.account.busy': 'Outra janela está atualizando as credenciais. Tente novamente em instantes.',
+  'settings.account.storeFailed': 'Falha na operação da credencial. Tente novamente.',
+  'settings.account.rollbackFailed': 'Falha ao gravar e restaurar a credencial. Verifique a conta ativa no Antigravity antes de continuar.',
+  'settings.account.credentialAccessDenied': 'O Windows negou acesso ao Gerenciador de Credenciais. Abra o Antigravity na sua sessão do Windows e tente novamente.',
+  'settings.account.credentialChanged': 'Esta credencial foi atualizada em outra janela. Atualize a lista e tente novamente.',
+  'settings.account.credentialRejected': 'O Google rejeitou esta credencial. Verifique se o refresh token ainda é válido.',
+  'settings.account.identityMismatch': 'A credencial pertence a outra conta. Importe a credencial novamente.',
+  'settings.account.oauthClientUnavailable': 'Não foi possível ler a configuração local do cliente OAuth do Antigravity.',
+  'settings.account.oauthUnavailable': 'A verificação OAuth do Google está indisponível. Verifique sua conexão e tente novamente.',
+  'settings.account.quotaUnavailable': 'A cota desta conta está indisponível. Tente novamente em instantes.',
+  'settings.subTab.aria': 'Abas de categorias de ajustes',
+  'settings.saving': 'Salvando…',
+  'settings.saved': 'Salvo',
+  'settings.saveFailed': 'Falha ao salvar',
+  'settings.resetDone': 'Restaurado ao padrão',
+  'settings.resetBtn': 'Restaurar',
+
+  // Preferences -> General Tab
+  'settings.gen.appearanceTitle': 'Interface e aparência',
+  'settings.gen.language': 'Idioma',
+  'settings.gen.langEn': 'English',
+  'settings.gen.langPt': 'Português (BR)',
+  'settings.gen.langAuto': 'Seguir sistema',
+  'settings.gen.themeAccent': 'Cor de destaque',
+  'settings.gen.accentHost': 'Host',
+  'settings.gen.accentBlue': 'Azul',
+  'settings.gen.accentEmerald': 'Esmeralda',
+  'settings.gen.accentAmber': 'Âmbar',
+  'settings.gen.accentViolet': 'Violeta',
+  'settings.gen.accentCyan': 'Ciano',
+  'settings.gen.accentRose': 'Rosa',
+  'settings.gen.fontScale': 'Tamanho da fonte',
+  'settings.gen.fontSm': 'Pequena',
+  'settings.gen.fontMd': 'Padrão',
+  'settings.gen.fontLg': 'Grande',
+  'settings.gen.fontXl': 'Extra grande',
+  'settings.gen.fontHint': 'Ajusta a escala de tipografia do painel lateral mantendo a cápsula compacta',
+  'settings.gen.modernUi': 'UI Moderna',
+  'settings.gen.modernUiOff': 'Desligada',
+  'settings.gen.modernUiOn': 'Ligada',
+  'settings.gen.modernUiHint': 'Remove a maioria das bordas em favor de superfícies tonais suaves e animações fluidas',
+  'settings.gen.updateTitle': 'Atualizações e preços',
+  'settings.gen.updateMode': 'Política de atualização',
+  'settings.gen.updateManual': 'Apenas notificar, atualizar manualmente',
+  'settings.gen.updateAuto': 'Atualização automática',
+  'settings.gen.updateOff': 'Desativar atualizações',
+  'settings.gen.pricingLabel': 'Catálogo de preços',
+  'settings.gen.versionLabel': 'Versão atual',
+  'settings.gen.modelCount': '{count} modelos',
+  'settings.gen.srcRemote': 'Sincronizado na nuvem',
+  'settings.gen.srcLocal': 'Arquivo local',
+  'settings.gen.srcDefault': 'Integrado',
+  'settings.gen.syncAt': 'Sincronizado em {time}',
+  'settings.gen.pubAt': 'Publicado em {date}',
+  'settings.gen.defaultPricing': 'Catálogo padrão',
+  'settings.gen.syncBtn': 'Sincronizar preços',
+  'settings.gen.syncingBtn': 'Sincronizando…',
+  'settings.gen.syncingMsg': 'Sincronizando catálogo de preços…',
+  'settings.gen.syncedMsg': 'Preços atualizados ({count} modelos)',
+  'settings.gen.syncFallbackMsg': 'Tempo esgotado, usando catálogo local',
+  'settings.gen.checkUpdateBtn': 'Verificar atualizações',
+  'settings.gen.checkingBtn': 'Verificando…',
+  'settings.gen.checkingMsg': 'Verificando atualizações…',
+  'settings.gen.checkFailedMsg': 'Falha na verificação: {err}',
+  'settings.gen.upToDateMsg': 'Já está atualizado (v{ver})',
+  'settings.gen.downloadingMsg': 'Baixando atualização…',
+  'settings.gen.updatedRestartMsg': 'Atualização concluída, reiniciando painel…',
+  'settings.gen.updateSkippedMsg': 'Atualização não aplicada',
+  'settings.gen.updateFailedMsg': 'Falha na atualização',
+  'settings.gen.canUpgradeSub': 'v{ver} disponível ({mode})',
+  'settings.gen.upgradeToBtn': 'Atualizar para v{ver}',
+  'settings.gen.manualUpgradeBtn': 'Atualizar v{ver}',
+  'settings.gen.updateOffSub': 'Notificações desligadas ({mode})',
+  'settings.gen.latestSub': 'Atualizado ({mode})',
+
+  // Preferences -> Structure Tab
+  'settings.str.thirdTabAria': 'Abas de estrutura',
+  'settings.str.tabMount': 'Acoplamento e barra',
+  'settings.str.tabHover': 'Visão flutuante',
+  'settings.str.tabOverview': 'Ao vivo',
+  'settings.str.tabSteps': 'Tabela de etapas',
+  'settings.str.previewMountSidebarHint': 'A cápsula de janela fica desativada no modo Somente barra lateral; volte para Barra superior ou Composer para aplicá-la',
+  'settings.str.mountSection': 'Acoplamento e cápsula',
+  'settings.str.mountBadge': '{count}/5 slots',
+  'settings.str.mountMode': 'Modo de exibição',
+  'settings.str.mountDual': 'Duplo (Barra superior + Lateral)',
+  'settings.str.mountComposer': 'Composer (Caixa de entrada + Lateral)',
+  'settings.str.mountSidebar': 'Somente barra lateral',
+  'settings.bridge.restartTitle': 'Parâmetro configurado — Reinicie uma vez para ativar',
+  'settings.bridge.ctxRestartTitle': 'Parâmetro configurado — Reinicie para aplicar limite de contexto',
+  'settings.bridge.restartBody': 'Adicionado --remote-debugging-port=0 automaticamente aos atalhos e inicialização. Clique abaixo para encerrar processos em segundo plano e reiniciar agora.',
+  'settings.bridge.readOnlyTitle': 'Atalho público protegido — Autorize e reinicie',
+  'settings.bridge.ctxReadOnlyTitle': 'Atalho público protegido — Autorize para aplicar limite de contexto',
+  'settings.bridge.readOnlyBody': 'Entradas pessoais configuradas, mas atalhos públicos exigem permissão de administrador. Clique abaixo e aprove o prompt do sistema.',
+  'settings.bridge.macTitle': 'Porta de depuração inativa — Reinicie para ativar',
+  'settings.bridge.ctxMacTitle': 'Porta de depuração inativa — Reinicie para limite de contexto',
+  'settings.bridge.noPortTitle': 'Porta local ausente — Acoplamento de janela inativo',
+  'settings.bridge.unreachableTitle': 'Porta local indisponível — Acoplamento inativo',
+  'settings.bridge.ctxTitle': 'Porta local inativa — Limite de contexto pendente',
+  'settings.bridge.guideWin': 'O Antigravity 2.33.0+ não abre porta de depuração por padrão. Clique em "Reiniciar e ativar" para configurar os atalhos e reiniciar.',
+  'settings.bridge.guideMac': 'Devido à assinatura no macOS, aberturas pelo Dock omitem a porta de depuração. Clique abaixo para reiniciar com o parâmetro ativo até encerrar com Cmd+Q.',
+  'settings.bridge.guideLinux': 'O Antigravity 2.33.0+ não abre porta de depuração por padrão. Clique em "Reiniciar e ativar" para atualizar seu lançador .desktop.',
+  'settings.bridge.relaunchBtn': 'Reiniciar e ativar',
+  'settings.bridge.relaunchAuthBtn': 'Autorizar e reiniciar',
+  'settings.bridge.relaunchingBtn': 'Reiniciando host...',
+  'settings.bridge.relaunchFailed': 'Falha ao reiniciar — feche pela bandeja e tente novamente',
+  'settings.bridge.dismissAria': 'Dispensar aviso por enquanto',
+  'settings.bridge.copyFlagBtn': 'Copiar {cmd}',
+  'settings.bridge.copiedBtn': 'Copiado para a área de transferência',
+  'settings.str.popoverWidthLabel': 'Largura do popover',
+  'settings.str.popoverWidthAuto': 'Ajuste automático',
+  'settings.str.popoverWidthCustom': 'Personalizada',
+  'settings.str.popoverWidthHint': 'O ajuste automático expande tabelas largas como Registro de etapas; Personalizada aceita 440–1080 px',
+  'settings.str.multiToggle': 'Pílula de sessões ativas',
+  'settings.str.cliCapsuleToggle': 'Barra inferior do CLI',
+  'settings.str.show': 'Mostrar',
+  'settings.str.hide': 'Ocultar',
+  'settings.str.on': 'Ligado',
+  'settings.str.off': 'Desligado',
+  'settings.str.capsuleSlotsLabel': 'Métricas e ordem da cápsula (Esq → Dir, 1–5, arrastável)',
+  'settings.str.addCapsuleSlot': 'Adicionar slot ({count}/{max})',
+  'settings.str.hoverSection': 'Resumo ao passar o mouse',
+  'settings.str.hoverBadgeOff': 'Desligado',
+  'settings.str.hoverBadgeCount': '{count} módulos',
+  'settings.str.hoverModulesLabel': 'Módulos do popup flutuante (Topo → Base, 0–4, arrastável)',
+  'settings.str.hoverEmptyHint': 'Resumo flutuante desativado (clique na cápsula para abrir o painel completo)',
+  'settings.str.addHoverModule': 'Adicionar módulo ({count}/{max})',
+  'settings.str.overviewSection': 'Layout da visão ao vivo',
+  'settings.str.overviewBadge': '{modCount} mód · {metCount} células',
+  'settings.str.overviewModulesLabel': 'Módulos e ordem (Topo → Base, mín. 1, arrastável)',
+  'settings.str.addOverviewModule': 'Adicionar módulo ({count}/{max})',
+  'settings.str.overviewMetricsLabel': 'Métricas da 1ª linha (Esq → Dir, 1–4, arrastável)',
+  'settings.str.overviewMetricsInactiveHint': '"Métricas ao vivo" está oculto aqui; estas células ainda valem para a visão flutuante ou se reativado',
+  'settings.str.addOverviewMetric': 'Adicionar métrica ({count}/{max})',
+  'settings.str.quotaPaceToggle': 'Indicador de ritmo da cota',
+  'settings.str.quotaPaceHint': 'Exibe o marcador de uso esperado no ciclo e a variação de ritmo nas barras de 5h e semanal',
+  'settings.str.stepsSection': 'Colunas da tabela de etapas',
+  'settings.str.stepsBadge': '{count} col.',
+  'settings.str.stepTurnRailToggle': 'Guia de turnos e prévia',
+  'settings.str.stepAgentBadgeToggle': 'Selo de agente principal/sub',
+  'settings.str.stepSpeedColorToggle': 'Cores por velocidade',
+  'settings.str.stepTokenComboLabel': 'Formato personalizado de tokens',
+  'settings.str.stepTokenComboPlaceholder': 'ex: context:new:cache ou in:out:cache',
+  'settings.str.stepTokenComboHint': 'Tokens: context, in/new, out, cache, think, reply, total — separados por : ou / (1–4 itens)',
+  'settings.str.stepsColsLabel': 'Colunas visíveis em "Etapas" (Esq → Dir, mín. 2, arrastável)',
+  'settings.str.addStepCol': 'Adicionar coluna ({count}/{max})',
+  'settings.slot.dragHint': 'Arraste para cima ou para baixo para reordenar',
+  'settings.slot.moveUp': 'Mover antes',
+  'settings.slot.moveDown': 'Mover depois',
+  'settings.slot.remove': 'Remover item',
+  'settings.slot.minReached': 'Mantenha ao menos {min}',
+  'settings.slot.alreadyAdded': 'Adicionado',
+  'settings.mock.sessionTitle': 'Refatorar middleware de auth e cache de sessão',
+  'settings.mock.subRole': 'Auditoria API',
+  'settings.mock.turnPromptLatest': 'Corrigir condição de corrida ao renovar token e adicionar testes',
+  'settings.mock.turnPromptPrev': 'Revisar guardas de rota e limpeza de sessões expiradas',
+
+  // Preferences -> Other Tab
+  'settings.oth.modelTitle': 'Exibição de modelo',
+  'settings.oth.modelFormat': 'Formato do nome',
+  'settings.oth.modelShort': 'Apelido curto (ex: argon-4-high)',
+  'settings.oth.modelUpstream': 'ID bruto (ex: gemini-3.8-flash-n)',
+  'settings.oth.modelUpstreamCompact': 'ID enxuto (oculta gemini- / claude- / gpt-)',
+  'settings.oth.orchFormat': 'ID da série Orchestrator',
+  'settings.oth.orchCompact': 'Apelido compacto (ex: orchestrator-argon)',
+  'settings.oth.orchFull': 'ID completo (ex: gemini-pro-orchestrator)',
+  'settings.oth.baselineTitle': 'Limites de contexto por modelo',
+  'settings.oth.ctxRiskTitle': 'Aviso de risco de alteração não oficial',
+  'settings.oth.ctxRiskBody': 'O Google não autorizou alterar limites de contexto no Antigravity App / IDE. Modificar limites pode resultar na suspensão do acesso ao Antigravity, serviços GCP ou conta Google; ao habilitar você assume todos os riscos.',
+  'settings.oth.ctxRiskAcceptBtn': 'Entendo o risco, desbloquear',
+  'settings.oth.ctxModel': 'Modelo',
+  'settings.oth.ctxBaselineLabel': 'Limite da janela de contexto',
+  'settings.oth.ctxChooseModel': 'Escolher modelo',
+  'settings.oth.ctxDefault': 'Seguir ajustes do host',
+  'settings.oth.ctxExpensive': '{name} (consome mais cota)',
+  'settings.oth.ctxTokens': '{count} tokens',
+  'settings.oth.ctxUnavailable': '{name} (indisponível no momento)',
+  'settings.oth.ctxConfigured': '{name} · Definido',
+  'settings.oth.ctxConfiguredReported': '{name} · Definido / Último visto {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · Aguardando reinício',
+  'settings.oth.ctxDefaultReported': 'Padrão · Último visto {name}',
+  'settings.oth.ctxReported': 'O host informou {name} na última requisição.',
+  'settings.oth.ctxMixed': 'Limites diferentes por nível de raciocínio',
+  'settings.oth.ctxMixedHint': 'Os níveis de raciocínio deste modelo possuem limites salvos diferentes. Escolha um limite para unificá-los.',
+  'settings.oth.ctxBaselineHint': 'Níveis de raciocínio do mesmo modelo compartilham um limite. Os limites salvos são reaplicados na inicialização.',
+  'settings.oth.ctxNoModels': 'O host ainda não retornou modelos disponíveis.',
+  'settings.oth.ctxNoOptions': 'O host não forneceu opções de contexto para este modelo. Seguir ajustes do host é a única opção.',
+  'settings.oth.maintTitle': 'Cache e restauração',
+  'settings.oth.cacheLabel': 'Cache local de trajetórias',
+  'settings.oth.cacheDesc': 'Limpar registros em cache e reescanear todas as transcrições de conversa imediatamente',
+  'settings.oth.rebuildBtn': 'Reconstruir cache',
+  'settings.oth.rebuildingBtn': 'Reconstruindo…',
+  'settings.oth.rebuildDone': 'Cache de trajetórias reconstruído',
+  'settings.oth.rebuildFailed': 'Falha ao reconstruir o cache',
+  'settings.oth.resetLabel': 'Padrões de fábrica',
+  'settings.oth.resetDesc': 'Restaurar todas as preferências das abas Geral, Estrutura e Outros para os valores padrão',
+  'settings.oth.resetAllBtn': 'Restaurar tudo ao padrão',
+  'settings.oth.resetConfirmBtn': 'Clique novamente para confirmar',
+  'settings.oth.resettingBtn': 'Restaurando…',
+  'settings.oth.resetAllDone': 'Todas as preferências foram restauradas',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': 'Executar comando',
+  'live.act.read_file': 'Ler arquivo',
+  'live.act.edit_file': 'Editar arquivo',
+  'live.act.write_file': 'Gravar arquivo',
+  'live.act.grep_search': 'Buscar no código',
+  'live.act.find_file': 'Localizar arquivos',
+  'live.act.read_url': 'Ler página web',
+  'live.act.search_web': 'Pesquisar na web',
+  'live.act.invoke_subagent': 'Chamar subagente',
+  'live.act.send_message': 'Mensagem ao subagente',
+  'live.act.manage_subagents': 'Gerenciar subagentes',
+  'live.act.swarm_add': 'Criar worker',
+  'live.act.swarm_title': 'Nomear swarm',
+  'live.act.swarm_kill': 'Encerrar worker',
+  'live.act.swarm_model': 'Trocar modelo do worker',
+  'live.act.swarm_channel': 'Canal do swarm',
+  'live.act.swarm_status': 'Verificar swarm',
+  'live.act.post_message': 'Publicar no mural',
+  'live.act.read_board': 'Ler mural',
+  'live.act.swarm_wait': 'Em espera no mural',
+  'live.act.manage_task': 'Gerenciar tarefa',
+  'live.act.schedule': 'Agendar tarefa',
+  'live.act.ask_question': 'Aguardando escolha',
+  'live.act.search_marketplace': 'Buscar plugins',
+  'live.act.mcp_tool': 'Chamar ferramenta MCP',
+  'live.act.tool_call': 'Chamar ferramenta',
+  'live.act.thinking': 'Pensando',
+  'live.act.compacting': 'Compactando contexto',
+  'live.act.responding': 'Respondendo',
+  'live.act.waiting_subagent': 'Aguardando subagente',
+  'live.act.waiting_swarm': 'Aguardando swarm',
+  'live.act.swarm_waiting': 'Aguardando',
+  'live.act.swarm_killed': 'Encerrado',
+  'live.act.starting': 'Iniciando',
+  'live.act.done': 'Concluído',
+  'live.act.awaitingApproval': 'Aguardando aprovação · {label}',
+  'live.act.compactionResuming': 'Compactação concluída, retomando raciocínio',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': 'Nenhuma etapa plotável no escopo atual',
+  'chart.step.excluded': 'Excluída',
+  'chart.step.zeroSteps': '0 etapas',
+  'chart.step.stepAdd': 'Etapa +{tokens}',
+  'chart.step.ioSplit': 'Ent {inTok} · Cache {cacheTok} · Saí {outTok}',
+  'chart.step.cacheShort': 'Cache {pct}%',
+  'chart.step.compactionCheckpoint': 'Checkpoint de compactação',
+  'chart.step.cacheHitOut': 'Cache {pct}% · Saí +{outTok}',
+  'chart.step.ttftShort': 'TTFT {sec}s',
+  'chart.step.outAndCtx': 'Saí {outTok} · Contexto {ctxTok}',
+  'chart.step.compactionStep': 'Etapa de compactação',
+  'chart.step.noSpeedSample': 'Sem amostra de velocidade',
+  'chart.step.ctxAndCache': 'Contexto {ctxTok} · Cache {pct}%',
+  'chart.step.noTtftSample': 'Sem amostra de TTFT',
+  'chart.step.cumCost': 'Total {cost}',
+  'chart.step.cacheAndStepTok': 'Cache {pct}% · Etapa {tokens}',
+  'chart.step.noSamples': 'Sem amostras',
+  'chart.step.peakShort': 'Pico {val}',
+  'chart.step.peakPill': 'Pico {tag} · {val}',
+  'chart.step.stepsCount': '{count} etapas',
+  'chart.step.multiPrefix': '{count} modelos · ',
+  'chart.step.sumTokens': '{prefix}Total {tokens}',
+  'chart.step.peakTokens': '{prefix}Pico {tokens}',
+  'chart.step.currentCtx': 'Atual {tokens}',
+  'chart.step.meanTps': '{prefix}Méd {val} tok/s',
+  'chart.step.meanSec': '{prefix}Méd {val}s',
+  'chart.step.noValidSamples': 'Sem amostras válidas',
+  'chart.step.sumCost': '{prefix}Total {cost}',
+  'chart.fit.empty': 'Sem amostras de regressão válidas para este modelo',
+  'chart.fit.loess': 'Ajuste LOESS',
+  'chart.fit.olsLinear': 'OLS Linear',
+  'chart.fit.olsReg': 'Reg OLS',
+  'chart.fit.observed': 'Observado',
+  'chart.fit.tipFit': 'Ajuste {val}',
+  'chart.fit.tipObs': 'Obs {val}',
+  'chart.fit.zeroSamples': '0 amostras',
+  'chart.fit.peerMean': '{label} Méd {val}',
+  'chart.fit.peerCompare': 'Comparar: {peers}',
+  'chart.fit.curvesCount': '{count} curvas de ajuste',
+  'chart.fit.multiBadge': '{steps} etapas · {models} modelos',
+  'chart.fit.singleBadge': '{steps} etapas · Méd {mean}',
+  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · DP = ±{sd}',
+  'chart.trend.hmMonthYear': '{month}/{yy}',
+  'chart.trend.hmMonthOnly': 'M{month}',
+  'chart.trend.wdayMon': 'S',
+  'chart.trend.wdayWed': 'Q',
+  'chart.trend.wdayFri': 'S',
+  'chart.trend.wdaySun': 'D',
+  'chart.trend.hmAria': 'Mapa de calor de uso diário',
+  'chart.trend.hmLess': 'Menos',
+  'chart.trend.hmMore': 'Mais',
+  'chart.trend.hmActivePeak': 'Ativos {active}/{total}d · Pico {label} · {tokens}',
+  'chart.trend.hmActiveZero': 'Ativos 0/{total}d',
+  'chart.trend.peakPill': 'Pico {label} · {tokens}',
+});
+return { I18N_MESSAGES_PT_BR };
+})();
+
+// --- src/i18n/index.js ---
+const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, isPortugueseLocale, t } = (() => {
+/**
+ * @fileoverview Reactive lightweight i18n engine (`en-US` / `pt-BR` / `auto`).
+ * Default fallback is `'en-US'` with automatic Portuguese detection for `pt*` system locales.
  */
 
 
 const I18N_DICTIONARIES = Object.freeze({
-  'zh-CN': I18N_MESSAGES_ZH_CN,
   'en-US': I18N_MESSAGES_EN_US,
+  'pt-BR': I18N_MESSAGES_PT_BR,
 });
 
 function normalizeI18nLanguage(raw) {
@@ -2503,12 +2503,12 @@ function normalizeI18nLanguage(raw) {
 function detectHostSystemLocale() {
   try {
     if (typeof navigator !== 'undefined' && navigator.language) {
-      return String(navigator.language).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-US';
+      return String(navigator.language).toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US';
     }
   } catch {
     // Ignore environment navigator read errors
   }
-  return 'zh-CN';
+  return 'en-US';
 }
 
 const i18nStore = createReactiveStore({
@@ -2527,11 +2527,15 @@ function setI18nLanguage(rawLang) {
 }
 
 function getEffectiveLocale() {
-  return i18nStore.getState().locale || 'zh-CN';
+  return i18nStore.getState().locale || 'en-US';
 }
 
 function isEnglishLocale() {
   return getEffectiveLocale() === 'en-US';
+}
+
+function isPortugueseLocale() {
+  return getEffectiveLocale() === 'pt-BR';
 }
 
 /**
@@ -2543,14 +2547,14 @@ function isEnglishLocale() {
  */
 function t(key, vars = undefined) {
   const locale = getEffectiveLocale();
-  const dict = I18N_DICTIONARIES[locale] || I18N_MESSAGES_ZH_CN;
-  const template = dict[key] ?? I18N_MESSAGES_ZH_CN[key] ?? key;
+  const dict = I18N_DICTIONARIES[locale] || I18N_MESSAGES_EN_US;
+  const template = dict[key] ?? I18N_MESSAGES_EN_US[key] ?? key;
   if (!vars || typeof template !== 'string') return template;
   return template.replace(/\{(\w+)\}/g, (_, k) =>
     vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : ''
   );
 }
-return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t };
+return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, isPortugueseLocale, t };
 })();
 
 // --- src/core/appearance.js ---
@@ -3500,6 +3504,11 @@ const EN_MONTH_SHORT = Object.freeze([
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]);
 
+const PT_MONTH_SHORT = Object.freeze([
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+  'jul', 'ago', 'set', 'out', 'nov', 'dez',
+]);
+
 function formatMetric(value, unit = '') {
   if (!Number.isFinite(value)) return '—';
   const numStr = Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
@@ -3555,18 +3564,20 @@ function formatCnyApprox(usdAmount, rate = 7.2) {
 function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
-  if (isEnglishLocale()) {
-    const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
-    const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
+  if (isPortugueseLocale()) {
+    const sMon = PT_MONTH_SHORT[s.getMonth()] || '';
+    const eMon = PT_MONTH_SHORT[e.getMonth()] || '';
     if (s.getFullYear() !== e.getFullYear()) {
-      return `${sMon} ${s.getDate()}, ${s.getFullYear()} ~ ${eMon} ${e.getDate()}, ${e.getFullYear()}`;
+      return `${s.getDate()} ${sMon} ${s.getFullYear()} ~ ${e.getDate()} ${eMon} ${e.getFullYear()}`;
     }
-    return `${sMon} ${s.getDate()} ~ ${eMon} ${e.getDate()}`;
+    return `${s.getDate()} ${sMon} ~ ${e.getDate()} ${eMon}`;
   }
+  const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
+  const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
   if (s.getFullYear() !== e.getFullYear()) {
-    return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
+    return `${sMon} ${s.getDate()}, ${s.getFullYear()} ~ ${eMon} ${e.getDate()}, ${e.getFullYear()}`;
   }
-  return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
+  return `${sMon} ${s.getDate()} ~ ${eMon} ${e.getDate()}`;
 }
 
 function formatUsd(amount, { precise = false } = {}) {
@@ -4254,18 +4265,15 @@ function formatAgentBadgeText(agent) {
   if (kind === 'side_question') {
     const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
   }
   if (kind === 'swarm_worker') {
     const ord = Number(agent.agentOrdinal || agent.index || 0);
     if (ord > 0) return t('fmt.swarmBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.swarmBadgeShort');
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
-  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
   return t('fmt.subBadgeShort');
 }
 
@@ -7017,7 +7025,7 @@ const TopLongPillNav = defineComponent({
       {
         className: 'long-pill-nav',
         role: 'tablist',
-        'aria-label': '主功能视图分割导航',
+        'aria-label': 'Primary navigation',
       },
       [glider]
     );
@@ -7426,7 +7434,7 @@ const CustomSelect = defineComponent({
         icon,
         multiple = false,
         allValue = '',
-        multiUnit = isEnglishLocale() ? 'items' : '项',
+        multiUnit = t('fmt.unitItems'),
       } = getProps();
       patchClasses(rootEl, { 'is-multi': Boolean(multiple) });
       patchAttr(leadIcon, 'hidden', !icon);
@@ -7452,7 +7460,7 @@ const CustomSelect = defineComponent({
           labelText = t('fmt.selectedCount', { count: vals.length, unit: multiUnit });
           titleText = t('fmt.selectedListTitle', {
             count: vals.length,
-            names: names.join(isEnglishLocale() ? ', ' : '、'),
+            names: names.join(', '),
           });
         }
       } else {
@@ -7546,7 +7554,7 @@ const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '减少数值',
+        'aria-label': 'Decrease value',
         onClick: (e) => {
           e.preventDefault();
           applyStep(-1, e.shiftKey ? 10 : 1);
@@ -7560,7 +7568,7 @@ const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '增加数值',
+        'aria-label': 'Increase value',
         onClick: (e) => {
           e.preventDefault();
           applyStep(1, e.shiftKey ? 10 : 1);
@@ -7647,7 +7655,8 @@ const { CustomDateTimePicker } = (() => {
  */
 
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+const WEEKDAYS_EN = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const WEEKDAYS_PT = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 
 function buildCalendarDays(viewYear, viewMonth, selectedDate) {
   const firstDay = new Date(viewYear, viewMonth, 1);
@@ -7708,7 +7717,7 @@ const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '上个月',
+        'aria-label': isPortugueseLocale() ? 'Mês anterior' : 'Previous month',
         onClick: (e) => {
           e.stopPropagation();
           viewMonth -= 1;
@@ -7727,7 +7736,7 @@ const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '下个月',
+        'aria-label': isPortugueseLocale() ? 'Próximo mês' : 'Next month',
         onClick: (e) => {
           e.stopPropagation();
           viewMonth += 1;
@@ -7743,10 +7752,11 @@ const CustomDateTimePicker = defineComponent({
 
     const navBar = h('div', { className: 'dt-nav' }, [prevMonthBtn, monthTitle, nextMonthBtn]);
 
+    const weekdayLabels = isPortugueseLocale() ? WEEKDAYS_PT : WEEKDAYS_EN;
     const weekdayRow = h(
       'div',
       { className: 'dt-weekdays' },
-      WEEKDAYS.map((w) => h('span', { className: 'dt-weekday', text: w }))
+      weekdayLabels.map((w) => h('span', { className: 'dt-weekday', text: w }))
     );
 
     const daysGrid = h('div', { className: 'dt-days' });
@@ -7768,7 +7778,7 @@ const CustomDateTimePicker = defineComponent({
     }
 
     const timeRow = h('div', { className: 'dt-time-row' }, [
-      h('span', { className: 'text-muted', text: '时 / 分' }),
+      h('span', { className: 'text-muted', text: isPortugueseLocale() ? 'Hora / Min' : 'Hour / Min' }),
       h('div', { className: 'dt-time-controls' }, [
         h('div', { className: 'dt-mini-step' }, [
           h('button', {
@@ -8148,7 +8158,7 @@ const SegmentedControl = defineComponent({
       {
         className: 'segmented',
         role: 'group',
-        'aria-label': getProps().ariaLabel || '分段切换器',
+        'aria-label': getProps().ariaLabel || 'Segmented control',
       },
       [gliderEl]
     );
@@ -8533,6 +8543,46 @@ const { HEATMAP_DAYS_THRESHOLD, createTrendAreaChart } = (() => {
 
 /** 超过该自然日天数（> 90 天）时，趋势图切换为类 GitHub 每日小格子热力图 */
 const HEATMAP_DAYS_THRESHOLD = 90;
+
+const TREND_WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const TREND_WEEKDAYS_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const TREND_MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const TREND_MONTHS_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+function formatTrendSlotFullLabel(slot) {
+  const sMs = Number(slot?.startMs);
+  if (Number.isFinite(sMs) && sMs > 0) {
+    const sd = new Date(sMs);
+    if (!Number.isNaN(sd.getTime())) {
+      const isPt = getEffectiveLocale() === 'pt-BR';
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const months = isPt ? TREND_MONTHS_PT : TREND_MONTHS_EN;
+      const weekdays = isPt ? TREND_WEEKDAYS_PT : TREND_WEEKDAYS_EN;
+      const monName = months[sd.getMonth()] || '';
+      if (slot?.granularity === 'hour') {
+        const eMs = Number(slot?.endMs);
+        const ed = Number.isFinite(eMs) && eMs > sMs ? new Date(eMs) : new Date(sMs + 3600_000);
+        const startHh = `${pad2(sd.getHours())}:00`;
+        const endHh = `${pad2(ed.getHours())}:00`;
+        return isPt
+          ? `${sd.getDate()} ${monName} · ${startHh} - ${endHh}`
+          : `${monName} ${sd.getDate()} · ${startHh} - ${endHh}`;
+      }
+      const wday = weekdays[sd.getDay()] || '';
+      const nowYear = new Date().getFullYear();
+      const yearPart =
+        sd.getFullYear() !== nowYear
+          ? isPt
+            ? ` ${sd.getFullYear()}`
+            : `, ${sd.getFullYear()}`
+          : '';
+      return isPt
+        ? `${sd.getDate()} ${monName}${yearPart} (${wday})`
+        : `${monName} ${sd.getDate()}${yearPart} (${wday})`;
+    }
+  }
+  return slot?.fullLabel || slot?.label || '--';
+}
 
 let chartUidCounter = 0;
 
@@ -8956,7 +9006,7 @@ function createTrendAreaChart() {
   }
 
   function populateTooltipContent(slot) {
-    patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
+    patchText(tipTimeEl, formatTrendSlotFullLabel(slot));
     patchText(
       tipCallsEl,
       t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
@@ -9565,7 +9615,7 @@ function createTrendAreaChart() {
         const tickEl = h('span', {
           className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
           text: slot.label || '',
-          title: slot.fullLabel || slot.label || '',
+          title: formatTrendSlotFullLabel(slot),
         });
         patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
         tickEl.onclick = () => showLineHoverAtIndex(tIdx);
@@ -12198,8 +12248,8 @@ function resolveQuotaCapsuleSummary(quotas) {
   const weekly = quotas.weekly;
   const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
   const candidates = [];
-  const defaultPoolName = isEnglishLocale() ? 'Active Pool' : '当前池';
-  const wkTag = isEnglishLocale() ? 'Wk' : '周';
+  const defaultPoolName = t('quota.activePoolFallback');
+  const wkTag = t('quota.wkTag');
 
   if (activePool && Number.isFinite(Number(activePool.remainingPct))) {
     candidates.push({
@@ -12218,7 +12268,7 @@ function resolveQuotaCapsuleSummary(quotas) {
   if (!candidates.length && weekly && Number.isFinite(Number(weekly.remainingPct))) {
     candidates.push({
       pct: Number(weekly.remainingPct),
-      label: weekly.poolFamily || (isEnglishLocale() ? 'Weekly' : '周限额'),
+      label: weekly.poolFamily || t('quota.weeklyShort'),
       windowTag: wkTag,
     });
   }
@@ -17671,7 +17721,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentId: 'main',
       agentIndex: 0,
       isSubagent: false,
-      agentBadge: '主',
+      agentBadge: t('fmt.mainBadge'),
       agentLabel: t('fmt.mainAgent'),
       modelLabel: 'Gemini 4 Carbon (High)',
       modelShort: 'carbon-4-high',
@@ -17709,7 +17759,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentId: 'sub-1',
       agentIndex: 1,
       isSubagent: true,
-      agentBadge: '子1',
+      agentBadge: t('fmt.subBadge', { index: 1 }),
       agentRole: subRole,
       agentLabel: subRole,
       modelLabel: 'Gemini 3.8 Flash',
@@ -17748,13 +17798,13 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentId: 'main',
       agentIndex: 0,
       isSubagent: false,
-      agentBadge: '主',
+      agentBadge: t('fmt.mainBadge'),
       agentLabel: t('fmt.mainAgent'),
       isCompactionStep: true,
-      modelLabel: 'Gemini 4 Carbon (High) [自动压缩]',
-      modelShort: 'carbon-4-high·压缩',
+      modelLabel: 'Gemini 4 Carbon (High) [auto-compact]',
+      modelShort: 'carbon-4-high·compact',
       rawModel: 'MODEL_PLACEHOLDER_M37',
-      modelUpstream: 'gemini-4-carbon-high·压缩',
+      modelUpstream: 'gemini-4-carbon-high·compact',
       upstreamModel: 'gemini-4-carbon-high',
       tokPerSec: 46.5,
       ttftSec: 3.4,
@@ -17787,7 +17837,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentId: 'main',
       agentIndex: 0,
       isSubagent: false,
-      agentBadge: '主',
+      agentBadge: t('fmt.mainBadge'),
       agentLabel: t('fmt.mainAgent'),
       modelLabel: 'Gemini 4 Carbon (High)',
       modelShort: 'gemini-4-carbon',
@@ -17825,7 +17875,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     cascadeId: 'mock-main',
     isMain: true,
     index: 0,
-    badgeText: '主',
+    badgeText: t('fmt.mainBadge'),
     role: t('fmt.mainAgent'),
     isRunning: true,
     stepCount: 16,
@@ -17878,7 +17928,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     cascadeId: 'mock-sub-1',
     isMain: false,
     index: 1,
-    badgeText: '子1',
+    badgeText: t('fmt.subBadge', { index: 1 }),
     shortLabel: `${t('fmt.subAgent')} #1`,
     role: subRole,
     isRunning: false,
@@ -18040,7 +18090,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
           {
             cascadeId: 'mock-sub-1',
             index: 1,
-            badgeText: '子1',
+            badgeText: t('fmt.subBadge', { index: 1 }),
             shortLabel: `${t('fmt.subAgent')} #1`,
             role: subRole,
             isRunning: false,
@@ -19111,7 +19161,7 @@ return { BridgeStatusNotice };
 const { SettingsGeneralTab } = (() => {
 /**
  * @fileoverview Preferences Tab 1: `SettingsGeneralTab.js` ("常规").
- * Manages UI Language (`zh-CN` / `en-US` / `auto`), Theme Accent (`host` + 6 swatches),
+ * Manages UI Language (`en-US` / `pt-BR` / `auto`), Theme Accent (`host` + 6 swatches),
  * Panel Font Scale (`sm` / `md` / `lg` / `xl`), Pricing Sync, and Plugin Updates.
  */
 
@@ -19119,8 +19169,8 @@ const { SettingsGeneralTab } = (() => {
 function getLanguageOptions() {
   return [
     { value: 'auto', label: t('settings.gen.langAuto') },
-    { value: 'zh-CN', label: t('settings.gen.langZh') },
     { value: 'en-US', label: t('settings.gen.langEn') },
+    { value: 'pt-BR', label: t('settings.gen.langPt') },
   ];
 }
 
@@ -22099,7 +22149,6 @@ const ConsumptionView = defineComponent({
     const heroTotalTokens = h('strong', { className: 'cons-hero-num text-mono', text: '0' });
     const heroTotalCalls = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.callsCount', { calls: 0 }) });
     const heroCostUsd = h('strong', { className: 'cons-hero-cost text-mono', text: '$0.00' });
-    const heroCostCny = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: '≈ ¥0' });
 
     const cacheHitPctEl = h('strong', { className: 'cons-hero-cache text-mono', text: '0%' });
     const cacheTokensEl = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.cacheHitTokens', { tokens: 0 }) });
@@ -22142,7 +22191,7 @@ const ConsumptionView = defineComponent({
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
             estCostLabel,
-            h('div', { className: 'cons-baseline' }, [heroCostUsd, heroCostCny]),
+            h('div', { className: 'cons-baseline' }, [heroCostUsd]),
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
             h('span', { className: 'legend-left', style: 'font-size: var(--fs-md);' }, [
@@ -22948,7 +22997,6 @@ const ConsumptionView = defineComponent({
       patchText(heroTotalTokens, formatTokensPrecise(totalTokens));
       patchText(heroTotalCalls, t('cons.callsCount', { calls: acct.calls || 0 }));
       patchText(heroCostUsd, formatUsd(costUsd));
-      patchText(heroCostCny, formatCnyApprox(costUsd));
 
       patchText(cacheHitPctEl, `${Number(acct.cacheHitPct ?? 0).toFixed(1)}%`);
       patchText(cacheTokensEl, t('cons.cacheHitTokens', { tokens: formatTokensPrecise(cacheTokens) }));
@@ -23079,10 +23127,9 @@ const ConsumptionView = defineComponent({
       ]);
 
       // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与悬停分模型浮层
-      const rangeBadgeText = isEnglishLocale()
-        ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
-          t('cons.allTime')
-        : preset?.label || rangeInfo.label || t('cons.allTime');
+      const rangeBadgeText =
+        getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
+        t('cons.allTime');
       patchText(trendRangeBadge, rangeBadgeText);
       const isHourlyTrend =
         rawTrendSeries[0]?.granularity === 'hour' ||

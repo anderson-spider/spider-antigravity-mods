@@ -2,7 +2,7 @@
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
 
-export const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+export const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'en-US', 'pt-BR']);
 
 export const THEME_ACCENT_KEYS = Object.freeze([
   'host',
@@ -103,37 +103,31 @@ export const DEFAULT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
 export const STEP_TOKEN_SEGMENT_ALIASES = Object.freeze({
   context: 'context',
   ctx: 'context',
-  '上下文': 'context',
+  contexto: 'context',
   in: 'in',
   new: 'in',
   input: 'in',
-  '输入': 'in',
-  '新输入': 'in',
+  entrada: 'in',
   out: 'out',
   output: 'out',
-  '输出': 'out',
-  '总输出': 'out',
+  saida: 'out',
+  'saída': 'out',
   cache: 'cache',
   cached: 'cache',
   cache_read: 'cache',
   cacheread: 'cache',
-  '缓存': 'cache',
-  '缓存读': 'cache',
   think: 'think',
   thinking: 'think',
-  '思考': 'think',
+  pensamento: 'think',
   reply: 'reply',
   body: 'reply',
   resp: 'reply',
   response: 'reply',
   text: 'reply',
-  '正文': 'reply',
-  '回复': 'reply',
+  resposta: 'reply',
   total: 'total',
   all: 'total',
   sum: 'total',
-  '总计': 'total',
-  '总token': 'total',
 });
 
 export const POPOVER_WIDTH_MODES = Object.freeze(['auto', 'custom']);
@@ -142,10 +136,10 @@ export const MAX_POPOVER_WIDTH = 1080;
 export const DEFAULT_POPOVER_WIDTH = 580;
 
 /**
- * 归一化界面语言枚举（默认 `'auto'`，支持 `'zh-CN'` 及 `'en-US'`）。
+ * Normalizes the UI language setting (`'auto'`, `'en-US'`, or `'pt-BR'`).
  *
  * @param {unknown} lang
- * @returns {'auto'|'zh-CN'|'en-US'}
+ * @returns {'auto'|'en-US'|'pt-BR'}
  */
 export function normalizeLanguageSetting(lang) {
   const raw = String(lang ?? '').trim();
@@ -153,7 +147,7 @@ export function normalizeLanguageSetting(lang) {
   const lower = raw.toLowerCase();
   if (lower === 'auto' || lower === 'system') return 'auto';
   if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
-  if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
+  if (lower === 'pt' || lower === 'pt-br' || lower.startsWith('pt-')) return 'pt-BR';
   return 'auto';
 }
 

@@ -14,7 +14,7 @@ import {
   patchText,
   positionAnchoredPopup,
 } from '../../core/domPatch.js';
-import { isEnglishLocale, t } from '../../i18n/index.js';
+import { t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 
 function normalizeMultiSelection(rawValue, options = [], allValue = '') {
@@ -313,7 +313,7 @@ export const CustomSelect = defineComponent({
         icon,
         multiple = false,
         allValue = '',
-        multiUnit = isEnglishLocale() ? 'items' : '项',
+        multiUnit = t('fmt.unitItems'),
       } = getProps();
       patchClasses(rootEl, { 'is-multi': Boolean(multiple) });
       patchAttr(leadIcon, 'hidden', !icon);
@@ -339,7 +339,7 @@ export const CustomSelect = defineComponent({
           labelText = t('fmt.selectedCount', { count: vals.length, unit: multiUnit });
           titleText = t('fmt.selectedListTitle', {
             count: vals.length,
-            names: names.join(isEnglishLocale() ? ', ' : '、'),
+            names: names.join(', '),
           });
         }
       } else {

@@ -580,7 +580,7 @@ function cliComposeBalancedThreeColumn(leftStr, centerStr, rightStr, maxWidth) {
 /**
  * 将单槽位指标格式化为纯文本与无背景前景语义 SGR 片段。
  */
-function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true, slotSet } = {}) {
+function cliRenderSingleSlot(metricKey, slotCtx, { isPt = false, useColor = true, slotSet } = {}) {
   const hasTelemetry = slotCtx.hasTelemetry !== false;
 
   if (metricKey === 'context') {
@@ -615,12 +615,12 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
     const textVal = valid
       ? `${numVal >= 100 ? Math.round(numVal) : numVal.toFixed(1)} t/s`
       : slotCtx.isRunning
-        ? isEn
-          ? 'Gen...'
-          : '生成中...'
-        : isEn
-          ? 'Idle'
-          : '空闲';
+        ? isPt
+          ? 'Gerando...'
+          : 'Gen...'
+        : isPt
+          ? 'Ocioso'
+          : 'Idle';
     if (!useColor) return textVal;
     const color = valid
       ? `${SGR_BOLD}${cliStatusSpeedSgr(numVal)}`
@@ -635,7 +635,7 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
       hasTelemetry && Number.isFinite(Number(slotCtx.avgTps)) && Number(slotCtx.avgTps) > 0;
     const numVal = valid ? Number(slotCtx.avgTps) : 0;
     const needPrefix = slotSet?.has('tps');
-    const prefix = needPrefix ? (isEn ? 'avg ' : '均 ') : '';
+    const prefix = needPrefix ? (isPt ? 'méd ' : 'avg ') : '';
     const textVal = valid
       ? `${prefix}${numVal >= 100 ? Math.round(numVal) : numVal.toFixed(1)} t/s`
       : `${prefix}-- t/s`;
@@ -660,7 +660,7 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
         ? slotCtx.sessionCost
         : slotCtx.stepCost;
     const needPrefix =
-      metricKey === 'session_cost' && slotSet?.has('cost') ? (isEn ? 'sum ' : '总 ') : '';
+      metricKey === 'session_cost' && slotSet?.has('cost') ? (isPt ? 'tot ' : 'sum ') : '';
     const textVal = `${needPrefix}${hasTelemetry ? cliFormatCompactCost(rawVal) : '--'}`;
     if (!useColor) return textVal;
     const color =
@@ -676,7 +676,7 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
     const valid =
       hasTelemetry && slotCtx.cacheHitPct != null && Number.isFinite(Number(slotCtx.cacheHitPct));
     const numVal = valid ? Math.max(0, Math.min(100, Math.round(Number(slotCtx.cacheHitPct)))) : 0;
-    const prefix = isEn ? 'cache ' : '缓 ';
+    const prefix = 'cache ';
     const textVal = valid ? `${prefix}${numVal}%` : `${prefix}--%`;
     if (!useColor) return textVal;
     const color = valid
@@ -699,12 +699,12 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
   const quotaPct = hasTelemetry ? cliResolveQuotaPct(slotCtx.quotas, metricKey) : null;
   const textVal =
     quotaPct != null
-      ? isEn
-        ? `${quotaPct}% left`
-        : `余 ${quotaPct}%`
-      : isEn
-        ? 'Quota --'
-        : '余 --%';
+      ? isPt
+        ? `${quotaPct}% rest.`
+        : `${quotaPct}% left`
+      : isPt
+        ? 'Cota --'
+        : 'Quota --';
   if (!useColor) return textVal;
   const isDanger = quotaPct != null && quotaPct <= 15;
   const isWarn = !isDanger && quotaPct != null && quotaPct <= 30;
@@ -749,29 +749,30 @@ function cliRenderSingleSlot(metricKey, slotCtx, { isEn = false, useColor = true
  * }} [options]
  * @returns {string}
  */
-function detectCliHostLanguageIsEn() {
+function detectCliHostLocale() {
   const envLang = String(
     process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || ''
   ).trim();
   if (envLang) {
-    return !envLang.toLowerCase().startsWith('zh');
+    return envLang.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US';
   }
   try {
     const navLang = globalThis.navigator?.language;
     if (navLang) {
-      return !String(navLang).toLowerCase().startsWith('zh');
+      return String(navLang).toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US';
     }
   } catch {
     // 忽略无 navigator 环境
   }
-  return false;
+  return 'en-US';
 }
 
 export function formatCliStatusLineCapsule(slotCtx = {}, options = {}) {
   const slots = normalizeTopbarCapsuleSlots(options.slots);
   const showMulti = options.showMultiSession !== false;
   const normLang = normalizeLanguageSetting(options.language);
-  const isEn = normLang === 'auto' ? detectCliHostLanguageIsEn() : normLang === 'en-US';
+  const effectiveLocale = normLang === 'auto' ? detectCliHostLocale() : normLang;
+  const isPt = effectiveLocale === 'pt-BR';
   const useColor = options.color !== false;
   const slotSet = new Set(slots);
 
@@ -781,18 +782,19 @@ export function formatCliStatusLineCapsule(slotCtx = {}, options = {}) {
 
   let multiCore = '';
   if (showMulti) {
+    const ptActiveWord = runningCount === 1 ? 'ativo' : 'ativos';
     const labelText =
       runningCount > 0
         ? runningSubCount > 0
-          ? isEn
-            ? `${runningCount} active · ${runningSubCount} sub`
-            : `${runningCount} 运行中 · ${runningSubCount} 子`
-          : isEn
-            ? `${runningCount} active`
-            : `${runningCount} 运行中`
-        : isEn
-          ? '0 active'
-          : '0 运行中';
+          ? isPt
+            ? `${runningCount} ${ptActiveWord} · ${runningSubCount} sub`
+            : `${runningCount} active · ${runningSubCount} sub`
+          : isPt
+            ? `${runningCount} ${ptActiveWord}`
+            : `${runningCount} active`
+        : isPt
+          ? '0 ativos'
+          : '0 active';
     if (!useColor) {
       multiCore = `● ${labelText}`;
     } else {
@@ -808,7 +810,7 @@ export function formatCliStatusLineCapsule(slotCtx = {}, options = {}) {
   }
 
   const renderedSlots = slots.map((key) =>
-    cliRenderSingleSlot(key, slotCtx, { isEn, useColor, slotSet })
+    cliRenderSingleSlot(key, slotCtx, { isPt, useColor, slotSet })
   );
   const sep = useColor ? `${SGR_FG_SEP} | ${SGR_RESET}` : ' | ';
   const slotsBody = renderedSlots.join(sep);

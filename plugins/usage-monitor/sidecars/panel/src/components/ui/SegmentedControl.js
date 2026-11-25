@@ -17,7 +17,7 @@ export const SegmentedControl = defineComponent({
       {
         className: 'segmented',
         role: 'group',
-        'aria-label': getProps().ariaLabel || '分段切换器',
+        'aria-label': getProps().ariaLabel || 'Segmented control',
       },
       [gliderEl]
     );
