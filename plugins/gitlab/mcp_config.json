@@ -3,7 +3,8 @@
     "gitlab": {
       "command": "node",
       "args": [
-        "${PLUGIN_ROOT}/server/main.ts"
+        "${PLUGIN_ROOT}/server/main.ts",
+        "--data-dir=${PLUGIN_DATA}"
       ],
       "env": {
         "GITLAB_MCP_TOKENS": "${GITLAB_MCP_TOKENS}"

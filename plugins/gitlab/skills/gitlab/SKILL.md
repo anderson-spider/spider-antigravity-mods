@@ -17,6 +17,7 @@ Tools may be exposed directly or lazy-loaded via `call_mcp_tool` with `ServerNam
 - `gitlab_job_log`
 - `gitlab_label`
 - `gitlab_user`
+- `gitlab_mr_dashboard` (opens or focuses the interactive **GitLab MRs** MCP App in the side pane; pass optional `cwd`, `host`, `project`, `iid`, `state`, or `involvement`)
 
 ### Targeting a repository, host, and MR
 

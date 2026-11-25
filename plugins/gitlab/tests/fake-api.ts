@@ -1,5 +1,5 @@
 // A fake GitLab API for the pure tool tests: records each call and answers from a route table keyed `METHOD path`.
-import type { Api, Page, Query } from '../server/api.ts'
+import type { Api, GraphqlReply, Page, Query } from '../server/api.ts'
 import { GitlabError } from '../server/api.ts'
 import { makeCtx, type Ctx } from '../server/context.ts'
 
@@ -38,6 +38,7 @@ export function fakeCtx(routes: Record<string, Answer>, branch: string | null = 
     page: async (path, query) => page(answer({ method: 'GET', path, query })),
     text: async (path) => String(answer({ method: 'GET', path })),
     send: async (method, path, body) => answer({ method, path, body }),
+    graphql: async (query, variables) => answer({ method: 'POST', path: 'GRAPHQL', body: { query, variables } }) as GraphqlReply,
     url: (path) => `https://gitlab.example.com/api/v4/projects/g%2Fp${path}`,
   }
   // a clock that only moves when the code sleeps

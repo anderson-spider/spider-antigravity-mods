@@ -2,8 +2,8 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "gitlab",
   "displayName": "GitLab",
-  "version": "0.3.1",
-  "description": "Work on GitLab merge requests, pipelines, jobs, comments, draft notes, and labels on gitlab.com and self-hosted GitLab instances.",
+  "version": "0.4.0",
+  "description": "Work on GitLab merge requests, pipelines, jobs, comments, draft notes, and labels with an interactive MR Dashboard (Global sidebar & side pane) on gitlab.com and self-hosted GitLab instances.",
   "logo": "assets/logo.svg",
   "author": {
     "name": "anderson-spider",

@@ -4,7 +4,9 @@ Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and label
 
 ## Features
 
-- **Zero runtime dependencies:** native Node.js TypeScript MCP server (`server/main.ts`, Node 22.18+).
+- **Zero runtime dependencies:** native Node.js TypeScript MCP server (`server/main.ts`, Node 22.18+) serving a prebuilt self-contained MCP App HTML bundle (`ui/dist/app.html`).
+- **Interactive MR Dashboard (MCP App):** open **GitLab MRs** full-page from Antigravity's left sidebar (`global`) or beside a conversation (`aux_pane`) with resizable master-detail split, multi-MR tabs, GraphQL-enriched rows (with automatic REST fallback), qualifier search (`label:`, `author:`, `draft:`, `checks:`), `Merge readiness` sort, Saved Views, inline CI job logs, discussions & private draft notes, Unified/Split diff viewer with inline comments & `Viewed` marks, guarded Merge confirmation modal, and Agent Handoff actions in `aux_pane`.
+- **Persistent UI state:** preferences, Saved Views, and per-SHA `filesViewed` marks are stored locally in `${PLUGIN_DATA}` (never credentials or MR contents).
 - **Multi-host isolation:** map multiple GitLab hosts to separate tokens (`host=token` pairs); each token is sent only to its paired host.
 - **Smart host resolution:**
   - Inside a GitLab clone (or with an explicit `cwd`), detects host, project, and current branch from git (including `~/.ssh/config` aliases via `ssh -G`).
@@ -45,6 +47,9 @@ Tokens need `api` scope (`read_api` for read-only use). When only one host is co
 - `gitlab_job_log`: `errors` (default), `tail`, `full`
 - `gitlab_label`: `list`, `create`
 - `gitlab_user`: current token owner (`@me`) or lookup by `username`
+- `gitlab_mr_dashboard`: opens the interactive **GitLab MRs** MCP App (`global` sidebar and `aux_pane` side pane)
+
+App-only UI tools (`gitlab_ui_list`, `gitlab_ui_detail`, `gitlab_ui_diff`, `gitlab_ui_job_log`, `gitlab_ui_action`, `gitlab_ui_state`) are marked `visibility: ["app"]` so only the dashboard iframe can invoke them.
 
 Every tool accepts an optional `cwd` (absolute repository path) to override or supplement MCP workspace roots when detecting the git remote and current branch.
 
@@ -65,9 +70,10 @@ git clone https://github.com/anderson-spider/spider-antigravity-mods.git
 ln -s "$(pwd)/spider-antigravity-mods/plugins/gitlab" ~/.gemini/config/plugins/gitlab
 ```
 
-Run tests, typechecks, and strict manifest validation from `plugins/gitlab`:
+Run tests, UI build, typechecks, and strict manifest validation from `plugins/gitlab`:
 
 ```bash
+pnpm build:ui
 node --test 'tests/*.test.ts'
 pnpm typecheck
 agy plugin validate --strict .
