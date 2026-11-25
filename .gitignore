@@ -4,3 +4,5 @@ node_modules/
 .data/
 !plugins/gitlab/ui/dist/
 !plugins/gitlab/ui/dist/app.html
+!plugins/usage-monitor/mcp/dist/
+!plugins/usage-monitor/mcp/dist/dashboard.html
