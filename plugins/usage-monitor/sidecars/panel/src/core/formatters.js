@@ -3,7 +3,7 @@
  * USD estimates, countdown timers, and custom datetime displays.
  */
 
-import { isEnglishLocale, t } from '../i18n/index.js';
+import { isEnglishLocale, isPortugueseLocale, t } from '../i18n/index.js';
 import {
   normalizeModelDisplayMode,
   normalizeOrchestratorIdMode,
@@ -19,6 +19,11 @@ import {
 const EN_MONTH_SHORT = Object.freeze([
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]);
+
+const PT_MONTH_SHORT = Object.freeze([
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+  'jul', 'ago', 'set', 'out', 'nov', 'dez',
 ]);
 
 export function formatMetric(value, unit = '') {
@@ -76,18 +81,20 @@ export function formatCnyApprox(usdAmount, rate = 7.2) {
 export function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
-  if (isEnglishLocale()) {
-    const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
-    const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
+  if (isPortugueseLocale()) {
+    const sMon = PT_MONTH_SHORT[s.getMonth()] || '';
+    const eMon = PT_MONTH_SHORT[e.getMonth()] || '';
     if (s.getFullYear() !== e.getFullYear()) {
-      return `${sMon} ${s.getDate()}, ${s.getFullYear()} ~ ${eMon} ${e.getDate()}, ${e.getFullYear()}`;
+      return `${s.getDate()} ${sMon} ${s.getFullYear()} ~ ${e.getDate()} ${eMon} ${e.getFullYear()}`;
     }
-    return `${sMon} ${s.getDate()} ~ ${eMon} ${e.getDate()}`;
+    return `${s.getDate()} ${sMon} ~ ${e.getDate()} ${eMon}`;
   }
+  const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
+  const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
   if (s.getFullYear() !== e.getFullYear()) {
-    return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
+    return `${sMon} ${s.getDate()}, ${s.getFullYear()} ~ ${eMon} ${e.getDate()}, ${e.getFullYear()}`;
   }
-  return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
+  return `${sMon} ${s.getDate()} ~ ${eMon} ${e.getDate()}`;
 }
 
 export function formatUsd(amount, { precise = false } = {}) {
@@ -776,18 +783,15 @@ export function formatAgentBadgeText(agent) {
   if (kind === 'side_question') {
     const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
   }
   if (kind === 'swarm_worker') {
     const ord = Number(agent.agentOrdinal || agent.index || 0);
     if (ord > 0) return t('fmt.swarmBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.swarmBadgeShort');
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
-  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
   return t('fmt.subBadgeShort');
 }
 

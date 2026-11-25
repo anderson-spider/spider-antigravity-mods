@@ -20,7 +20,6 @@ import {
 } from '../core/domPatch.js';
 import {
   buildDeterministicModelColorMap,
-  formatCnyApprox,
   formatDateSpanBadge,
   formatTokensPrecise,
   formatUsd,
@@ -31,7 +30,7 @@ import {
   resolveDeterministicModelColor,
 } from '../core/formatters.js';
 import { scaleBucketsExact } from '../../shared/telemetry-display-rules.mjs';
-import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
+import { i18nStore, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import {
   prefetchConsumptionPresets,
@@ -186,7 +185,6 @@ export const ConsumptionView = defineComponent({
     const heroTotalTokens = h('strong', { className: 'cons-hero-num text-mono', text: '0' });
     const heroTotalCalls = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.callsCount', { calls: 0 }) });
     const heroCostUsd = h('strong', { className: 'cons-hero-cost text-mono', text: '$0.00' });
-    const heroCostCny = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: '≈ ¥0' });
 
     const cacheHitPctEl = h('strong', { className: 'cons-hero-cache text-mono', text: '0%' });
     const cacheTokensEl = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.cacheHitTokens', { tokens: 0 }) });
@@ -229,7 +227,7 @@ export const ConsumptionView = defineComponent({
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
             estCostLabel,
-            h('div', { className: 'cons-baseline' }, [heroCostUsd, heroCostCny]),
+            h('div', { className: 'cons-baseline' }, [heroCostUsd]),
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
             h('span', { className: 'legend-left', style: 'font-size: var(--fs-md);' }, [
@@ -1035,7 +1033,6 @@ export const ConsumptionView = defineComponent({
       patchText(heroTotalTokens, formatTokensPrecise(totalTokens));
       patchText(heroTotalCalls, t('cons.callsCount', { calls: acct.calls || 0 }));
       patchText(heroCostUsd, formatUsd(costUsd));
-      patchText(heroCostCny, formatCnyApprox(costUsd));
 
       patchText(cacheHitPctEl, `${Number(acct.cacheHitPct ?? 0).toFixed(1)}%`);
       patchText(cacheTokensEl, t('cons.cacheHitTokens', { tokens: formatTokensPrecise(cacheTokens) }));
@@ -1166,10 +1163,9 @@ export const ConsumptionView = defineComponent({
       ]);
 
       // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与悬停分模型浮层
-      const rangeBadgeText = isEnglishLocale()
-        ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
-          t('cons.allTime')
-        : preset?.label || rangeInfo.label || t('cons.allTime');
+      const rangeBadgeText =
+        getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
+        t('cons.allTime');
       patchText(trendRangeBadge, rangeBadgeText);
       const isHourlyTrend =
         rawTrendSeries[0]?.granularity === 'hour' ||

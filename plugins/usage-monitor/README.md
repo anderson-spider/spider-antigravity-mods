@@ -17,6 +17,7 @@ Usage & Speed Monitor tracks token throughput, latency, context allocation, and 
   - **Antigravity Desktop:** Auxiliary sidebar pane (`sidecars/panel/sidecar.json`).
   - **Antigravity CLI (`agy`):** Single-line ANSI `statusLine` integration (toggle with `/statusline` or under **Settings > Structure**).
   - **Standalone Local Web UI:** Optional HTTP server (`sidecars/panel/standalone.mjs`) bound to `127.0.0.1:8787` by default.
+- **Bilingual Support (`en-US` / `pt-BR`):** Supports English and Brazilian Portuguese across the panel UI and CLI `statusLine`, with automatic system-locale detection (`Follow System`, defaulting to `en-US`).
 
 ## Installation
 

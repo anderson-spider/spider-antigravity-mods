@@ -70,6 +70,7 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.selectedCount': '{count} {unit} selected',
   'fmt.selectedListTitle': 'Selected ({count}): {names}',
   'fmt.selectPlaceholder': 'Select',
+  'fmt.unitItems': 'items',
 
   // Capsule & Multi-Session Overlay
   'capsule.ariaMonitor': 'Usage & Speed Monitor',
@@ -193,6 +194,8 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'quota.paceOnTrack': '● On pace · exp {exp}%',
   'quota.paceTooltip': 'Expected: {exp}% elapsed · Actual: {used}% ({signedDelta}% vs pace, {ratio}x burn rate)',
   'quota.paceTooltipNoRatio': 'Expected: {exp}% elapsed · Actual: {used}% ({signedDelta}% vs pace)',
+  'quota.activePoolFallback': 'Active Pool',
+  'quota.wkTag': 'Wk',
 
   // Live Activity Widget
   'live.currentSession': 'Current Session',
@@ -433,8 +436,8 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   // Preferences -> General Tab
   'settings.gen.appearanceTitle': 'Interface & Appearance',
   'settings.gen.language': 'Language',
-  'settings.gen.langZh': '简体中文',
   'settings.gen.langEn': 'English',
+  'settings.gen.langPt': 'Português (BR)',
   'settings.gen.langAuto': 'Follow System',
   'settings.gen.themeAccent': 'Accent Color',
   'settings.gen.accentHost': 'Host',

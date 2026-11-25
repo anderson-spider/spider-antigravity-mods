@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0 - 2026-11-24
+
+- Remove Mandarin (`zh-CN`) language support and replace it with Brazilian Portuguese (`pt-BR`) alongside English (`en-US`), with `auto` defaulting to `en-US` and detecting `pt*` host locales.
+- Localize the CLI `statusLine`, `TrendAreaChart` tooltips, `CustomDateTimePicker`, `ConsumptionView` range badge, `metricRegistry`, `CustomSelect`, `SegmentedControl`, `TopLongPillNav`, `CustomNumberInput`, `index.html`, and standalone token login page across `en-US` / `pt-BR`.
+- Remove CNY (`≈ ¥`) secondary cost conversion from `ConsumptionView`.
+
 ## 1.0.0 - 2026-11-24
 
 - Initial integration of `usage-monitor` into `spider-antigravity-mods` (`plugins/usage-monitor/`).

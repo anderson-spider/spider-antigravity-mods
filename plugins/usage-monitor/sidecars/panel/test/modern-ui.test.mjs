@@ -160,7 +160,7 @@ test('applyAppearanceToRoot and SettingsGeneralTab toggle data-modern-ui + data-
             status: 200,
             json: async () => ({
               ok: true,
-              settings: { language: 'zh-CN', themeAccent: 'host', fontScale: 'md', ...parsed },
+              settings: { language: 'pt-BR', themeAccent: 'host', fontScale: 'md', ...parsed },
             }),
           };
         }
@@ -180,7 +180,7 @@ test('applyAppearanceToRoot and SettingsGeneralTab toggle data-modern-ui + data-
     globalThis.window = prevWin;
   });
 
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('pt-BR');
 
   // 1. Default off -> no data-modern-ui attribute, stamps data-color-scheme="light"
   applyAppearanceToRoot(document.documentElement, { experimentalModernUi: false });
@@ -200,7 +200,7 @@ test('applyAppearanceToRoot and SettingsGeneralTab toggle data-modern-ui + data-
   assert.equal(document.documentElement.hasAttribute('data-modern-ui'), false);
   assert.equal(document.documentElement.getAttribute('data-color-scheme'), 'light');
 
-  // 2. SettingsGeneralTab renders '现代化 UI' (开启 / 关闭) and Language (跟随系统 / 简体中文 / English)
+  // 2. SettingsGeneralTab renders 'UI Moderna' (Ligada / Desligada) and Language (Seguir sistema / English / Português (BR))
   tab = SettingsGeneralTab({});
   document.body.appendChild(tab.el);
   tab.refs.renderSettings({
@@ -212,23 +212,23 @@ test('applyAppearanceToRoot and SettingsGeneralTab toggle data-modern-ui + data-
     pluginUpdateMode: 'manual',
   });
 
-  assert.match(tab.el.textContent, /现代化 UI/);
-  assert.doesNotMatch(tab.el.textContent, /实验性/);
+  assert.match(tab.el.textContent, /UI Moderna/);
+  assert.doesNotMatch(tab.el.textContent, /Experimental/i);
   const langSegBtns = tab.refs.languageSwitch.el.querySelectorAll('.seg-btn');
   assert.deepEqual(
     langSegBtns.map((b) => b.textContent),
-    ['跟随系统', '简体中文', 'English']
+    ['Seguir sistema', 'English', 'Português (BR)']
   );
   assert.equal(langSegBtns[0].classList.contains('is-active'), true);
 
   const modernBtns = tab.refs.modernUiSwitch.el.querySelectorAll('.seg-btn');
   assert.deepEqual(
     modernBtns.map((b) => b.textContent),
-    ['开启', '关闭']
+    ['Ligada', 'Desligada']
   );
   assert.equal(modernBtns[1].classList.contains('is-active'), true);
 
-  // Click '开启' (index 0)
+  // Click 'Ligada' (index 0)
   modernBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
   await new Promise((r) => setTimeout(r, 15));
 
@@ -432,15 +432,15 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   assert.equal(liveWidget.el.querySelector('.live-sub-list').hasAttribute('hidden'), false);
   liveWidget.destroy();
 
-  // 7. ConsumptionView places '周期' ('cycle') before '今天' ('today'), while defaulting active selection to 'today'
+  // 7. ConsumptionView places 'Ciclo' ('cycle') before 'Hoje' ('today'), while defaulting active selection to 'today'
   assert.equal(telemetryStore.getState().selectedTimeRange, 'today');
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('pt-BR');
   const consView = ConsumptionView({});
   const rangeBtns = consView.el.querySelector('.cons-overview-head').querySelectorAll('.seg-btn');
   assert.equal(rangeBtns[0].getAttribute('data-seg-value'), 'cycle');
-  assert.equal(rangeBtns[0].textContent, '周期');
+  assert.equal(rangeBtns[0].textContent, 'Ciclo');
   assert.equal(rangeBtns[1].getAttribute('data-seg-value'), 'today');
-  assert.equal(rangeBtns[1].textContent, '今天');
+  assert.equal(rangeBtns[1].textContent, 'Hoje');
   assert.equal(rangeBtns[0].classList.contains('is-active'), false);
   assert.equal(rangeBtns[1].classList.contains('is-active'), true, 'Default active range remains today');
   consView.destroy();
@@ -470,7 +470,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   const s2Main = { stepIndex: 2, agentCascadeId: 'conv-a', modelShort: '4-carbon', inputTokens: 200 };
 
   // Initial load (conv-a, filtered to main only, while allConversationSteps has s2Sub too) -> 0 entering rows
-  stepTable.refs.renderStepTable([s2Main, s1], 'conv-a', cols, 'zh-CN', {
+  stepTable.refs.renderStepTable([s2Main, s1], 'conv-a', cols, 'pt-BR', {
     allConversationSteps: [s2Main, s2Sub, s1],
     allowNewRowFade: true,
   });
@@ -480,8 +480,8 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
     'Initial render must never animate existing rows'
   );
 
-  // Filter change reveals existing s2Sub -> 0 entering rows ("而且不是查看其他记录")
-  stepTable.refs.renderStepTable([s2Main, s2Sub, s1], 'conv-a', cols, 'zh-CN', {
+  // Filter change reveals existing s2Sub -> 0 entering rows
+  stepTable.refs.renderStepTable([s2Main, s2Sub, s1], 'conv-a', cols, 'pt-BR', {
     allConversationSteps: [s2Main, s2Sub, s1],
     allowNewRowFade: false,
   });
@@ -491,9 +491,9 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
     'Revealing existing subagent steps via filter must not animate'
   );
 
-  // Classic UI (allowNewRowFade: false) when step #3 arrives -> 0 entering rows ("只有新ui才有这个动画")
+  // Classic UI (allowNewRowFade: false) when step #3 arrives -> 0 entering rows
   const s3Classic = { stepIndex: 3, agentCascadeId: 'conv-a', modelShort: '4-carbon', inputTokens: 300 };
-  stepTable.refs.renderStepTable([s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'zh-CN', {
+  stepTable.refs.renderStepTable([s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'pt-BR', {
     allConversationSteps: [s3Classic, s2Main, s2Sub, s1],
     allowNewRowFade: false,
   });
@@ -505,7 +505,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
 
   // Modern UI live update (allowNewRowFade: true) when step #4 arrives -> ONLY row 0 (#4) gets is-step-entering
   const s4New = { stepIndex: 4, agentCascadeId: 'conv-a', modelShort: '4-carbon', inputTokens: 400 };
-  stepTable.refs.renderStepTable([s4New, s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'zh-CN', {
+  stepTable.refs.renderStepTable([s4New, s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'pt-BR', {
     allConversationSteps: [s4New, s3Classic, s2Main, s2Sub, s1],
     allowNewRowFade: true,
   });
@@ -525,7 +525,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   enteringRow.onanimationend?.({ target: enteringRow });
   assert.equal(enteringRow.classList.contains('is-step-entering'), false);
   const s4Updated = { ...s4New, outputTokens: 520 };
-  stepTable.refs.renderStepTable([s4Updated, s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'zh-CN', {
+  stepTable.refs.renderStepTable([s4Updated, s3Classic, s2Main, s2Sub, s1], 'conv-a', cols, 'pt-BR', {
     allConversationSteps: [s4Updated, s3Classic, s2Main, s2Sub, s1],
     allowNewRowFade: true,
   });
@@ -537,7 +537,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
 
   // Switching to another conversation ('conv-b') -> 0 entering rows
   const otherConvStep = { stepIndex: 99, agentCascadeId: 'conv-b', modelShort: '4-carbon', inputTokens: 50 };
-  stepTable.refs.renderStepTable([otherConvStep], 'conv-b', cols, 'zh-CN', {
+  stepTable.refs.renderStepTable([otherConvStep], 'conv-b', cols, 'pt-BR', {
     allConversationSteps: [otherConvStep],
     allowNewRowFade: true,
   });
@@ -586,7 +586,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   }));
   ctxWidget.refs.update({
     data: {
-      settings: { language: 'zh-CN' },
+      settings: { language: 'pt-BR' },
       activeConversation: {
         cascadeId: 'conv-ctx-anim',
         hasSubagents: true,
@@ -613,7 +613,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   moreBtn.onclick(); // Expand
   assert.equal(inspectorBar.style.height, '74px');
   const collapseBtn = ctxWidget.el.querySelector('.ctx-agent-pill.is-more-toggle');
-  assert.equal(collapseBtn.textContent, '收起');
+  assert.equal(collapseBtn.textContent, 'Menos');
   assert.equal(collapseBtn.classList.contains('is-expanded'), true);
   inspectorBar.ontransitionend?.({ target: inspectorBar });
   assert.equal(inspectorBar.style.height, '');
@@ -649,7 +649,7 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   });
   const liveToggleBtn = animLive.el.querySelector('.live-sub-toggle');
   const liveScrollHost = animLive.el.querySelector('.live-sub-scroll-host');
-  assert.equal(liveToggleBtn.textContent, '蜂群 (2)');
+  assert.equal(liveToggleBtn.textContent, 'Swarm (2)');
   assert.ok(liveToggleBtn.querySelector('.live-sub-toggle-chevron'));
   assert.equal(liveToggleBtn.classList.contains('is-expanded'), false);
 
@@ -689,7 +689,7 @@ test('saveSettingsPatch prevents stale in-flight telemetry polls from snapping s
   globalThis.document = document;
 
   const baseSettings = {
-    language: 'zh-CN',
+    language: 'pt-BR',
     themeAccent: 'host',
     fontScale: 'md',
     experimentalModernUi: false,
@@ -855,7 +855,7 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
 
   // 1. Small dataset (<=80 rows) stays direct without virtualization or spacers
   const smallSteps = Array.from({ length: 12 }, (_, i) => makeStep(12 - i));
-  renderStepTable(smallSteps, 'conv-small', cols, 'zh-CN', {
+  renderStepTable(smallSteps, 'conv-small', cols, 'pt-BR', {
     showStepTurnRail: true,
     allConversationSteps: smallSteps,
     allowNewRowFade: false,
@@ -880,7 +880,7 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
     )
   );
   const t0 = performance.now();
-  renderStepTable(bigSteps, 'conv-big', cols, 'zh-CN', {
+  renderStepTable(bigSteps, 'conv-big', cols, 'pt-BR', {
     showStepTurnRail: true,
     allConversationSteps: bigSteps,
     allowNewRowFade: false,
@@ -975,7 +975,7 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
 
   // 4. Simulating tab switch away & back (display:none resets scrollTop to 0 with unchanged bigSteps reference)
   stepsTablePane.scrollTop = 0;
-  renderStepTable(bigSteps, 'conv-big', cols, 'zh-CN', {
+  renderStepTable(bigSteps, 'conv-big', cols, 'pt-BR', {
     showStepTurnRail: true,
     allConversationSteps: bigSteps,
     allowNewRowFade: false,
@@ -987,7 +987,7 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
 
   // 5. Live new step prepended at top animates ONLY the new row even when virtualized
   const nextBigSteps = [makeStep(1723, { isLatestTurn: true }), ...bigSteps];
-  renderStepTable(nextBigSteps, 'conv-big', cols, 'zh-CN', {
+  renderStepTable(nextBigSteps, 'conv-big', cols, 'pt-BR', {
     showStepTurnRail: true,
     allConversationSteps: nextBigSteps,
     allowNewRowFade: true,
@@ -999,7 +999,7 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
 
   // 6. Narrowing filter below threshold cleanly exits virtualization
   const filteredSteps = nextBigSteps.slice(0, 20);
-  renderStepTable(filteredSteps, 'conv-big', cols, 'zh-CN', {
+  renderStepTable(filteredSteps, 'conv-big', cols, 'pt-BR', {
     showStepTurnRail: true,
     allConversationSteps: nextBigSteps,
     allowNewRowFade: false,

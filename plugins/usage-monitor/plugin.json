@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "usage-monitor",
   "displayName": "Usage & Speed Monitor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local offline monitor for token usage, generation speed (TPS), TTFT, context breakdown, and quota pools.",
   "logo": "assets/logo.svg",
   "author": {

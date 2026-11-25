@@ -185,8 +185,8 @@ test('empty session does not invent an Argon model or a model quota pool', async
 test('unknown single-step cost renders as pending while aggregate subtotals omit pending suffix', () => {
   const prevLang = i18nStore.getState().language;
   try {
-    setI18nLanguage('zh-CN');
-    assert.equal(formatUsd(null), '待定');
+    setI18nLanguage('pt-BR');
+    assert.equal(formatUsd(null), 'N/D');
     setI18nLanguage('en-US');
     assert.equal(formatUsd(null), 'N/A');
     assert.equal(formatUsd(0), '$0.00');
@@ -612,49 +612,54 @@ test('orchestratorIdMode defaults to compact, persists via settings action, and 
   };
 
   const prevLang = i18nStore.getState().language;
-  setI18nLanguage('zh-CN');
   try {
-    for (const showUpstreamModel of [false, true]) {
-      assert.equal(
-        resolveModelDisplayInfo(orchCarbon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-        'orchestrator-carbon'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchArgon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-        'orchestrator-argon'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchNeon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-        'orchestrator-neon'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchNeonCompaction, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-        'orchestrator-neon·压缩'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-        'worker-agy-hydrogen·压缩'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchCarbon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-        'gemini-pro-orchestrator (carbon-4)'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchArgon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-        'gemini-pro-orchestrator-argon (argon-4)'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchNeon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-        'gemini-pro-orchestrator-neon (neon-4)'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchNeonCompaction, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-        'gemini-pro-orchestrator-neon (neon-4)·压缩'
-      );
-      assert.equal(
-        resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-        'gemini-flash-worker-agy (hydrogen-4)·压缩'
-      );
+    for (const [lang, suffix] of [
+      ['en-US', '·compact'],
+      ['pt-BR', '·compacto'],
+    ]) {
+      setI18nLanguage(lang);
+      for (const showUpstreamModel of [false, true]) {
+        assert.equal(
+          resolveModelDisplayInfo(orchCarbon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
+          'orchestrator-carbon'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchArgon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
+          'orchestrator-argon'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchNeon, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
+          'orchestrator-neon'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchNeonCompaction, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
+          `orchestrator-neon${suffix}`
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
+          `worker-agy-hydrogen${suffix}`
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchCarbon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
+          'gemini-pro-orchestrator (carbon-4)'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchArgon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
+          'gemini-pro-orchestrator-argon (argon-4)'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchNeon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
+          'gemini-pro-orchestrator-neon (neon-4)'
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchNeonCompaction, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
+          `gemini-pro-orchestrator-neon (neon-4)${suffix}`
+        );
+        assert.equal(
+          resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
+          `gemini-flash-worker-agy (hydrogen-4)${suffix}`
+        );
+      }
     }
   } finally {
     setI18nLanguage(prevLang);

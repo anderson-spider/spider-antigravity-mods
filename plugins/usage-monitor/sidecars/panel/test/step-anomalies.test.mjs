@@ -379,7 +379,7 @@ test('SQLite protobuf decoder + trajectory-metrics + usage-aggregator decode cha
 test('formatSpeedMetric drops decimals at >= 100 tok/s and STEP_COLUMN_REGISTRY.tps renders integer speeds and error reasons', () => {
   const env = installMockBrowser();
   try {
-    i18nStore.setState({ locale: 'zh-CN' });
+    i18nStore.setState({ locale: 'pt-BR' });
 
     assert.equal(formatSpeedMetric(100), '100 tok/s');
     assert.equal(formatSpeedMetric(128.4), '128 tok/s');
@@ -402,7 +402,7 @@ test('formatSpeedMetric drops decimals at >= 100 tok/s and STEP_COLUMN_REGISTRY.
       { showStepSpeedColor: false }
     );
     assert.equal(fastCell.refs.speedMain.textContent, '—');
-    assert.equal(fastCell.refs.speedReason.textContent, '调用报错');
+    assert.equal(fastCell.refs.speedReason.textContent, 'Erro na chamada');
 
     // Seconds >= 100s also drop decimals in ttft & duration columns
     assert.equal(formatMetric(100, 's'), '100s');
@@ -423,7 +423,7 @@ test('formatSpeedMetric drops decimals at >= 100 tok/s and STEP_COLUMN_REGISTRY.
 
     // Compaction steps keep normal TTFT formatting ("—" when null) instead of overriding the cell
     const compactTtftCell = STEP_COLUMN_REGISTRY.ttft.createCell();
-    i18nStore.setState({ locale: 'zh-CN' });
+    i18nStore.setState({ locale: 'pt-BR' });
     STEP_COLUMN_REGISTRY.ttft.updateCell(compactTtftCell.refs, { isCompactionStep: true, ttftSec: null });
     assert.equal(compactTtftCell.refs.valEl.textContent, '—');
     assert.notEqual(compactTtftCell.refs.valEl.getAttribute('class'), 'step-ttft-compaction');
@@ -458,7 +458,7 @@ test('StepTableWidget tints entire anomaly rows with zero extra column width and
   const env = installMockBrowser();
   const widget = StepTableWidget({ standalone: true });
   try {
-    i18nStore.setState({ locale: 'zh-CN' });
+    i18nStore.setState({ locale: 'pt-BR' });
 
     const colKeys = ['step', 'model', 'tps', 'ttft'];
     const steps = [
@@ -562,7 +562,7 @@ test('StepTableWidget tints entire anomaly rows with zero extra column width and
       },
     ];
 
-    widget.refs.renderStepTable(steps, 'cid-1', colKeys, 'zh-CN', {
+    widget.refs.renderStepTable(steps, 'cid-1', colKeys, 'pt-BR', {
       hasSubagents: false,
       showStepAgentBadge: true,
       showStepTurnRail: false,
@@ -602,8 +602,8 @@ test('StepTableWidget tints entire anomaly rows with zero extra column width and
     rows[0].onmouseenter();
     assert.equal(tipEl.hasAttribute('hidden'), false);
     assert.equal(tipEl.classList.contains('is-compaction'), false);
-    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4924.*异常 1 次/);
-    assert.equal(tipEl.querySelector('.step-anomaly-tip-sub').textContent, '退避 2.5s');
+    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4924.*1 tentativas \/ erros/);
+    assert.equal(tipEl.querySelector('.step-anomaly-tip-sub').textContent, 'Espera 2.5s');
     assert.match(tipEl.querySelector('.step-anomaly-tip-detail').textContent, /stream idle timeout/);
 
     rows[0].onmouseleave();
@@ -614,9 +614,9 @@ test('StepTableWidget tints entire anomaly rows with zero extra column width and
     assert.equal(tipEl.hasAttribute('hidden'), false);
     assert.equal(tipEl.classList.contains('is-compaction'), true);
     assert.equal(tipEl.classList.contains('is-danger'), false);
-    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4918.*自动压缩/);
+    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4918.*Compactação automática/);
     assert.equal(tipEl.querySelector('.step-anomaly-tip-sub').textContent, '4-neon');
-    assert.match(tipEl.querySelector('.step-anomaly-tip-row').textContent, /输入 520\.0k → 摘要输出 4\.4k/);
+    assert.match(tipEl.querySelector('.step-anomaly-tip-row').textContent, /Entrada 520\.0k → Resumo 4\.4k/);
     assert.equal(tipEl.querySelector('.step-anomaly-tip-detail').classList.contains('text-mono'), false);
     rows[3].onmouseleave();
     assert.equal(tipEl.hasAttribute('hidden'), true);
@@ -636,8 +636,8 @@ test('StepTableWidget tints entire anomaly rows with zero extra column width and
     rows[4].onmouseenter();
     assert.equal(tipEl.hasAttribute('hidden'), false);
     assert.equal(tipEl.classList.contains('is-compaction'), false);
-    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4916.*异常 1 次/);
-    assert.match(tipEl.querySelector('.step-anomaly-tip-hint').textContent, /自动压缩/);
+    assert.match(tipEl.querySelector('.step-anomaly-tip-title').textContent, /#4916.*1 tentativas \/ erros/);
+    assert.match(tipEl.querySelector('.step-anomaly-tip-hint').textContent, /compactação automática/);
     rows[4].onmouseleave();
     assert.equal(tipEl.hasAttribute('hidden'), true);
 
@@ -661,7 +661,7 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
   let lineChart = null;
   let fitChart = null;
   try {
-    i18nStore.setState({ locale: 'zh-CN' });
+    i18nStore.setState({ locale: 'pt-BR' });
     view = StepsDetailView();
 
     const anomalyObj = {
@@ -776,7 +776,7 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     // Session-level anomaly strip is visible with timeout tag
     const stripEl = view.refs.modelsAnomalyStripEl;
     assert.equal(stripEl.hasAttribute('hidden'), false);
-    assert.match(stripEl.textContent, /异常 2 次.*1 步/);
+    assert.match(stripEl.textContent, /2 tentativas\/erros.*1 etapas/);
 
     // Model summary cards: Pro shows danger anomaly badge + integer 120 tok/s; Flash hides badge + keeps 88.2 tok/s
     const cards = view.refs.modelsListEl.querySelectorAll('.smodel-card');
@@ -784,7 +784,7 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     const proBadge = cards[0].querySelector('.smodel-anomaly-tag');
     const flashBadge = cards[1].querySelector('.smodel-anomaly-tag');
     assert.equal(proBadge.hasAttribute('hidden'), false);
-    assert.equal(proBadge.textContent, '超时2');
+    assert.equal(proBadge.textContent, 'TO2');
     assert.equal(proBadge.classList.contains('is-danger'), true);
     assert.match(cards[0].querySelector('.smodel-perf').textContent, /120 tok\/s/);
     assert.equal(flashBadge.hasAttribute('hidden'), true);
@@ -797,7 +797,7 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     proBadge.onmouseenter();
     assert.equal(cards[0].getAttribute('title'), null, 'Parent model card native title must be suppressed while hovering anomaly badge');
     assert.equal(view.refs.anomalyTipEl.hasAttribute('hidden'), false);
-    assert.match(view.refs.anomalyTipEl.querySelector('.step-anomaly-tip-hint').textContent, /按步查看/);
+    assert.match(view.refs.anomalyTipEl.querySelector('.step-anomaly-tip-hint').textContent, /filtrar etapas/);
     proBadge.onmouseleave();
     assert.ok(cards[0].getAttribute('title'), 'Parent model card native title restores after leaving anomaly badge');
     assert.equal(view.refs.anomalyTipEl.hasAttribute('hidden'), true);
@@ -810,7 +810,7 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     assert.equal(view.refs.stepsTbody.children.length, 1);
     assert.match(view.refs.stepsTbody.children[0].children[0].textContent, /#10/);
 
-    // Clicking "返回全部步骤" restores all rows and hides the filterbar
+    // Clicking "Mostrar todas as etapas" restores all rows and hides the filterbar
     view.refs.anomalyFilterBarEl
       .querySelector('.steps-anomaly-filter-clear')
       .dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -822,12 +822,12 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     await Promise.resolve();
     const stripTagBtn = stripEl.querySelector('.smodel-anomaly-tag');
     assert.ok(stripTagBtn, 'Session anomaly strip renders clickable category micro-tag');
-    assert.equal(stripTagBtn.textContent, '超时2');
+    assert.equal(stripTagBtn.textContent, 'TO2');
     stripTagBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
     await Promise.resolve();
     assert.equal(uiStore.getState().stepsSubTab, 'steps');
     assert.equal(view.refs.anomalyFilterBarEl.hasAttribute('hidden'), false);
-    assert.match(view.refs.anomalyFilterBarEl.textContent, /流空闲 \/ 连接超时/);
+    assert.match(view.refs.anomalyFilterBarEl.textContent, /Tempo esgotado de stream \/ conexão/);
     assert.equal(view.refs.stepsTbody.children.length, 1);
 
     // Line chart (>64 points still renders anomaly ring overlay!) and Fit chart scatter anomaly overlay + hover tooltip linkage

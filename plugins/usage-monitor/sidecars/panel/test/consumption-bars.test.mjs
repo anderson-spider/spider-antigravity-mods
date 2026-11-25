@@ -263,7 +263,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
     globalThis.window = prevWin;
   });
 
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('en-US');
   uiStore.setState(
     { monitorVisible: true, activeView: 'consumption', settingsOpen: false },
     { sync: true }
@@ -310,7 +310,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
 
   const baseTelemetry = {
     settings: {
-      language: 'zh-CN',
+      language: 'en-US',
       modelDisplayMode: 'upstream',
       showUpstreamModel: true,
     },
@@ -455,7 +455,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
   assert.equal(popRows.length, 4);
   assert.equal(popRows[0].querySelector('.cons-pop-model-name')?.textContent, '4-argon');
   assert.equal(popRows[0].querySelector('.cons-pop-model-pct')?.textContent, '50.0%');
-  assert.equal(popRows[3].querySelector('.cons-pop-model-name')?.textContent, '其他 (3)');
+  assert.equal(popRows[3].querySelector('.cons-pop-model-name')?.textContent, 'Others (3)');
 
   appBarHit.dispatchEvent({ type: 'mouseleave' });
   assert.equal(popover.hasAttribute('hidden'), true);
@@ -487,7 +487,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
 
   novCol.dispatchEvent({ type: 'mouseenter' });
   assert.equal(popover.hasAttribute('hidden'), false);
-  assert.equal(popover.querySelector('.trend-tip-time')?.textContent, '2026年 11月');
+  assert.equal(popover.querySelector('.trend-tip-time')?.textContent, 'M11, 2026');
   assert.equal(popover.querySelectorAll('.cons-pop-model-row').length, 4);
 
   // 4. Usage Trend: taller 184px viewBox & hovering x-axis tick opens trend tooltip with identical model colors + long-tail '其他 (3)'
@@ -505,7 +505,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
     trendTipModelRows[0].querySelector('.cons-model-dot')?.style.getPropertyValue('--dot-color'),
     argonDotColor
   );
-  assert.equal(trendTipModelRows[3].querySelector('.cons-pop-model-name')?.textContent, '其他 (3)');
+  assert.equal(trendTipModelRows[3].querySelector('.cons-pop-model-name')?.textContent, 'Others (3)');
 });
 
 test('selectConsumptionTimeRange serves prefetched presets with 0 network calls, blocks stale 2s poll overwrites, and TrendAreaChart heatmap batches via DocumentFragment', async (t) => {
@@ -531,7 +531,7 @@ test('selectConsumptionTimeRange serves prefetched presets with 0 network calls,
 
   const baseTelemetry = {
     account: { email: 'u@example.com', status: 'signedIn' },
-    settings: { language: 'zh-CN', weeklyLimitMode: 'official' },
+    settings: { language: 'en-US', weeklyLimitMode: 'official' },
     cloudStatus: { catalogVersion: 'v1' },
     activeConversation: { cascadeId: 'c1', recentSteps: [], agents: [] },
     consumption: {

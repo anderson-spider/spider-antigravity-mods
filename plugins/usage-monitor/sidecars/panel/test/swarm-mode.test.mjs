@@ -992,11 +992,11 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
     globalThis.window = prevWin;
   });
 
-  // 1. Bilingual badges, labels, auxiliary role hints, and conversation meta
-  setI18nLanguage('zh-CN');
+  // 1. Bilingual badges, labels, auxiliary role hints, and conversation meta (pt-BR & en-US)
+  setI18nLanguage('pt-BR');
   assert.equal(
     formatAgentBadgeText({ agentKind: 'swarm_worker', agentOrdinal: 9 }),
-    '蜂9'
+    'W9'
   );
   assert.equal(
     formatAgentLabel({
@@ -1004,27 +1004,27 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
       agentOrdinal: 9,
       customRole: 'Swarm Worker (bridge-actions)',
     }),
-    '蜂群 #9 · @bridge-actions'
+    'Swarm #9 · @bridge-actions'
   );
   assert.equal(
     formatAgentLabel({ agentKind: 'swarm_worker', agentOrdinal: 20, customRole: '@monitor' }),
-    '蜂群 #20 · @monitor (巡检)'
+    'Swarm #20 · @monitor (Monitor)'
   );
   assert.equal(
     formatAgentLabel({ agentKind: 'swarm_worker', agentOrdinal: 21, customRole: '@narrator' }),
-    '蜂群 #21 · @narrator (旁白)'
+    'Swarm #21 · @narrator (Narrador)'
   );
   assert.equal(
     formatConversationMeta({ stepCount: 10, subagentCount: 20, swarmCount: 20, totalStepCount: 250 }),
-    '主10 · 20蜂 (共250步)'
+    'Principal 10 · 20 swarm (250 etapas)'
   );
   assert.equal(
     formatConversationMeta({ stepCount: 10, subagentCount: 7, swarmCount: 5, totalStepCount: 80 }),
-    '主10 · 5蜂 · 2子 (共80步)'
+    'Principal 10 · 5 swarm · 2 sub (80 etapas)'
   );
-  assert.equal(formatLiveActivityLabel({ actionKey: 'waiting_swarm' }), '等待工蜂');
-  assert.equal(formatLiveActivityLabel({ actionKey: 'swarm_waiting' }), '待命中');
-  assert.equal(formatLiveActivityLabel({ actionKey: 'swarm_killed' }), '已终止');
+  assert.equal(formatLiveActivityLabel({ actionKey: 'waiting_swarm' }), 'Aguardando swarm');
+  assert.equal(formatLiveActivityLabel({ actionKey: 'swarm_waiting' }), 'Aguardando');
+  assert.equal(formatLiveActivityLabel({ actionKey: 'swarm_killed' }), 'Encerrado');
 
   setI18nLanguage('en-US');
   assert.equal(
@@ -1052,7 +1052,7 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
     'Main 10 · 5 swarm · 2 sub (80 steps)'
   );
 
-  setI18nLanguage('zh-CN');
+  setI18nLanguage('pt-BR');
 
   // 2. Verify CSS bounded scroll rule on `.live-sub-list`
   const builtStyles = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
@@ -1152,7 +1152,7 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
   liveWidget.refs.pauseTicker();
 
   const toggleBtn = liveWidget.el.querySelector('.live-sub-toggle');
-  assert.equal(toggleBtn?.textContent, '蜂群 1/4');
+  assert.equal(toggleBtn?.textContent, 'Swarm 1/4');
   assert.ok(
     toggleBtn?.querySelector('.live-sub-toggle-chevron'),
     'Swarm toggle button renders pure vector SVG chevron icon'
@@ -1164,15 +1164,15 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
   assert.equal(renderedRows.length, 4);
   assert.deepEqual(
     renderedRows.map((r) => r.querySelector('.agent-badge')?.textContent),
-    ['蜂3', '蜂2', '蜂4', '蜂1'],
+    ['W3', 'W2', 'W4', 'W1'],
     'Rows must sort as running -> waiting -> killed while keeping original ordinals'
   );
-  assert.equal(renderedRows[1].querySelector('.live-sub-summary')?.textContent, '待命中 (6 步)');
-  assert.equal(renderedRows[3].querySelector('.live-sub-summary')?.textContent, '已终止 (2 步)');
+  assert.equal(renderedRows[1].querySelector('.live-sub-summary')?.textContent, 'Aguardando (6 etapas)');
+  assert.equal(renderedRows[3].querySelector('.live-sub-summary')?.textContent, 'Encerrado (2 etapas)');
 
   // 4. TopSessionHeader: child route resolution, header title, and one-shot auto-focus
   const mockTelemetry = {
-    settings: { language: 'zh-CN' },
+    settings: { language: 'pt-BR' },
     activeConversation: {
       cascadeId: rootId,
       title: 'Greeting and Hello',
@@ -1256,7 +1256,7 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
   assert.equal(uiStore.getState().selectedAgentScope, w2);
   assert.equal(uiStore.getState().ctxInspectorAgentId, w2);
   const triggerText = topHeader.el.querySelector('.select-trigger')?.textContent || '';
-  assert.match(triggerText, /当前窗口 \(Greeting and Hello · 蜂2\)/);
+  assert.match(triggerText, /Atual \(Greeting and Hello · W2\)/);
 
   // User manually switches scope back to `all` while still on `/c/<w2>` -> next poll must NOT override!
   uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' }, { sync: true });

@@ -1,6 +1,6 @@
 /**
  * @fileoverview Preferences Tab 1: `SettingsGeneralTab.js` ("常规").
- * Manages UI Language (`zh-CN` / `en-US` / `auto`), Theme Accent (`host` + 6 swatches),
+ * Manages UI Language (`en-US` / `pt-BR` / `auto`), Theme Accent (`host` + 6 swatches),
  * Panel Font Scale (`sm` / `md` / `lg` / `xl`), Pricing Sync, and Plugin Updates.
  */
 
@@ -28,8 +28,8 @@ import { SegmentedControl } from '../../components/ui/SegmentedControl.js';
 function getLanguageOptions() {
   return [
     { value: 'auto', label: t('settings.gen.langAuto') },
-    { value: 'zh-CN', label: t('settings.gen.langZh') },
     { value: 'en-US', label: t('settings.gen.langEn') },
+    { value: 'pt-BR', label: t('settings.gen.langPt') },
   ];
 }
 
