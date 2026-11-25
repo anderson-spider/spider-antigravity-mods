@@ -15,7 +15,9 @@ import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { HERE, lsRuntimeEndpoint, normalizeLanguageSetting, normalizeTopbarCapsuleSlots } from './config.mjs';
+import { normalizeLanguageSetting, normalizeTopbarCapsuleSlots } from '../shared/settings-normalization.mjs';
+import { HERE } from './config.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
 import {
   classifyCacheTier,
   classifySpeedTier,
@@ -303,7 +305,7 @@ export function ensureCliStatusLineConfigured({
   nodeOnPath,
 } = {}) {
   if (
-    lsRuntimeEndpoint.addr === 'test.invalid' &&
+    isTestRuntime() &&
     String(env?.USAGE_MONITOR_ALLOW_TEST_CLI_SETTINGS || '') !== '1'
   ) {
     return { checked: false, updated: false, reason: 'test_sandbox_skipped' };

@@ -6,40 +6,48 @@
  * with simulated telemetry, and supports smooth mouse drag-and-drop reordering.
  */
 
-import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
-import { getEffectiveLocale, t } from '../../i18n/index.js';
+import {
+  defineComponent } from '../../core/component.js';
+import { h,
+  patchAttr,
+  patchClasses,
+  patchStyleVar,
+  patchText } from '../../core/domPatch.js';
+import { getEffectiveLocale,
+  t } from '../../i18n/index.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
 import {
   getCapsuleMetricOptions,
   getOverviewMetricOptions,
-} from '../../registries/metricRegistry.js';
+  } from '../../registries/metricRegistry.js';
 import { getStepColumnOptions } from '../../registries/stepColumnRegistry.js';
 import {
   createDynamicWidgetHost,
   getOverviewModuleOptions,
-} from '../../registries/widgetRegistry.js';
+  } from '../../registries/widgetRegistry.js';
 import {
-  DEFAULT_CLIENT_HOVER_MODULES,
-  DEFAULT_CLIENT_OVERVIEW_METRICS,
-  DEFAULT_CLIENT_OVERVIEW_MODULES,
-  DEFAULT_CLIENT_POPOVER_WIDTH,
-  DEFAULT_CLIENT_STEP_COLUMNS,
-  DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
-  DEFAULT_CLIENT_TOPBAR_SLOTS,
-  MAX_CLIENT_POPOVER_WIDTH,
-  MIN_CLIENT_POPOVER_WIDTH,
-  normalizeClientHoverModules,
-  normalizeClientOverviewMetrics,
-  normalizeClientOverviewModules,
-  normalizeClientPopoverWidth,
-  normalizeClientPopoverWidthMode,
-  normalizeClientStepColumns,
-  normalizeClientStepTokenComboFormat,
-  normalizeClientTopbarSlots,
-  normalizeClientWindowMountMode,
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
+import {
+  DEFAULT_HOVER_MODULES,
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_POPOVER_WIDTH,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  DEFAULT_TOPBAR_SLOTS,
+  MAX_POPOVER_WIDTH,
+  MIN_POPOVER_WIDTH,
+  normalizeHoverModules,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePopoverWidth,
+  normalizePopoverWidthMode,
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
+  normalizeTopbarCapsuleSlots,
+  normalizeWindowMountMode,
+} from "../../../shared/settings-normalization.mjs";
 import { getVisibleMonitorView, uiStore } from '../../store/uiStore.js';
 import { BridgeStatusNotice } from '../../components/settings/BridgeStatusNotice.js';
 import { CollapsibleSection } from '../../components/settings/CollapsibleSection.js';
@@ -106,20 +114,20 @@ export const SettingsStructureTab = defineComponent({
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
     let draftPopoverWidthMode = 'auto';
-    let draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
+    let draftPopoverWidth = DEFAULT_POPOVER_WIDTH;
     let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
-    let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
-    let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
-    let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
-    let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+    let draftTopbarSlots = [...DEFAULT_TOPBAR_SLOTS];
+    let draftHoverModules = [...DEFAULT_HOVER_MODULES];
+    let draftOverviewModules = [...DEFAULT_OVERVIEW_MODULES];
+    let draftOverviewMetrics = [...DEFAULT_OVERVIEW_METRICS];
     let draftShowQuotaPace = true;
     let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
     let draftShowStepSpeedColor = false;
-    let draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-    let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-    let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
+    let draftStepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+    let rawStepTokenComboText = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+    let draftStepColumns = [...DEFAULT_STEP_TABLE_COLUMNS];
     let latestSettings = null;
     let latestWindowBridge = null;
     let latestHostPlatform = 'win32';
@@ -266,7 +274,7 @@ export const SettingsStructureTab = defineComponent({
       icon: 'dock',
       options: getMountModeOptions(),
       onUpdateModelValue: (val) => {
-        const nextMode = normalizeClientWindowMountMode(val);
+        const nextMode = normalizeWindowMountMode(val);
         draftWindowMountMode = nextMode;
         syncMountSectionMeta();
         props.onLayoutChange?.();
@@ -279,12 +287,12 @@ export const SettingsStructureTab = defineComponent({
 
     const popoverWidthStepper = CustomNumberInput({
       modelValue: draftPopoverWidth,
-      min: MIN_CLIENT_POPOVER_WIDTH,
-      max: MAX_CLIENT_POPOVER_WIDTH,
+      min: MIN_POPOVER_WIDTH,
+      max: MAX_POPOVER_WIDTH,
       step: 10,
       ariaLabel: t('settings.str.popoverWidthLabel'),
       onUpdateModelValue: (val) => {
-        const nextWidth = normalizeClientPopoverWidth(val);
+        const nextWidth = normalizePopoverWidth(val);
         draftPopoverWidth = nextWidth;
         syncMountSectionMeta();
         props.onLayoutChange?.();
@@ -306,7 +314,7 @@ export const SettingsStructureTab = defineComponent({
       modelValue: draftPopoverWidthMode,
       options: getPopoverWidthModeOptions(),
       onUpdateModelValue: (val) => {
-        draftPopoverWidthMode = normalizeClientPopoverWidthMode(val);
+        draftPopoverWidthMode = normalizePopoverWidthMode(val);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -349,11 +357,11 @@ export const SettingsStructureTab = defineComponent({
       maxItems: 5,
       addBtnTextFn: (count, max) => t('settings.str.addCapsuleSlot', { count, max }),
       onPreview: (previewItems) => {
-        draftTopbarSlots = normalizeClientTopbarSlots(previewItems);
+        draftTopbarSlots = normalizeTopbarCapsuleSlots(previewItems);
         refreshMountPreview();
       },
       onChange: (nextItems) => {
-        draftTopbarSlots = normalizeClientTopbarSlots(nextItems);
+        draftTopbarSlots = normalizeTopbarCapsuleSlots(nextItems);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -372,11 +380,11 @@ export const SettingsStructureTab = defineComponent({
       onReset: () => {
         draftWindowMountMode = 'dual';
         draftPopoverWidthMode = 'auto';
-        draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
-        popoverWidthStepper.setProps({ modelValue: DEFAULT_CLIENT_POPOVER_WIDTH });
+        draftPopoverWidth = DEFAULT_POPOVER_WIDTH;
+        popoverWidthStepper.setProps({ modelValue: DEFAULT_POPOVER_WIDTH });
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
-        draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
+        draftTopbarSlots = [...DEFAULT_TOPBAR_SLOTS];
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
@@ -385,10 +393,10 @@ export const SettingsStructureTab = defineComponent({
             windowMountMode: 'dual',
             enableWindowOverlay: true,
             popoverWidthMode: 'auto',
-            popoverWidth: DEFAULT_CLIENT_POPOVER_WIDTH,
+            popoverWidth: DEFAULT_POPOVER_WIDTH,
             enableCliStatusLine: true,
             showTopbarMultiSession: true,
-            topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
+            topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
           },
           'settings.resetDone'
         );
@@ -465,10 +473,10 @@ export const SettingsStructureTab = defineComponent({
       const isDefault =
         draftWindowMountMode === 'dual' &&
         draftPopoverWidthMode === 'auto' &&
-        draftPopoverWidth === DEFAULT_CLIENT_POPOVER_WIDTH &&
+        draftPopoverWidth === DEFAULT_POPOVER_WIDTH &&
         draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
-        isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
+        isSameList(draftTopbarSlots, DEFAULT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
       refreshMountPreview();
     }
@@ -508,11 +516,11 @@ export const SettingsStructureTab = defineComponent({
       emptyHintText: t('settings.str.hoverEmptyHint'),
       addBtnTextFn: (count, max) => t('settings.str.addHoverModule', { count, max }),
       onPreview: (previewItems) => {
-        draftHoverModules = normalizeClientHoverModules(previewItems);
+        draftHoverModules = normalizeHoverModules(previewItems);
         refreshHoverPreview();
       },
       onChange: (nextItems) => {
-        draftHoverModules = normalizeClientHoverModules(nextItems);
+        draftHoverModules = normalizeHoverModules(nextItems);
         syncHoverSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(hoverSection, {
@@ -527,12 +535,12 @@ export const SettingsStructureTab = defineComponent({
       title: t('settings.str.hoverSection'),
       badgeText: t('settings.str.hoverBadgeCount', { count: draftHoverModules.length }),
       onReset: () => {
-        draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
+        draftHoverModules = [...DEFAULT_HOVER_MODULES];
         syncHoverSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           hoverSection,
-          { hoverModules: [...DEFAULT_CLIENT_HOVER_MODULES] },
+          { hoverModules: [...DEFAULT_HOVER_MODULES] },
           'settings.resetDone'
         );
       },
@@ -568,7 +576,7 @@ export const SettingsStructureTab = defineComponent({
           : t('settings.str.hoverBadgeCount', { count: draftHoverModules.length })
       );
       hoverSection.refs.setResetDisabled(
-        isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES)
+        isSameList(draftHoverModules, DEFAULT_HOVER_MODULES)
       );
       refreshHoverPreview();
     }
@@ -628,12 +636,12 @@ export const SettingsStructureTab = defineComponent({
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewModule', { count, max }),
       onPreview: (previewItems) => {
-        draftOverviewModules = normalizeClientOverviewModules(previewItems);
+        draftOverviewModules = normalizeOverviewModules(previewItems);
         patchAttr(overviewMetricsHintEl, 'hidden', draftOverviewModules.includes('metrics'));
         refreshOverviewPreview();
       },
       onChange: (nextItems) => {
-        draftOverviewModules = normalizeClientOverviewModules(nextItems);
+        draftOverviewModules = normalizeOverviewModules(nextItems);
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(overviewSection, {
@@ -649,11 +657,11 @@ export const SettingsStructureTab = defineComponent({
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewMetric', { count, max }),
       onPreview: (previewItems) => {
-        draftOverviewMetrics = normalizeClientOverviewMetrics(previewItems);
+        draftOverviewMetrics = normalizeOverviewMetrics(previewItems);
         refreshOverviewPreview();
       },
       onChange: (nextItems) => {
-        draftOverviewMetrics = normalizeClientOverviewMetrics(nextItems);
+        draftOverviewMetrics = normalizeOverviewMetrics(nextItems);
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(overviewSection, {
@@ -671,16 +679,16 @@ export const SettingsStructureTab = defineComponent({
         metCount: draftOverviewMetrics.length,
       }),
       onReset: () => {
-        draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
-        draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+        draftOverviewModules = [...DEFAULT_OVERVIEW_MODULES];
+        draftOverviewMetrics = [...DEFAULT_OVERVIEW_METRICS];
         draftShowQuotaPace = true;
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           overviewSection,
           {
-            overviewModules: [...DEFAULT_CLIENT_OVERVIEW_MODULES],
-            overviewMetrics: [...DEFAULT_CLIENT_OVERVIEW_METRICS],
+            overviewModules: [...DEFAULT_OVERVIEW_MODULES],
+            overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
             showQuotaPace: true,
           },
           'settings.resetDone'
@@ -737,8 +745,8 @@ export const SettingsStructureTab = defineComponent({
         })
       );
       const isDefault =
-        isSameList(draftOverviewModules, DEFAULT_CLIENT_OVERVIEW_MODULES) &&
-        isSameList(draftOverviewMetrics, DEFAULT_CLIENT_OVERVIEW_METRICS) &&
+        isSameList(draftOverviewModules, DEFAULT_OVERVIEW_MODULES) &&
+        isSameList(draftOverviewMetrics, DEFAULT_OVERVIEW_METRICS) &&
         draftShowQuotaPace === true;
       overviewSection.refs.setResetDisabled(isDefault);
       refreshOverviewPreview();
@@ -819,7 +827,7 @@ export const SettingsStructureTab = defineComponent({
 
     function commitStepTokenComboInput() {
       const rawTrimmed = String(stepTokenComboInput.value || '').trim();
-      const normFmt = normalizeClientStepTokenComboFormat(rawTrimmed);
+      const normFmt = normalizeStepTokenComboFormat(rawTrimmed);
       rawStepTokenComboText = normFmt;
       draftStepTokenComboFormat = normFmt;
       stepTokenComboInput.value = normFmt;
@@ -830,9 +838,9 @@ export const SettingsStructureTab = defineComponent({
         if (comboIdx >= 0) {
           const nextCols = [...draftStepColumns];
           nextCols[comboIdx] = 'tokens_custom';
-          draftStepColumns = normalizeClientStepColumns(nextCols);
+          draftStepColumns = normalizeStepTableColumns(nextCols);
         } else {
-          draftStepColumns = normalizeClientStepColumns([...draftStepColumns, 'tokens_custom']);
+          draftStepColumns = normalizeStepTableColumns([...draftStepColumns, 'tokens_custom']);
         }
       }
       syncStepsSectionMeta();
@@ -852,7 +860,7 @@ export const SettingsStructureTab = defineComponent({
       'aria-label': t('settings.str.stepTokenComboLabel'),
       onInput: () => {
         rawStepTokenComboText = stepTokenComboInput.value;
-        draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(rawStepTokenComboText);
+        draftStepTokenComboFormat = normalizeStepTokenComboFormat(rawStepTokenComboText);
         stepColumnsList.refs.setProps({
           items: draftStepColumns,
           options: getStepColumnOptions(draftStepTokenComboFormat),
@@ -878,11 +886,11 @@ export const SettingsStructureTab = defineComponent({
       maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
-        draftStepColumns = normalizeClientStepColumns(previewItems);
+        draftStepColumns = normalizeStepTableColumns(previewItems);
         refreshStepsPreview();
       },
       onChange: (nextItems) => {
-        draftStepColumns = normalizeClientStepColumns(nextItems);
+        draftStepColumns = normalizeStepTableColumns(nextItems);
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(stepsSection, {
@@ -900,10 +908,10 @@ export const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
         draftShowStepSpeedColor = false;
-        draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        stepTokenComboInput.value = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
+        draftStepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        rawStepTokenComboText = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        stepTokenComboInput.value = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        draftStepColumns = [...DEFAULT_STEP_TABLE_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
@@ -912,8 +920,8 @@ export const SettingsStructureTab = defineComponent({
             showStepTurnRail: false,
             showStepAgentBadge: true,
             showStepSpeedColor: false,
-            stepTokenComboFormat: DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
-            stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
+            stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+            stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
           },
           'settings.resetDone'
         );
@@ -951,7 +959,7 @@ export const SettingsStructureTab = defineComponent({
         document?.activeElement === stepTokenComboInput &&
         String(rawStepTokenComboText || '').trim() &&
         !draftStepColumns.includes('tokens_custom')
-          ? normalizeClientStepColumns(
+          ? normalizeStepTableColumns(
               draftStepColumns.some((k) => k === 'tokens_combo' || k === 'tokens_io_cache')
                 ? draftStepColumns.map((k) =>
                     k === 'tokens_combo' || k === 'tokens_io_cache' ? 'tokens_custom' : k
@@ -1003,8 +1011,8 @@ export const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
         draftShowStepSpeedColor === false &&
-        draftStepTokenComboFormat === DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT &&
-        isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
+        draftStepTokenComboFormat === DEFAULT_STEP_TOKEN_COMBO_FORMAT &&
+        isSameList(draftStepColumns, DEFAULT_STEP_TABLE_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
     }
@@ -1072,27 +1080,27 @@ export const SettingsStructureTab = defineComponent({
       latestSettings = settings;
       if (windowBridge !== undefined) latestWindowBridge = windowBridge;
       if (hostPlatform) latestHostPlatform = hostPlatform;
-      draftWindowMountMode = normalizeClientWindowMountMode(
+      draftWindowMountMode = normalizeWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
-      draftPopoverWidthMode = normalizeClientPopoverWidthMode(settings.popoverWidthMode);
-      draftPopoverWidth = normalizeClientPopoverWidth(settings.popoverWidth);
+      draftPopoverWidthMode = normalizePopoverWidthMode(settings.popoverWidthMode);
+      draftPopoverWidth = normalizePopoverWidth(settings.popoverWidth);
       draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
-      draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
-      draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
-      draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
-      draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
+      draftTopbarSlots = normalizeTopbarCapsuleSlots(settings.topbarCapsuleSlots);
+      draftHoverModules = normalizeHoverModules(settings.hoverModules);
+      draftOverviewModules = normalizeOverviewModules(settings.overviewModules);
+      draftOverviewMetrics = normalizeOverviewMetrics(settings.overviewMetrics);
       draftShowQuotaPace = settings.showQuotaPace !== false;
       draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftShowStepSpeedColor = settings.showStepSpeedColor === true;
-      draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(
+      draftStepTokenComboFormat = normalizeStepTokenComboFormat(
         settings.stepTokenComboFormat
       );
       rawStepTokenComboText = draftStepTokenComboFormat;
-      draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
+      draftStepColumns = normalizeStepTableColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
       syncHoverSectionMeta();

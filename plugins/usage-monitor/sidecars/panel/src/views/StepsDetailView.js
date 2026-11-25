@@ -5,7 +5,8 @@
  * - 总汇总视图提供会话线性走势图、多模型同图趋势拟合曲线与极简高密度模型总览卡片。
  */
 
-import { resolveSettingsModernUi } from '../core/appearance.js';
+import {
+  resolveSettingsModernUi } from '../core/appearance.js';
 import { defineComponent } from '../core/component.js';
 import {
   h,
@@ -13,7 +14,7 @@ import {
   patchClasses,
   patchKeyedList,
   patchText,
-} from '../core/domPatch.js';
+  } from '../core/domPatch.js';
 import {
   buildModelAnomalyDiagnostic,
   formatAnomalyKindLabel,
@@ -28,15 +29,19 @@ import {
   normalizeOrchestratorIdDisplayMode,
   resolveModelAnomalySummary,
   resolveModelDisplayInfo,
-} from '../core/formatters.js';
-import { getEffectiveLocale, i18nStore, t } from '../i18n/index.js';
+  } from '../core/formatters.js';
+import { getEffectiveLocale,
+  i18nStore,
+  t } from '../i18n/index.js';
 import {
   formatAgentLabel,
-  normalizeClientStepColumns,
-  normalizeClientStepTokenComboFormat,
   resolveScopedConversation,
   telemetryStore,
 } from '../store/telemetryStore.js';
+import {
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
+} from "../../shared/settings-normalization.mjs";
 import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import {
   MODEL_COLOR_VARS,
@@ -580,7 +585,7 @@ export const StepsDetailView = defineComponent({
         modelValue: selectedFitMetric,
         options: getFitMetricSwitchOptions(),
       });
-      const colKeys = normalizeClientStepColumns(latestSlice?.stepTableColumns);
+      const colKeys = normalizeStepTableColumns(latestSlice?.stepTableColumns);
       syncTableHeaderColumns(colKeys);
       if (!latestSlice) {
         subTabSwitch.setProps({
@@ -847,7 +852,7 @@ export const StepsDetailView = defineComponent({
         allowNewRowFade && slice.experimentalModernUi && !showModels
       );
       if (!showModels) {
-        const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
+        const colKeys = normalizeStepTableColumns(slice.stepTableColumns);
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
           effectiveScopes,
           hasSubagents,
@@ -1407,7 +1412,7 @@ export const StepsDetailView = defineComponent({
         showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
-        stepTokenComboFormat: normalizeClientStepTokenComboFormat(
+        stepTokenComboFormat: normalizeStepTokenComboFormat(
           st.telemetry?.settings?.stepTokenComboFormat
         ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,

@@ -4,23 +4,27 @@
  * Panel Font Scale (`sm` / `md` / `lg` / `xl`), Pricing Sync, and Plugin Updates.
  */
 
-import { defineComponent } from '../../core/component.js';
+import {
+  defineComponent } from '../../core/component.js';
 import {
   applyAppearanceToRoot,
   normalizeClientFontScale,
   normalizeClientThemeAccent,
   resolveSettingsModernUi,
-} from '../../core/appearance.js';
-import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+  } from '../../core/appearance.js';
+import { h,
+  patchAttr,
+  patchClasses,
+  patchText } from '../../core/domPatch.js';
 import { isWindowOverlayMode } from '../../core/httpClient.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
-import { normalizeI18nLanguage, setI18nLanguage, t } from '../../i18n/index.js';
+import { normalizeI18nLanguage,
+  setI18nLanguage,
+  t } from '../../i18n/index.js';
 import {
-  normalizeClientUpdateMode,
   saveSettingsPatch,
-  triggerCloudSync,
-  triggerPluginUpdate,
 } from '../../store/telemetryStore.js';
+import { normalizePluginUpdateMode } from '../../../shared/settings-normalization.mjs';
 import { ThemeColorPicker } from '../../components/settings/ThemeColorPicker.js';
 import { CustomSelect } from '../../components/ui/CustomSelect.js';
 import { SegmentedControl } from '../../components/ui/SegmentedControl.js';
@@ -288,7 +292,7 @@ export const SettingsGeneralTab = defineComponent({
       icon: 'refresh',
       options: getUpdateModeOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientUpdateMode(val);
+        const nextMode = normalizePluginUpdateMode(val);
         draftPluginUpdateMode = nextMode;
         autoUpdateSelect.setValue(nextMode);
         if (latestCloudStatus) {
@@ -314,88 +318,6 @@ export const SettingsGeneralTab = defineComponent({
     const versionVal = h('strong', { className: 'cell-value', text: 'v1.4.4' });
     const versionSub = h('span', { className: 'cell-sub', text: t('settings.gen.checkingBtn') });
 
-    const syncPricingBtnText = h('span', { text: t('settings.gen.syncBtn') });
-    const syncPricingBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'btn-secondary',
-        onClick: async () => {
-          patchAttr(syncPricingBtn, 'disabled', true);
-          patchText(syncPricingBtnText, t('settings.gen.syncingBtn'));
-          showCloudFeedback(t('settings.gen.syncingMsg'), 0);
-          try {
-            const res = await triggerCloudSync();
-            const cs = res?.cloudStatus;
-            if (res?.ok && cs) {
-              showCloudFeedback(t('settings.gen.syncedMsg', { count: cs.modelCount }), 3500);
-            } else {
-              showCloudFeedback(cs?.lastSyncError || t('settings.gen.syncFallbackMsg'), 4500);
-            }
-          } catch (err) {
-            showCloudFeedback(err?.message || t('settings.gen.syncFallbackMsg'), 4500);
-          } finally {
-            patchAttr(syncPricingBtn, 'disabled', false);
-            patchText(syncPricingBtnText, t('settings.gen.syncBtn'));
-          }
-        },
-      },
-      [createSvgIcon('refresh', { size: 12 }), syncPricingBtnText]
-    );
-
-    const updatePluginBtnText = h('span', { text: t('settings.gen.checkUpdateBtn') });
-    const updatePluginBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'btn-secondary',
-        onClick: async () => {
-          patchAttr(updatePluginBtn, 'disabled', true);
-          try {
-            if (!latestCloudStatus?.updateAvailable) {
-              patchText(updatePluginBtnText, t('settings.gen.checkingBtn'));
-              showCloudFeedback(t('settings.gen.checkingMsg'), 0);
-              const syncRes = await triggerCloudSync();
-              const cs = syncRes?.cloudStatus || latestCloudStatus;
-              if (cs) {
-                latestCloudStatus = cs;
-                renderCloudStatus(cs);
-              }
-              if (!syncRes?.ok && cs?.lastSyncError) {
-                showCloudFeedback(
-                  t('settings.gen.checkFailedMsg', { err: cs.lastSyncError }),
-                  5000
-                );
-                return;
-              }
-              if (!cs?.updateAvailable) {
-                const curVer = cs?.currentPluginVersion || '1.4.4';
-                showCloudFeedback(t('settings.gen.upToDateMsg', { ver: curVer }), 4500);
-                return;
-              }
-            }
-            patchText(updatePluginBtnText, t('capsule.updating'));
-            showCloudFeedback(t('settings.gen.downloadingMsg'), 0);
-            const res = await triggerPluginUpdate();
-            if (res?.cloudStatus) {
-              latestCloudStatus = res.cloudStatus;
-            }
-            if (res?.ok) {
-              showCloudFeedback(res.message || t('settings.gen.updatedRestartMsg'), 5000);
-            } else {
-              showCloudFeedback(res?.message || t('settings.gen.updateSkippedMsg'), 5500);
-            }
-          } catch (err) {
-            showCloudFeedback(err?.message || t('settings.gen.updateFailedMsg'), 5000);
-          } finally {
-            patchAttr(updatePluginBtn, 'disabled', false);
-            renderCloudStatus(latestCloudStatus);
-          }
-        },
-      },
-      [createSvgIcon('arrow-down', { size: 12 }), updatePluginBtnText]
-    );
-
     const cloudPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
@@ -413,7 +335,6 @@ export const SettingsGeneralTab = defineComponent({
         ]),
         h('div', { className: 'matrix-cell' }, [versionCellLabelEl, versionVal, versionSub]),
       ]),
-      h('div', { className: 'cloud-actions-row' }, [syncPricingBtn, updatePluginBtn]),
     ]);
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [appearancePanel, cloudPanel]);
@@ -425,7 +346,7 @@ export const SettingsGeneralTab = defineComponent({
       draftThemeAccent = normalizeClientThemeAccent(settings.themeAccent);
       draftFontScale = normalizeClientFontScale(settings.fontScale);
       draftModernUi = resolveSettingsModernUi(settings);
-      draftPluginUpdateMode = normalizeClientUpdateMode(
+      draftPluginUpdateMode = normalizePluginUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
       );
@@ -465,36 +386,14 @@ export const SettingsGeneralTab = defineComponent({
       );
 
       const curVer = cs.currentPluginVersion || '1.4.4';
-      const latVer = cs.latestPluginVersion || curVer;
       const modeTag = cs.installMode === 'git' ? 'Git' : 'ZIP';
       patchText(versionVal, `v${curVer}`);
-      if (cs.updateAvailable && draftPluginUpdateMode !== 'off') {
-        patchText(versionSub, t('settings.gen.canUpgradeSub', { ver: latVer, mode: modeTag }));
-        patchClasses(versionSub, { 'accent-ok': true });
-        patchText(updatePluginBtnText, t('settings.gen.upgradeToBtn', { ver: latVer }));
-        patchClasses(updatePluginBtn, { 'btn-primary': true, 'btn-secondary': false });
-      } else if (draftPluginUpdateMode === 'off') {
+      if (draftPluginUpdateMode === 'off') {
         patchText(versionSub, t('settings.gen.updateOffSub', { mode: modeTag }));
         patchClasses(versionSub, { 'accent-ok': false });
-        patchText(
-          updatePluginBtnText,
-          cs.updateAvailable
-            ? t('settings.gen.manualUpgradeBtn', { ver: latVer })
-            : t('settings.gen.checkUpdateBtn')
-        );
-        patchClasses(updatePluginBtn, { 'btn-primary': false, 'btn-secondary': true });
       } else {
         patchText(versionSub, t('settings.gen.latestSub', { mode: modeTag }));
         patchClasses(versionSub, { 'accent-ok': false });
-        patchText(updatePluginBtnText, t('settings.gen.checkUpdateBtn'));
-        patchClasses(updatePluginBtn, { 'btn-primary': false, 'btn-secondary': true });
-      }
-
-      if (
-        !cloudTimer &&
-        (cs.lastUpdateError || (cs.lastUpdateResult?.ok === false && cs.lastUpdateResult?.message))
-      ) {
-        showCloudFeedback(cs.lastUpdateError || cs.lastUpdateResult.message, 5500);
       }
     }
 
@@ -510,9 +409,6 @@ export const SettingsGeneralTab = defineComponent({
       patchText(updateModeLabelEl, t('settings.gen.updateMode'));
       patchText(pricingCellLabelEl, t('settings.gen.pricingLabel'));
       patchText(versionCellLabelEl, t('settings.gen.versionLabel'));
-      if (!syncPricingBtn.hasAttribute('disabled')) {
-        patchText(syncPricingBtnText, t('settings.gen.syncBtn'));
-      }
       languageSwitch.setProps({
         modelValue: draftLanguage,
         options: getLanguageOptions(),
@@ -556,8 +452,6 @@ export const SettingsGeneralTab = defineComponent({
         fontScaleSwitch,
         modernUiSwitch,
         autoUpdateSelect,
-        syncPricingBtn,
-        updatePluginBtn,
         renderSettings,
         renderCloudStatus,
         refreshLabels,

@@ -12,11 +12,9 @@ import {
   fetchTelemetry,
   formatAgentBadgeText,
   formatConversationMeta,
-  normalizeClientUpdateMode,
   resolveHostRouteMatch,
   selectConversation,
   telemetryStore,
-  triggerPluginUpdate,
 } from '../../store/telemetryStore.js';
 import { uiStore } from '../../store/uiStore.js';
 import { CustomSelect } from '../ui/CustomSelect.js';
@@ -37,44 +35,6 @@ export const TopSessionHeader = defineComponent({
         void selectConversation(nextConvId);
       },
     });
-
-    const updateBtnIcon = createSvgIcon('arrow-down', { size: 11 });
-    const updateBtnText = h('span', { text: t('header.hasUpdate') });
-    let isHeaderUpdating = false;
-    const updateBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'update-badge-btn',
-        hidden: true,
-        'aria-label': t('header.ariaUpdate'),
-        onClick: async () => {
-          if (isHeaderUpdating) return;
-          isHeaderUpdating = true;
-          patchText(updateBtnText, t('header.upgrading'));
-          patchAttr(updateBtn, 'disabled', true);
-          try {
-            const res = await triggerPluginUpdate();
-            if (!res?.ok) {
-              uiStore.setState({ activeView: 'settings' });
-            }
-          } catch {
-            uiStore.setState({ activeView: 'settings' });
-          } finally {
-            isHeaderUpdating = false;
-            patchAttr(updateBtn, 'disabled', false);
-            const cs = telemetryStore.getState().telemetry?.cloudStatus;
-            patchText(
-              updateBtnText,
-              cs?.latestPluginVersion
-                ? t('header.upgradeToVer', { ver: cs.latestPluginVersion })
-                : t('header.hasUpdate')
-            );
-          }
-        },
-      },
-      [updateBtnIcon, updateBtnText]
-    );
 
     const sshBadge = h('span', {
       className: 'endpoint-ssh-badge',
@@ -99,7 +59,7 @@ export const TopSessionHeader = defineComponent({
 
     const headerRowEl = h('div', { className: 'session-header' }, [
       h('div', { className: 'session-left' }, [convSelect.el]),
-      h('div', { className: 'session-right' }, [sshBadge, updateBtn, statusTag, refreshBtn]),
+      h('div', { className: 'session-right' }, [sshBadge, statusTag, refreshBtn]),
     ]);
 
     const headerEl = h('header', { className: 'top-session-stack' }, [headerRowEl]);
@@ -165,7 +125,6 @@ export const TopSessionHeader = defineComponent({
       const telemetry = telSt.telemetry;
       if (!uiSt.monitorVisible) return;
 
-      patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
       patchAttr(refreshBtn, 'aria-label', t('header.ariaRefresh'));
 
       const ep = telemetry?.endpoint;
@@ -241,22 +200,6 @@ export const TopSessionHeader = defineComponent({
 
       const hasSubagents = Boolean(actConv?.hasSubagents || (actConv?.subagentCount || 0) > 0);
       const aggregated = actConv?.aggregated;
-
-      const cloudStatus = telemetry?.cloudStatus;
-      const updateMode = normalizeClientUpdateMode(
-        telemetry?.settings?.pluginUpdateMode,
-        telemetry?.settings?.autoUpdatePlugin
-      );
-      const showUpdate = Boolean(cloudStatus?.updateAvailable) && updateMode !== 'off';
-      patchAttr(updateBtn, 'hidden', !showUpdate);
-      if (showUpdate && !isHeaderUpdating) {
-        patchText(
-          updateBtnText,
-          cloudStatus?.latestPluginVersion
-            ? t('header.upgradeToVer', { ver: cloudStatus.latestPluginVersion })
-            : t('header.hasUpdate')
-        );
-      }
 
       const isSyncing = telSt.syncState === 'syncing';
       const isSynced = telSt.syncState === 'synced';

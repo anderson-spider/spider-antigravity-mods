@@ -3,9 +3,14 @@
 // main.ts against Node.
 import { GitlabError, NoProjectError, gitlab, type Fetch } from './api.ts'
 import { InputError, makeCtx, type Clock, type Ctx } from './context.ts'
-import { errorText } from './errors.ts'
-import { currentBranch, hostName, locate, projectPath, sshHostname, type Git, type Ssh } from './remote.ts'
-import { ENV_NAME, configuredHosts, isSet, offText, resolveToken } from './tokens.ts'
+
+export const ENV_NAME = 'GITLAB_MCP_TOKENS'
+
+/** Runs `git <args>` in the session's directory. */
+type Git = (args: string[]) => Promise<{ exitCode: number; stdout: string }>
+
+/** Runs `ssh <args>`; only `ssh -G <host>`, which prints the resolved configuration and connects nowhere. */
+type Ssh = (args: string[]) => Promise<{ exitCode: number; stdout: string }>
 
 /** What a call needs from outside: processes, the network, the environment and the clock. */
 export type Deps = {
@@ -25,9 +30,181 @@ export type Reply = { text: string; isError?: true }
 /** A tool: what it answers for its input, through the context of its call. */
 export type Tool = (ctx: Ctx, input: Record<string, unknown>) => Promise<string>
 
+/** Where a remote points; `ssh` marks an SSH remote, whose host may be an alias from ~/.ssh/config. */
+type Location = { host: string; project: string; ssh?: true }
+
+type Off = 'no-tokens' | 'bad-tokens' | 'no-host'
+
+/** A host name (an https remote or token key may carry a port): what may follow `https://` without changing the host. */
+const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/
+/** `group/sub/project`: at least two segments of GitLab path characters, no dot-only segment. */
+const PROJECT = /^[\w.-]+(\/[\w.-]+)+$/
+/** Printable ASCII with no space, comma or `=`, so the header cannot be broken by what was pasted. */
+const TOKEN = /^[\x21-\x2b\x2d-\x3c\x3e-\x7e]{1,512}$/
+/** Unexpanded Antigravity variable placeholder (for example `${GITLAB_MCP_TOKENS}` when enabled before filling variables). */
+const UNEXPANDED_PLACEHOLDER = /^\$\{[A-Z0-9_]+\}$/
+const NO_REMOTE =
+  'This directory is not a git repository with a GitLab remote. Pass cwd (the repository path), or host and project.'
+
+/** Present: a string with something other than whitespace. */
+const isSet = (value: unknown): boolean => value !== undefined && value !== null && !(typeof value === 'string' && !value.trim())
+
 /** Shapes an answer: `isError` is set only when true. */
 function reply(text: string, isError = false): Reply {
   return isError ? { text, isError: true } : { text }
+}
+
+/**
+ * The host and project path of a remote URL: `git@host:group/proj.git`, `ssh://git@host:22/group/proj.git` or
+ * `https://host/group/proj.git`. An SSH port is dropped (the API is https); an https port is kept.
+ */
+function parseRemote(url: string): Location | undefined {
+  const text = url.trim()
+  let host: string
+  let path: string
+  let ssh = false
+  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(text)
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    let parsed: URL
+    try {
+      parsed = new URL(text)
+    } catch {
+      return undefined
+    }
+    const scheme = parsed.protocol.replace(/:$/, '').toLowerCase()
+    if (scheme === 'https' || scheme === 'http') host = parsed.host
+    else if (scheme === 'ssh' || scheme === 'git+ssh') {
+      host = parsed.hostname
+      ssh = true
+    } else return undefined
+    path = decodeURIComponent(parsed.pathname)
+  } else if (scp) {
+    host = scp[1]!
+    path = scp[2]!
+    ssh = true
+  } else {
+    return undefined
+  }
+  host = host.toLowerCase()
+  const project = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '')
+  if (!HOST.test(host) || !PROJECT.test(project) || project.split('/').some((s) => /^\.+$/.test(s))) return undefined
+  return ssh ? { host, project, ssh: true } : { host, project }
+}
+
+/**
+ * A project the model names: a path (`group/sub/project`, the same shape as a remote's) or GitLab's numeric project id;
+ * never a URL or another host.
+ */
+function projectPath(value: unknown): string | undefined {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0 ? String(value) : undefined
+  if (typeof value !== 'string') return undefined
+  const project = value.trim().replace(/^\/+|\/+$/g, '')
+  if (/^[1-9]\d{0,15}$/.test(project)) return project
+  return PROJECT.test(project) && !project.split('/').some((s) => /^\.+$/.test(s)) ? project : undefined
+}
+
+/** A host name a tool input gives (`gitlab.example.com` or `localhost:8080`, with an optional port), lower-cased; never a URL. */
+function hostName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const host = value.trim().toLowerCase()
+  return HOST.test(host) ? host : undefined
+}
+
+/**
+ * The real host an SSH alias names (`Host work` with `HostName gitlab.example.com` in ~/.ssh/config), read from
+ * `ssh -G`; undefined when ssh fails or names no valid host. The alias itself comes back for a host with no alias.
+ */
+async function sshHostname(ssh: Ssh, alias: string): Promise<string | undefined> {
+  if (!HOST.test(alias) || alias.includes(':')) return undefined
+  const out = await ssh(['-G', alias]).catch(() => undefined)
+  if (!out || out.exitCode !== 0) return undefined
+  const line = out.stdout.split('\n').find((l) => /^hostname\s/i.test(l))
+  const name = line?.replace(/^hostname\s+/i, '').trim().toLowerCase()
+  return name && HOST.test(name) && !name.includes(':') ? name : undefined
+}
+
+/** The `origin` remote, or the first remote when there is no `origin`. */
+async function locate(git: Git): Promise<Location | { error: string }> {
+  let url = await git(['remote', 'get-url', 'origin']).catch(() => undefined)
+  if (!url || url.exitCode !== 0) {
+    const names = await git(['remote']).catch(() => undefined)
+    const first = names?.exitCode === 0 ? names.stdout.split('\n').map((s) => s.trim()).find(Boolean) : undefined
+    if (!first) return { error: NO_REMOTE }
+    url = await git(['remote', 'get-url', first]).catch(() => undefined)
+    if (!url || url.exitCode !== 0) return { error: NO_REMOTE }
+  }
+  const where = parseRemote(url.stdout)
+  // the URL itself is not echoed: an https remote may carry a user and password
+  return where ?? { error: 'The git remote is not a GitLab project URL this plugin can read (host and group/project).' }
+}
+
+/** The checked-out branch, or undefined on a detached HEAD or outside a repository. */
+async function currentBranch(git: Git): Promise<string | undefined> {
+  const out = await git(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => undefined)
+  const name = out?.exitCode === 0 ? out.stdout.trim() : ''
+  return name && name !== 'HEAD' ? name : undefined
+}
+
+/** The host-to-token map: pairs separated by commas or whitespace. Any malformed pair refuses the whole value. */
+function parseTokens(value: unknown): { tokens: Map<string, string>; off?: undefined } | { tokens?: undefined; off: 'no-tokens' | 'bad-tokens' } {
+  if (value === undefined || value === null) return { off: 'no-tokens' }
+  if (typeof value !== 'string') return { off: 'bad-tokens' }
+  if (UNEXPANDED_PLACEHOLDER.test(value.trim())) return { off: 'no-tokens' }
+  const pairs = value.split(/[\s,]+/).filter(Boolean)
+  if (pairs.length === 0) return { off: 'no-tokens' }
+  const tokens = new Map<string, string>()
+  for (const pair of pairs) {
+    const at = pair.indexOf('=')
+    const host = pair.slice(0, at).toLowerCase()
+    const token = pair.slice(at + 1)
+    if (at <= 0 || !HOST.test(host) || !TOKEN.test(token) || tokens.has(host)) return { off: 'bad-tokens' }
+    tokens.set(host, token)
+  }
+  return { tokens }
+}
+
+/** What each refusal tells the user: where to set the variable, never a token value. */
+function offText(off: Off, host?: string, configured?: readonly string[]): string {
+  switch (off) {
+    case 'no-tokens':
+      return `${ENV_NAME} is not set. Configure ${ENV_NAME} as host=token pairs (for example gitlab.com=glpat-...) in Antigravity's plugin settings (/plugin or Customizations) or your environment and reload MCP.`
+    case 'bad-tokens':
+      return `${ENV_NAME} is not a valid list of host=token pairs (comma- or whitespace-separated).`
+    case 'no-host': {
+      const base = `No token configured for ${host ?? 'this host'}. Add ${host ?? '<host>'}=<token> to ${ENV_NAME}.`
+      if (configured && configured.length > 0) {
+        return `${base} Configured hosts: ${configured.join(', ')}. Pass host explicitly to target one of them.`
+      }
+      return base
+    }
+  }
+}
+
+/** A hint for the status (and, for 403, whether the request wrote), or undefined when GitLab's message says enough. */
+function hint(err: GitlabError, project: string, host: string): string | undefined {
+  switch (err.status) {
+    case 401:
+      return `The token for ${host} was refused (expired or revoked?). Replace it in ${ENV_NAME}.`
+    case 403:
+      return err.method === 'GET'
+        ? `The token's user may have no access to ${project}.`
+        : `The token may lack the api scope (read_api only reads), or the user's role in ${project} does not allow this.`
+    case 404:
+      return `${project} may not exist or the token's user cannot see it; check the project path and the iid or id.`
+    case 405:
+    case 406:
+      return 'GitLab refused the action in the current state (for a merge: not mergeable yet, or merging is not allowed).'
+    case 409:
+      return 'Something changed meanwhile (for a merge: the head moved; read status again).'
+    default:
+      return undefined
+  }
+}
+
+function errorText(err: GitlabError, project: string, host: string): string {
+  const more = hint(err, project, host)
+  const said = err.message.replace(/[.\s]+$/, '')
+  return `GitLab answered ${err.status} for ${project}: ${said}${more ? `. ${more}` : ''}`
 }
 
 /**
@@ -35,43 +212,54 @@ function reply(text: string, isError = false): Reply {
  * remote that names no GitLab with a token (not a git repo or a host missing from tokens), where a single configured
  * host can step in.
  */
-type Target = { host: string; token: string; current?: string } | { error: string; fallback?: 'no-repo' | 'no-host' }
+type Target =
+  | { host: string; token: string; current?: string }
+  | { error: string; fallback?: 'no-repo' | 'no-host'; where?: Location; resolvedHost?: string }
 
 /** The remote's host (an SSH alias resolved through `ssh -G`) and its token. */
-async function fromRemote(git: Git, ssh: Ssh, tokens: unknown): Promise<Target> {
+async function fromRemote(git: Git, ssh: Ssh, tokens: Map<string, string>): Promise<Target> {
   const where = await locate(git)
   if ('error' in where) return { error: where.error, fallback: 'no-repo' }
+  const hosts = [...tokens.keys()]
   let host = where.host
-  let access = resolveToken(tokens, host)
-  if (access.off === 'no-host' && where.ssh) {
+  let token = tokens.get(host)
+  let resolvedHost: string | undefined
+  if (token === undefined && where.ssh) {
     // an SSH remote may name a ~/.ssh/config alias (`git@work:group/app.git`): its token is the real host's
     const real = await sshHostname(ssh, host)
+    resolvedHost = real
     if (real && real !== host) {
-      access = resolveToken(tokens, real)
-      if (access.off === 'no-host') {
-        return { error: `The remote's host ${host} is an SSH alias for ${real}. ${offText('no-host', real, access.hosts)}`, fallback: 'no-host' }
+      token = tokens.get(real)
+      if (token === undefined) {
+        return {
+          error: `The remote's host ${host} is an SSH alias for ${real}. ${offText('no-host', real, hosts)}`,
+          fallback: 'no-host',
+          where,
+          resolvedHost,
+        }
       }
       host = real
     } else if (!host.includes('.')) {
       return {
-        error: `${offText('no-host', host, access.hosts)} If ${host} is an SSH alias from ~/.ssh/config, ssh -G could not resolve it: give the remote the real host name.`,
+        error: `${offText('no-host', host, hosts)} If ${host} is an SSH alias from ~/.ssh/config, ssh -G could not resolve it: give the remote the real host name.`,
         fallback: 'no-host',
+        where,
+        resolvedHost,
       }
     }
   }
-  if (access.off === 'no-host') return { error: offText(access.off, host, access.hosts), fallback: 'no-host' }
-  if (access.off !== undefined) return { error: offText(access.off, host) }
-  return { host, token: access.token, current: where.project }
+  if (token === undefined) return { error: offText('no-host', host, hosts), fallback: 'no-host', where, resolvedHost }
+  return { host, token, current: where.project }
 }
 
 /** A host named by the `host` input or single-host auto-default, and its token. */
-async function onHost(git: Git, ssh: Ssh, tokens: unknown, host: string): Promise<Target> {
-  const access = resolveToken(tokens, host)
-  if (access.off !== undefined) return { error: offText(access.off, host, access.hosts) }
+async function onHost(git: Git, ssh: Ssh, tokens: Map<string, string>, host: string): Promise<Target> {
+  const token = tokens.get(host)
+  if (token === undefined) return { error: offText('no-host', host, [...tokens.keys()]) }
   const where = await locate(git)
-  if ('error' in where) return { host, token: access.token }
+  if ('error' in where) return { host, token }
   const same = where.host === host || (!!where.ssh && (await sshHostname(ssh, where.host)) === host)
-  return { host, token: access.token, current: same ? where.project : undefined }
+  return { host, token, current: same ? where.project : undefined }
 }
 
 /**
@@ -80,23 +268,32 @@ async function onHost(git: Git, ssh: Ssh, tokens: unknown, host: string): Promis
  */
 export async function run(deps: Deps, tool: Tool, input: Record<string, unknown>, options: Options): Promise<Reply> {
   const { git, ssh } = deps
+  const namedHost = input.host !== undefined ? hostName(input.host) : undefined
+  if (input.host !== undefined && !namedHost) {
+    return reply('host must be a GitLab host name (gitlab.example.com), not a URL.', true)
+  }
   const rawTokens = isSet(options.tokens) ? options.tokens : await deps.env(ENV_NAME)
+  const parsed = parseTokens(rawTokens)
+  if (parsed.tokens === undefined) return reply(offText(parsed.off), true)
+  const tokens = parsed.tokens
+
   let target: Target
-  if (input.host !== undefined) {
-    const named = hostName(input.host)
-    if (!named) return reply('host must be a GitLab host name (gitlab.example.com), not a URL.', true)
-    target = await onHost(git, ssh, rawTokens, named)
+  if (namedHost !== undefined) {
+    target = await onHost(git, ssh, tokens, namedHost)
   } else {
-    target = await fromRemote(git, ssh, rawTokens)
+    target = await fromRemote(git, ssh, tokens)
     if ('error' in target && target.fallback) {
-      const available = configuredHosts(rawTokens)
-      if (available.off !== undefined) {
-        target = { error: offText(available.off) }
-      } else if (available.hosts.length === 1) {
-        target = await onHost(git, ssh, rawTokens, available.hosts[0]!)
+      const hosts = [...tokens.keys()]
+      if (hosts.length === 1) {
+        const sole = hosts[0]!
+        const token = tokens.get(sole)!
+        const same =
+          target.where !== undefined &&
+          (target.where.host === sole || (!!target.where.ssh && target.resolvedHost === sole))
+        target = { host: sole, token, current: same ? target.where?.project : undefined }
       } else if (target.fallback === 'no-repo') {
         target = {
-          error: `${target.error} Pass host explicitly. Configured hosts: ${available.hosts.join(', ')}.`,
+          error: `${target.error} Pass host explicitly. Configured hosts: ${hosts.join(', ')}.`,
         }
       }
     }

@@ -1582,10 +1582,8 @@ test('antigravity-cli multi-dir transcript fallback recovers offline sessions an
   assert.equal(onlineStep.ttftSec, 0.8);
 });
 
-test('standalonePort setting normalizes valid ports and notifies auto-host listener on change and reset', () => {
+test('standalonePort setting normalizes valid ports and persists across update and reset', () => {
   const h = backendHarness();
-  const observedPorts = [];
-  h.setStandalonePortListener((p) => observedPorts.push(p));
 
   assert.equal(h.normalizeStandalonePort(0), 0);
   assert.equal(h.normalizeStandalonePort(80), 0);
@@ -1595,17 +1593,11 @@ test('standalonePort setting normalizes valid ports and notifies auto-host liste
   const saved = h.executeSettingsAction({ standalonePort: 8787 });
   assert.equal(saved.ok, true);
   assert.equal(saved.updated.standalonePort, 8787);
-  assert.deepEqual(observedPorts, [8787]);
 
-  // Same port does not re-trigger listener
-  h.executeSettingsAction({ standalonePort: 8787 });
-  assert.deepEqual(observedPorts, [8787]);
-
-  // Reset returns standalonePort to 0 and notifies listener
+  // Reset returns standalonePort to 0
   const reset = h.executeResetSettingsAction();
   assert.equal(reset.ok, true);
   assert.equal(reset.updated.standalonePort, 0);
-  assert.deepEqual(observedPorts, [8787, 0]);
 });
 
 function encodeProtoVarint(value) {

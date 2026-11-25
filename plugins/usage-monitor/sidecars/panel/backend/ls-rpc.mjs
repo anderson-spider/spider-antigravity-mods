@@ -18,6 +18,7 @@ import {
   shouldRemoteEndpointPreferTier2,
 } from './endpoint-registry.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
 
 const QUOTA_CACHE_TTL_MS = 10_000;
 const QUOTA_RETRY_COOLDOWN_MS = 5_000;
@@ -287,7 +288,7 @@ export async function callLsRpc(method, body = {}, timeoutMs = 5000, endpoint = 
     return callRemoteEndpointLsRpc(endpoint, method, body, timeoutMs);
   }
 
-  if (!lsRuntimeEndpoint.baseUrl && lsRuntimeEndpoint.addr !== 'test.invalid') {
+  if (!lsRuntimeEndpoint.baseUrl && !isTestRuntime()) {
     await ensureLsEndpointDiscovered({ force: false });
   }
   if (!lsRuntimeEndpoint.baseUrl) {
@@ -306,7 +307,7 @@ export async function callLsRpc(method, body = {}, timeoutMs = 5000, endpoint = 
       timeoutMs
     );
   } catch (netErr) {
-    if (lsRuntimeEndpoint.addr !== 'test.invalid') {
+    if (!isTestRuntime()) {
       const refreshed = await ensureLsEndpointDiscovered({ force: true });
       if (
         refreshed &&
@@ -327,7 +328,7 @@ export async function callLsRpc(method, body = {}, timeoutMs = 5000, endpoint = 
     }
   }
 
-  if (!res.ok && (res.status === 401 || res.status === 403) && lsRuntimeEndpoint.addr !== 'test.invalid') {
+  if (!res.ok && (res.status === 401 || res.status === 403) && !isTestRuntime()) {
     const refreshed = await ensureLsEndpointDiscovered({ force: true });
     if (
       refreshed &&

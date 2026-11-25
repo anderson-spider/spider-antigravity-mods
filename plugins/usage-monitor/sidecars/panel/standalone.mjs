@@ -10,51 +10,13 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-function applyPreImportEnvOverrides(argv) {
-  for (let i = 0; i < argv.length; i++) {
-    const raw = String(argv[i] || '');
-    if (!raw) continue;
-    const eqIdx = raw.indexOf('=');
-    const flag = eqIdx > 0 ? raw.slice(0, eqIdx) : raw;
-    const readVal = () => {
-      if (eqIdx > 0) return raw.slice(eqIdx + 1).trim();
-      if (i + 1 < argv.length) {
-        i += 1;
-        return String(argv[i] || '').trim();
-      }
-      return '';
-    };
-    if (flag === '--data-dir') {
-      const v = readVal();
-      if (v) process.env.USAGE_MONITOR_DATA_DIR = v;
-    } else if (flag === '--app-data-dir') {
-      const v = readVal();
-      if (v) process.env.USAGE_MONITOR_APP_DATA_DIR = v;
-    } else if (flag === '--gemini-dir') {
-      const v = readVal();
-      if (v) process.env.ANTIGRAVITY_GEMINI_DIR = v;
-    } else if (flag === '--ls-addr') {
-      const v = readVal();
-      if (v) process.env.ANTIGRAVITY_LS_ADDRESS = v;
-    } else if (flag === '--csrf-token') {
-      const v = readVal();
-      if (v) process.env.ANTIGRAVITY_CSRF_TOKEN = v;
-    }
-  }
-}
+import {
+  applyStandaloneEnvOverrides,
+  formatStandaloneHelpText,
+  parseStandaloneCliArgs,
+} from './backend/standalone-cli-args.mjs';
 
 export async function runStandaloneCli(argv = process.argv.slice(2)) {
-  applyPreImportEnvOverrides(argv);
-
-  const {
-    createStandaloneWebServer,
-    formatStandaloneHelpText,
-    parseStandaloneCliArgs,
-  } = await import('./backend/standalone-server.mjs');
-  const { DATA_DIR, lsRuntimeEndpoint } = await import('./backend/config.mjs');
-  const { ensureLsEndpointDiscovered } = await import('./backend/ls-discovery.mjs');
-
   let parsed;
   try {
     parsed = parseStandaloneCliArgs(argv, process.env, { defaultPort: 8787 });
@@ -68,6 +30,12 @@ export async function runStandaloneCli(argv = process.argv.slice(2)) {
     console.log(formatStandaloneHelpText());
     return null;
   }
+
+  applyStandaloneEnvOverrides(parsed);
+
+  const { createStandaloneWebServer } = await import('./backend/standalone-server.mjs');
+  const { DATA_DIR, lsRuntimeEndpoint } = await import('./backend/config.mjs');
+  const { ensureLsEndpointDiscovered } = await import('./backend/ls-discovery.mjs');
 
   let controller;
   try {

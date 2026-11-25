@@ -43,6 +43,7 @@ import {
   isCarbonModelIdentifier,
 } from './model-pricing.mjs';
 import { getCloudStatus, getPricingPhaseEpoch, pricingCatalogRevision } from './pricing-catalog.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
 // CDP window bridge removed in hardened build.
 function getDefaultWindowBridgeStatus() {
@@ -1560,7 +1561,7 @@ export async function buildTelemetryPayloadInternal(
   if (
     !isRemote &&
     !userStatus &&
-    lsRuntimeEndpoint.addr !== 'test.invalid' &&
+    !isTestRuntime() &&
     (!lsRuntimeEndpoint.baseUrl || lsRuntimeEndpoint.isDynamic)
   ) {
     const prevBaseUrl = lsRuntimeEndpoint.baseUrl;
@@ -2210,7 +2211,7 @@ export async function buildTelemetryPayloadInternal(
     },
   });
 
-  if (!isRemote && lsRuntimeEndpoint.addr !== 'test.invalid') {
+  if (!isRemote && !isTestRuntime()) {
     try {
       saveJson(CLI_STATUS_SNAPSHOT_FILE, buildCliStatusSnapshot(finalPayload, Date.now()));
     } catch {

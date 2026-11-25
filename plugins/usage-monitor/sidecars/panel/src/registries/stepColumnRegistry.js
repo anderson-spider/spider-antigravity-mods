@@ -30,9 +30,6 @@ import {
 
 export const STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
 export const DEFAULT_STEP_COLUMN_KEYS = DEFAULT_STEP_TABLE_COLUMNS;
-const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
-const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
-const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
 
 function resolveStepTokenParts(st) {
   const inTok = Math.max(0, Number(st?.inputTokens || 0));
@@ -57,7 +54,7 @@ function formatPartWithOptionalCost(tokCount, costVal) {
 }
 
 export function formatCustomTokenComboHeader(rawFormat) {
-  const segs = parseClientStepTokenComboSegments(rawFormat);
+  const segs = parseStepTokenComboSegments(rawFormat);
   return segs.map((seg) => t(`steps.tokSeg.${seg}.th`)).join(' / ');
 }
 
@@ -319,14 +316,14 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
         fmt: formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
       }),
     sigPart: (st, ctx) =>
-      `${normalizeClientStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
+      `${normalizeStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
     createCell: () => {
       const valEl = h('span');
       const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st, ctx) => {
-      const segs = parseClientStepTokenComboSegments(ctx?.stepTokenComboFormat);
+      const segs = parseStepTokenComboSegments(ctx?.stepTokenComboFormat);
       const parts = resolveStepTokenParts(st);
       const rendered = segs.map((seg) => resolveSegmentDisplay(seg, parts, st));
       patchText(
@@ -431,7 +428,7 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
 });
 
 export function getStepColumnOptions(
-  stepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT
+  stepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT
 ) {
   const ctx = { stepTokenComboFormat };
   return STEP_COLUMN_KEYS.map((key) => ({

@@ -4,6 +4,12 @@
  * while strictly isolating `#ag-usage-monitor-capsule` from font scaling.
  */
 
+import {
+  normalizeFontScale,
+  normalizeModernUi,
+  normalizeThemeAccent,
+} from '../../shared/settings-normalization.mjs';
+
 export const THEME_ACCENT_PRESETS = Object.freeze([
   { key: 'host', labelKey: 'settings.gen.accentHost', cssColor: '' },
   { key: 'blue', labelKey: 'settings.gen.accentBlue', cssColor: 'hsl(217 84% 53%)' },
@@ -28,26 +34,9 @@ export const PANEL_SCALE_FACTORS = Object.freeze({
   xl: 1.18,
 });
 
-export function normalizeClientThemeAccent(raw) {
-  const val = String(raw ?? '').trim().toLowerCase();
-  return THEME_ACCENT_PRESETS.some((p) => p.key === val) ? val : 'host';
-}
-
-export function normalizeClientFontScale(raw) {
-  const val = String(raw ?? '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(FONT_SCALE_FACTORS, val) ? val : 'md';
-}
-
-export function normalizeClientModernUi(raw) {
-  if (raw === undefined || raw === null || raw === '') return true;
-  if (typeof raw === 'string') {
-    const lower = raw.trim().toLowerCase();
-    if (lower === 'false' || lower === '0' || lower === 'off') return false;
-    if (lower === 'true' || lower === '1' || lower === 'on') return true;
-    return true;
-  }
-  return Boolean(raw);
-}
+export const normalizeClientThemeAccent = normalizeThemeAccent;
+export const normalizeClientFontScale = normalizeFontScale;
+export const normalizeClientModernUi = normalizeModernUi;
 
 export function resolveSettingsModernUi(settings) {
   if (!settings || typeof settings !== 'object') return true;

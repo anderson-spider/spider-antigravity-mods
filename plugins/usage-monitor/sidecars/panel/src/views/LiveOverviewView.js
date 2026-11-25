@@ -5,15 +5,18 @@
  * allowing users to freely reorder or remove any module down to 1 item.
  */
 
-import { defineComponent } from '../core/component.js';
+import {
+  defineComponent } from '../core/component.js';
 import { h } from '../core/domPatch.js';
 import { i18nStore } from '../i18n/index.js';
 import { createDynamicWidgetHost } from '../registries/widgetRegistry.js';
 import {
-  DEFAULT_CLIENT_OVERVIEW_MODULES,
-  normalizeClientOverviewModules,
+  DEFAULT_OVERVIEW_MODULES,
   telemetryStore,
 } from '../store/telemetryStore.js';
+import {
+  normalizeOverviewModules,
+} from "../../shared/settings-normalization.mjs";
 import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 
@@ -41,7 +44,7 @@ export const LiveOverviewView = defineComponent({
       containerEl: overviewInner,
       mode: 'overview',
       isVisibleFn: () => getVisibleMonitorView() === 'overview',
-      initialModuleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+      initialModuleKeys: DEFAULT_OVERVIEW_MODULES,
     });
 
     const viewScrollbar = CustomScrollbar({
@@ -76,7 +79,7 @@ export const LiveOverviewView = defineComponent({
 
     function renderData(data) {
       if (!data) return;
-      const moduleKeys = normalizeClientOverviewModules(data.settings?.overviewModules);
+      const moduleKeys = normalizeOverviewModules(data.settings?.overviewModules);
       const minuteTick = Math.floor(Date.now() / 30000);
       widgetHost.update({
         moduleKeys,
@@ -144,7 +147,7 @@ export const LiveOverviewView = defineComponent({
           // Refresh initial skeleton labels even before telemetry arrives
           if (!latestData) {
             widgetHost.update({
-              moduleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+              moduleKeys: DEFAULT_OVERVIEW_MODULES,
               data: null,
             });
           }
@@ -154,7 +157,7 @@ export const LiveOverviewView = defineComponent({
           renderData(latestData);
         } else {
           widgetHost.update({
-            moduleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+            moduleKeys: DEFAULT_OVERVIEW_MODULES,
             data: null,
           });
         }
