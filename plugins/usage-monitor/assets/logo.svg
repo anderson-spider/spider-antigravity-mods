@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Usage &amp; Speed Monitor</title>
+  <desc id="desc">Dark slate squircle badge featuring a cyan-to-emerald telemetry gauge arc, an expected-pace tick marker, and a central speed pulse waveform.</desc>
+  <defs>
+    <linearGradient id="bgSlate" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="arcGrad" x1="22" y1="88" x2="106" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#10B981"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="url(#bgSlate)"/>
+  <rect x="1.5" y="1.5" width="125" height="125" rx="22.5" stroke="#334155" stroke-width="1.5"/>
+  <!-- 240° gauge track (150° to 390°, radius 42 around center 64,66) -->
+  <path d="M 27.6 87 A 42 42 0 1 1 100.4 87" stroke="#334155" stroke-width="9" stroke-linecap="round"/>
+  <!-- Active telemetry/quota arc (~155° span from 150° to 305°) -->
+  <path d="M 27.6 87 A 42 42 0 1 1 88.1 31.6" stroke="url(#arcGrad)" stroke-width="9" stroke-linecap="round"/>
+  <!-- Expected-pace tick marker at ~270° (top center) -->
+  <line x1="64" y1="16" x2="64" y2="32" stroke="#F8FAFC" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="64" cy="14" r="3" fill="#F59E0B"/>
+  <!-- Central speed pulse waveform -->
+  <path d="M 38 72 H 48 L 55 54 L 63 82 L 71 60 L 77 72 H 90" stroke="#F8FAFC" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

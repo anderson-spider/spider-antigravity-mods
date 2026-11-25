@@ -1,0 +1,31 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "usage-monitor",
+  "displayName": "Usage & Speed Monitor",
+  "version": "1.0.0",
+  "description": "Local offline monitor for token usage, generation speed (TPS), TTFT, context breakdown, and quota pools.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "anderson-spider",
+    "url": "https://github.com/anderson-spider"
+  },
+  "homepage": "https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/usage-monitor",
+  "repository": "https://github.com/anderson-spider/spider-antigravity-mods",
+  "license": "GPL-3.0",
+  "keywords": [
+    "usage",
+    "tokens",
+    "speed",
+    "tps",
+    "ttft",
+    "quota",
+    "context",
+    "sidecar",
+    "offline"
+  ],
+  "suggestedPrompts": [
+    "Open Usage Monitor panel",
+    "Check current session token usage",
+    "Check today's and this week's model usage breakdown"
+  ]
+}
