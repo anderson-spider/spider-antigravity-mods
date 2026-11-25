@@ -25,7 +25,56 @@ export type Deps = {
 /** Configuration captured at startup (or injected in tests); unset fields fall back to `deps.env`. */
 export type Options = { tokens?: unknown }
 
-export type Reply = { text: string; isError?: true }
+export type Reply = { text: string; structuredContent?: Record<string, unknown>; isError?: true }
+
+/** Masks every secret string recursively across text, arrays, and plain objects so tokens never leak into replies. */
+export function maskSecrets<T>(value: T, secrets: readonly string[]): T {
+  const nonEmpty = secrets.filter(Boolean)
+  if (nonEmpty.length === 0) return value
+  const scrub = (text: string): string => nonEmpty.reduce((acc, secret) => acc.split(secret).join('[token]'), text)
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'string') return scrub(node)
+    if (Array.isArray(node)) return node.map(walk)
+    if (node && typeof node === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = walk(v)
+      return out
+    }
+    return node
+  }
+  return walk(value) as T
+}
+
+export type WorkspaceInfo = { host: string; project: string; branch?: string }
+
+export type ResolvedEnv =
+  | { tokens: Map<string, string>; workspace?: WorkspaceInfo; error?: undefined }
+  | { tokens?: undefined; workspace?: undefined; error: string }
+
+/** Resolves all configured tokens plus the active git workspace (when its remote matches a configured GitLab host). */
+export async function resolveEnv(deps: Deps, options: Options): Promise<ResolvedEnv> {
+  const rawTokens = isSet(options.tokens) ? options.tokens : await deps.env(ENV_NAME)
+  const parsed = parseTokens(rawTokens)
+  if (parsed.tokens === undefined) return { error: offText(parsed.off) }
+  const { tokens } = parsed
+  let workspace: WorkspaceInfo | undefined
+  const where = await locate(deps.git)
+  if (!('error' in where)) {
+    let host = where.host
+    if (!tokens.has(host) && where.ssh) {
+      const real = await sshHostname(deps.ssh, host)
+      if (real && tokens.has(real)) host = real
+    }
+    if (tokens.has(host)) {
+      const branch = await currentBranch(deps.git)
+      workspace = { host, project: where.project, ...(branch ? { branch } : {}) }
+    }
+  }
+  return { tokens, ...(workspace ? { workspace } : {}) }
+}
+
+/** Validates a GitLab host name (without scheme or path), returning normalized lowercase or undefined. */
+export { hostName, projectPath, errorText }
 
 /** A tool: what it answers for its input, through the context of its call. */
 export type Tool = (ctx: Ctx, input: Record<string, unknown>) => Promise<string>

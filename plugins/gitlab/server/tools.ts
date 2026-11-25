@@ -1,6 +1,8 @@
-// The six tools as the MCP server lists them: name, description and inputSchema, each schema checked against its
-// input type by `SchemaFor`, and the function that answers it.
+// All tools listed by the MCP server: name, optional title and _meta, description and inputSchema (checked against
+// `ToolInputs` by `SchemaFor`). The six core GitLab tools plus `gitlab_mr_dashboard` are visible to the model;
+// `gitlab_ui_*` tools carry `visibility: ['app']` so only the MCP App iframe can invoke them.
 import { comment } from './comments.ts'
+import { DASHBOARD_URI, type DashboardToolName } from './dashboard.ts'
 import type { ToolInputs } from './inputs.ts'
 import { jobLog } from './joblog.ts'
 import { label } from './labels.ts'
@@ -21,6 +23,14 @@ const COMMENT_ACTIONS = allOf<Inputs['gitlab_mr_comment']['action']>()(
 const PIPELINE_ACTIONS = allOf<Inputs['gitlab_pipeline']['action']>()(
   'list', 'jobs', 'wait', 'run', 'retry', 'cancel', 'play', 'artifacts',
 )
+const UI_ACTIONS = allOf<Inputs['gitlab_ui_action']['action']>()(
+  'approve', 'unapprove', 'rebase', 'toggle_draft', 'close', 'reopen', 'update_description', 'merge',
+  'comment', 'reply', 'line_comment', 'edit_note', 'resolve', 'unresolve', 'publish_draft', 'publish_all_drafts',
+  'retry_job', 'cancel_job', 'play_job', 'retry_pipeline', 'cancel_pipeline', 'run_pipeline',
+)
+const STATE_ACTIONS = allOf<Inputs['gitlab_ui_state']['action']>()(
+  'get', 'save_preferences', 'save_view', 'delete_view', 'set_file_viewed',
+)
 
 const IID = { type: 'integer', description: 'MR !iid. Default: the open MR of the current branch.' } as const
 const NAMES = { type: 'array', items: { type: 'string' } } as const
@@ -30,8 +40,27 @@ const CWD = { type: 'string', description: 'Local repo path.' } as const
 const PAGE = { type: 'integer' } as const
 const PER_PAGE = { type: 'integer', description: 'Max 100.' } as const
 const ALLOW_OTHERS = { type: 'boolean', description: "Write on someone else's MR; only when the user asked." } as const
+const MR_STATES = allOf<'opened' | 'merged' | 'closed' | 'all'>()('opened', 'merged', 'closed', 'all')
+const INVOLVEMENTS = allOf<'all' | 'reviewing' | 'authored'>()('all', 'reviewing', 'authored')
 
-export type ToolSpec = { name: keyof ToolInputs; description: string; inputSchema: { type: 'object'; properties: Record<string, unknown>; required: readonly string[] } }
+const APP_ONLY_META = { ui: { visibility: ['app'] } } as const
+const DASHBOARD_META = {
+  ui: { resourceUri: DASHBOARD_URI },
+  'com.google.antigravity/ui': {
+    entrypoints: [
+      { type: 'aux_pane', title: 'GitLab MRs' },
+      { type: 'global', title: 'GitLab MRs' },
+    ],
+  },
+} as const
+
+export type ToolSpec = {
+  name: keyof ToolInputs
+  title?: string
+  description: string
+  inputSchema: { type: 'object'; properties: Record<string, unknown>; required: readonly string[] }
+  _meta?: Record<string, unknown>
+}
 
 export const SPECS: readonly ToolSpec[] = [
   {
@@ -50,7 +79,7 @@ export const SPECS: readonly ToolSpec[] = [
         host: HOST,
         project: PROJECT,
         iid: IID,
-        state: { type: 'string', enum: allOf<'opened' | 'merged' | 'closed' | 'all'>()('opened', 'merged', 'closed', 'all') },
+        state: { type: 'string', enum: MR_STATES },
         scope: { type: 'string', enum: allOf<'created_by_me' | 'assigned_to_me' | 'all'>()('created_by_me', 'assigned_to_me', 'all') },
         author: { type: 'string', description: 'list: username or @me.' },
         assignee: { type: 'string' },
@@ -197,10 +226,153 @@ export const SPECS: readonly ToolSpec[] = [
       required: [],
     } satisfies SchemaFor<Inputs['gitlab_user']>,
   },
+  {
+    name: 'gitlab_mr_dashboard',
+    title: 'GitLab MRs',
+    description:
+      'Open the interactive GitLab Merge Requests dashboard (side pane or full-page sidebar) to browse, filter, ' +
+      'review diffs, inspect pipelines/job logs, manage discussions/draft notes, and merge MRs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: CWD,
+        host: HOST,
+        project: PROJECT,
+        iid: IID,
+        state: { type: 'string', enum: MR_STATES },
+        involvement: { type: 'string', enum: INVOLVEMENTS },
+      },
+      required: [],
+    } satisfies SchemaFor<Inputs['gitlab_mr_dashboard']>,
+    _meta: DASHBOARD_META,
+  },
+  // App-only UI tools (hidden from the LLM via `visibility: ['app']`)
+  {
+    name: 'gitlab_ui_list',
+    description: 'App-only: list merge requests across configured GitLab hosts with GraphQL enrichment and REST fallback.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: HOST,
+        project: PROJECT,
+        state: { type: 'string', enum: MR_STATES },
+        involvement: { type: 'string', enum: INVOLVEMENTS },
+      },
+      required: [],
+    } satisfies SchemaFor<Inputs['gitlab_ui_list']>,
+    _meta: APP_ONLY_META,
+  },
+  {
+    name: 'gitlab_ui_detail',
+    description: 'App-only: load full merge request detail, approvals, pipeline jobs, discussions, and draft notes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: HOST,
+        project: PROJECT,
+        iid: { type: 'integer' },
+      },
+      required: ['host', 'project', 'iid'],
+    } satisfies SchemaFor<Inputs['gitlab_ui_detail']>,
+    _meta: APP_ONLY_META,
+  },
+  {
+    name: 'gitlab_ui_diff',
+    description: 'App-only: load structured file diffs for a merge request.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: HOST,
+        project: PROJECT,
+        iid: { type: 'integer' },
+        page: PAGE,
+        perPage: PER_PAGE,
+      },
+      required: ['host', 'project', 'iid'],
+    } satisfies SchemaFor<Inputs['gitlab_ui_diff']>,
+    _meta: APP_ONLY_META,
+  },
+  {
+    name: 'gitlab_ui_job_log',
+    description: 'App-only: read a CI job log for inline display in the dashboard.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: HOST,
+        project: PROJECT,
+        jobId: { type: 'integer' },
+        mode: { type: 'string', enum: allOf<'errors' | 'tail' | 'full'>()('errors', 'tail', 'full') },
+        lines: { type: 'integer' },
+        pattern: { type: 'string' },
+      },
+      required: ['host', 'project', 'jobId'],
+    } satisfies SchemaFor<Inputs['gitlab_ui_job_log']>,
+    _meta: APP_ONLY_META,
+  },
+  {
+    name: 'gitlab_ui_action',
+    description: 'App-only: execute an explicit user-triggered write action from the GitLab MR dashboard UI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: HOST,
+        project: PROJECT,
+        action: { type: 'string', enum: UI_ACTIONS },
+        iid: { type: 'integer' },
+        draft: { type: 'boolean' },
+        description: { type: 'string' },
+        sha: { type: 'string' },
+        squash: { type: 'boolean' },
+        removeSourceBranch: { type: 'boolean' },
+        whenPipelineSucceeds: { type: 'boolean' },
+        confirmOthers: { type: 'boolean' },
+        confirmProtectedTarget: { type: 'boolean' },
+        body: { type: 'string' },
+        discussionId: { type: 'string' },
+        noteId: { type: 'integer' },
+        path: { type: 'string' },
+        line: { type: 'integer' },
+        oldLine: { type: 'integer' },
+        jobId: { type: 'integer' },
+        pipelineId: { type: 'integer' },
+      },
+      required: ['host', 'project', 'action'],
+    } satisfies SchemaFor<Inputs['gitlab_ui_action']>,
+    _meta: APP_ONLY_META,
+  },
+  {
+    name: 'gitlab_ui_state',
+    description: 'App-only: load or persist dashboard preferences, saved views, and files-viewed state in PLUGIN_DATA.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: STATE_ACTIONS },
+        id: { type: 'string' },
+        name: { type: 'string' },
+        q: { type: 'string' },
+        state: { type: 'string', enum: MR_STATES },
+        involvement: { type: 'string', enum: INVOLVEMENTS },
+        sort: { type: 'string', enum: allOf<'ready' | 'updated' | 'newest' | 'oldest' | 'largest'>()('ready', 'updated', 'newest', 'oldest', 'largest') },
+        hostOrProject: { type: 'string' },
+        diffMode: { type: 'string', enum: allOf<'unified' | 'split'>()('unified', 'split') },
+        autoRefresh: { type: 'boolean' },
+        showFileIndex: { type: 'boolean' },
+        listWidthPct: { type: 'integer' },
+        mrKey: { type: 'string' },
+        sha: { type: 'string' },
+        path: { type: 'string' },
+        viewed: { type: 'boolean' },
+      },
+      required: ['action'],
+    } satisfies SchemaFor<Inputs['gitlab_ui_state']>,
+    _meta: APP_ONLY_META,
+  },
 ]
 
-/** What answers each tool. */
-export const TOOLS: Readonly<Record<keyof ToolInputs, Tool>> = {
+export type CoreToolName = Exclude<keyof ToolInputs, DashboardToolName>
+
+/** What answers each of the six core GitLab tools. */
+export const TOOLS: Readonly<Record<CoreToolName, Tool>> = {
   gitlab_mr: mr,
   gitlab_mr_comment: comment,
   gitlab_pipeline: pipeline,
@@ -208,3 +380,13 @@ export const TOOLS: Readonly<Record<keyof ToolInputs, Tool>> = {
   gitlab_label: label,
   gitlab_user: user,
 }
+
+export const DASHBOARD_TOOLS: ReadonlySet<string> = new Set<DashboardToolName>([
+  'gitlab_mr_dashboard',
+  'gitlab_ui_list',
+  'gitlab_ui_detail',
+  'gitlab_ui_diff',
+  'gitlab_ui_job_log',
+  'gitlab_ui_action',
+  'gitlab_ui_state',
+])

@@ -1,5 +1,5 @@
-// The GitLab REST API (v4) of one host and project. Pure: fetch is injected. Every path is built here from checked
-// ids and the encoded project path, never taken from the model, so a call cannot leave its host or its project.
+// The GitLab REST API (v4) and GraphQL API of one host and project. Pure: fetch is injected. Every path is built here
+// from checked ids and the encoded project path, never taken from the model, so a call cannot leave its host or its project.
 
 export type FetchResponse = { status: number; ok: boolean; text: string; headers?: Record<string, string> }
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<FetchResponse>
@@ -23,6 +23,8 @@ export class GitlabError extends Error {
 /** A project call on a host that is not the remote's, made without naming the project. */
 export class NoProjectError extends Error {}
 
+export type GraphqlReply = { data?: Record<string, unknown> | null; errors?: { message?: string }[] }
+
 export type Api = {
   /** GET under the API root (`/user`, `/users`), parsed JSON. */
   root: (path: string, query?: Query) => Promise<unknown>
@@ -36,6 +38,8 @@ export type Api = {
   text: (path: string) => Promise<string>
   /** POST, PUT or DELETE under the project with a JSON body. */
   send: (method: 'POST' | 'PUT' | 'DELETE', path: string, body?: Record<string, unknown>) => Promise<unknown>
+  /** POST a GraphQL query against `https://<host>/api/graphql` with the same per-host token. */
+  graphql: (query: string, variables?: Record<string, unknown>) => Promise<GraphqlReply>
   /** The URL of a path under the project, for the model to show; it carries no token. */
   url: (path: string) => string
 }
@@ -65,9 +69,10 @@ export function nextPage(headers: Record<string, string> | undefined): number | 
   return Number.isSafeInteger(n) && n > 0 ? n : undefined
 }
 
-/** The API of `host` and `project`; with no project, only the root calls work and the others throw `NoProjectError`. */
+/** The API of `host` and `project`; with no project, only the root and graphql calls work and the others throw `NoProjectError`. */
 export function gitlab(fetch: Fetch, host: string, project: string | undefined, token: string): Api {
   const base = `https://${host}/api/v4`
+  const graphqlUrl = `https://${host}/api/graphql`
   const under = (path: string): string => {
     if (project === undefined) throw new NoProjectError()
     return `${base}/projects/${encodeURIComponent(project)}${path}`
@@ -90,6 +95,16 @@ export function gitlab(fetch: Fetch, host: string, project: string | undefined, 
     page: async (path, query) => page(await request('GET', under(path) + search(query))),
     text: async (path) => (await request('GET', under(path))).text,
     send: async (method, path, body) => json(await request(method, under(path), body)),
+    graphql: async (query, variables) => {
+      const res = await request('POST', graphqlUrl, { query, ...(variables ? { variables } : {}) })
+      const parsed = json(res) as GraphqlReply
+      if (!parsed || typeof parsed !== 'object') throw new GitlabError(502, 'Invalid GraphQL response', 'POST')
+      if ((parsed.data === undefined || parsed.data === null) && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+        const msg = parsed.errors.map((e) => e.message).filter(Boolean).join('; ').slice(0, 500) || 'GraphQL error'
+        throw new GitlabError(400, msg, 'POST')
+      }
+      return parsed
+    },
     url: (path) => under(path),
   }
 }

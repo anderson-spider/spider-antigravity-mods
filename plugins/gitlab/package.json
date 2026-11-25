@@ -3,7 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:ui": "vite build --config ui/vite.config.ts",
     "test": "node --test 'tests/*.test.ts'",
-    "typecheck": "tsc"
+    "typecheck": "tsc && tsc -p ui/tsconfig.json"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
+    "@types/react": "^19.3.1",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.8",
+    "vite-plugin-singlefile": "^2.3.4"
   }
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-11-25
+
+- Add an interactive **GitLab MR Dashboard** MCP App (`ui://gitlab/mr-dashboard.html`) served directly by the `gitlab_gitlab` MCP server with **Global** (full-page sidebar) and **Aux Pane** (side pane beside chat) entrypoints.
+- Enrich MR lists via GitLab GraphQL (`/api/graphql`) in a single request per host (pipeline status, approvals, real label hex colors, `+add / -del` stats) with automatic fallback to REST v4 for older/restricted instances.
+- Support context-smart scoping (current repository in `aux_pane` with one-click toggle to all projects; multi-host/cross-project inbox grouped by Reviewing / Authored in Global view), qualifier search (`label:`, `author:`, `draft:`, `checks:`), `Merge readiness` sorting, Saved Views, and visibility-aware 60s auto-refresh.
+- Add resizable master-detail split layout with multi-MR tabs (and responsive List ↔ Detail navigation in narrow panes), three detail tabs (**Summary** with Markdown, blockers, approvals, pipeline jobs, and inline job logs; **Discussions** with unresolved filter, replies, resolve/unresolve, and private draft notes; **Code** with Unified/Split diff toggle, file index, syntax highlighting, inline line comments, and per-SHA `Viewed` marks), guarded Merge confirmation modal, and capability-gated Agent Handoff actions in `aux_pane`.
+- Persist UI preferences, Saved Views, and `filesViewed` state (never credentials) in `${PLUGIN_DATA}` via `--data-dir=${PLUGIN_DATA}` in `mcp_config.json`.
+- Keep the MCP server runtime 100% zero npm dependencies; bundle the React MCP App into a committed single-file `ui/dist/app.html` using dev-only build dependencies.
+
 ## 0.3.1 - 2026-11-25
 
 - Consolidate GitLab remote, token, and API error resolution into `server/run.ts` with a single-pass token parser, unified host validation, and single `git` remote lookup on fallback.

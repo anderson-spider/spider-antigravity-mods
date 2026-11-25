@@ -1,18 +1,29 @@
 // A Model Context Protocol server over stdio (JSON-RPC 2.0, one message per line), with no dependencies: it lists the
-// six tools and answers their calls. The client's roots name the session's folder, read again when the client says they
-// changed, so git runs where the session works. Pure: the streams, the folder's handlers and the call are injected.
+// tools and UI resources and answers their calls. The client's roots name the session's folder, read again when the
+// client says they changed, so git runs where the session works. Pure: the streams, resources, folder's handlers and
+// the call are injected.
 import { fileURLToPath } from 'node:url'
 import { SPECS, type ToolSpec } from './tools.ts'
 import type { Reply } from './run.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.3.1'
+export const SERVER_VERSION = '0.4.0'
 
 type Id = string | number
 type Message = { jsonrpc?: string; id?: Id | null; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown }
 
 /** What a tool call gets beyond its input: the session's folder, and a beat that keeps a long call alive. */
 export type CallContext = { cwd: string | undefined; progress: (message: string) => void }
+
+/** An MCP resource served via `resources/list` and `resources/read` (such as an MCP App `ui://` HTML bundle). */
+export type ResourceEntry = {
+  uri: string
+  name: string
+  description?: string
+  mimeType: string
+  _meta?: Record<string, unknown>
+  read: () => Promise<string>
+}
 
 export type Server = {
   /** Handles one line from the client; answers through `write`. */
@@ -22,6 +33,8 @@ export type Server = {
 export type ServerDeps = {
   write: (line: string) => void
   call: (name: ToolSpec['name'], input: Record<string, unknown>, context: CallContext) => Promise<Reply>
+  /** Optional MCP resources exposed by this server (e.g. `ui://` MCP App bundles). */
+  resources?: readonly ResourceEntry[]
   /** A line for the server's own log (stderr), never the client's channel. */
   log?: (text: string) => void
   /** How long a roots request waits before the call goes on with the last folder known. */
@@ -46,6 +59,9 @@ export function server(deps: ServerDeps): Server {
   const send = (message: Record<string, unknown>) => deps.write(JSON.stringify({ jsonrpc: '2.0', ...message }))
   const answer = (id: Id, result: unknown) => send({ id, result })
   const fail = (id: Id, code: number, message: string) => send({ id, error: { code, message } })
+
+  const resourceList = deps.resources ?? []
+  const resourceMap = new Map(resourceList.map(r => [r.uri, r]))
 
   let rootsSupported = false
   let cwd: string | undefined
@@ -88,7 +104,34 @@ export function server(deps: ServerDeps): Server {
       deps.log?.(`gitlab: ${name} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
       reply = { text: 'The gitlab tool failed before it could answer. Try again; if it repeats, check the Antigravity MCP logs.', isError: true }
     }
-    answer(id, { content: [{ type: 'text', text: reply.text }], ...(reply.isError ? { isError: true } : {}) })
+    answer(id, {
+      content: [{ type: 'text', text: reply.text }],
+      ...(reply.structuredContent !== undefined ? { structuredContent: reply.structuredContent } : {}),
+      ...(reply.isError ? { isError: true } : {}),
+    })
+  }
+
+  async function readResource(id: Id, params: Record<string, unknown>): Promise<void> {
+    const uri = params.uri
+    if (typeof uri !== 'string') return fail(id, -32602, 'resources/read requires a string uri.')
+    const entry = resourceMap.get(uri)
+    if (!entry) return fail(id, -32602, `Unknown resource: ${uri}`)
+    try {
+      const text = await entry.read()
+      answer(id, {
+        contents: [
+          {
+            uri: entry.uri,
+            mimeType: entry.mimeType,
+            text,
+            ...(entry._meta ? { _meta: entry._meta } : {}),
+          },
+        ],
+      })
+    } catch (err) {
+      deps.log?.(`gitlab: resource ${uri} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
+      fail(id, -32603, `Failed to read resource: ${uri}`)
+    }
   }
 
   return {
@@ -126,17 +169,38 @@ export function server(deps: ServerDeps): Server {
           const asked = params.protocolVersion
           return answer(id, {
             protocolVersion: typeof asked === 'string' ? asked : PROTOCOL,
-            capabilities: { tools: {} },
+            capabilities: { tools: {}, resources: {} },
             serverInfo: { name: 'gitlab', version: SERVER_VERSION },
           })
         }
         case 'ping':
           return answer(id, {})
         case 'tools/list':
-          return answer(id, { tools: SPECS.map(spec => ({ name: spec.name, description: spec.description, inputSchema: spec.inputSchema })) })
+          return answer(id, {
+            tools: SPECS.map(spec => ({
+              name: spec.name,
+              ...(spec.title ? { title: spec.title } : {}),
+              description: spec.description,
+              inputSchema: spec.inputSchema,
+              ...(spec._meta ? { _meta: spec._meta } : {}),
+            })),
+          })
         case 'tools/call':
           // Calls run side by side: one waiting on a pipeline does not hold the others.
           void call(id, params)
+          return
+        case 'resources/list':
+          return answer(id, {
+            resources: resourceList.map(r => ({
+              uri: r.uri,
+              name: r.name,
+              ...(r.description ? { description: r.description } : {}),
+              mimeType: r.mimeType,
+              ...(r._meta ? { _meta: r._meta } : {}),
+            })),
+          })
+        case 'resources/read':
+          void readResource(id, params)
           return
         default:
           return fail(id, -32601, `Method not found: ${method}`)

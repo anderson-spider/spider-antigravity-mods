@@ -95,9 +95,9 @@ export function world(on: Session, opts: { remote?: string; branch?: string; env
   return { tools, sent, host, runs }
 }
 
-/** The tools the server lists, put in `tools`, and their names. */
+/** The core `run()` tools the server lists, put in `tools`, and their names. */
 export async function started(_$: Dollar, tools: Tool[]): Promise<string[]> {
-  tools.push(...(SPECS as unknown as Tool[]))
+  tools.push(...(SPECS.filter((spec) => spec.name in TOOLS) as unknown as Tool[]))
   expect(tools.length).toBeGreaterThan(0)
 
   return tools.map((tool) => tool.name)
