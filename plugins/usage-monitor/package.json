@@ -1,0 +1,11 @@
+{
+  "name": "usage-monitor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node sidecars/panel/scripts/build-bundle.mjs",
+    "standalone": "node sidecars/panel/standalone.mjs",
+    "test": "node --test 'sidecars/panel/test/*.test.mjs'",
+    "typecheck": "node sidecars/panel/scripts/check-syntax.mjs"
+  }
+}
