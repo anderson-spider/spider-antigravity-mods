@@ -4,10 +4,10 @@ import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import type { Fetch, FetchResponse } from './api.ts'
-import type { Deps } from './run.ts'
+import { ENV_NAME, type Deps } from './run.ts'
 
 const SCRUBBED_CHILD_ENV = [
-  'GITLAB_MCP_TOKENS',
+  ENV_NAME,
   'GITLAB_TOKEN',
   'GITLAB_PRIVATE_TOKEN',
   'GL_TOKEN',

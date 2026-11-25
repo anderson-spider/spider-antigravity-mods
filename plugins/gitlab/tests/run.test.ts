@@ -301,3 +301,118 @@ test('wait sleeps 15 seconds between polls through the clock, which keeps the ca
   expect(JSON.parse(text(result))).toMatchObject({ pipeline: { id: 90, status: 'success' }, finished: true, failed: [], downstream: [] })
   expect(runs.filter((r) => r.startsWith('sleep'))).toEqual(['sleep 15', 'sleep 15'])
 })
+
+test('remote parsing supports ssh:// with port and https:// with userinfo and port, while rejecting invalid remotes without echoing secrets', async ($, on) => {
+  const { sent, host } = world(on, {
+    api: {
+      'https://gitlab.example.com/api/v4/projects/team%2Fsub%2Fapp/merge_requests/7': { text: MR_JSON },
+      'https://gitlab.example.com:8443/api/v4/projects/team%2Fapp/merge_requests/7': { text: MR_JSON },
+    },
+  })
+  on.options = { tokens: `gitlab.example.com=${WORK}, gitlab.example.com:8443=${WORK}` }
+
+  host.remote = 'ssh://git@GitLab.Example.com:2222/team/sub/app.git\n'
+  expect((await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)).isError).toBeUndefined()
+
+  host.remote = 'https://user:secret@gitlab.example.com:8443/team/app.git'
+  expect((await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)).isError).toBeUndefined()
+  expect(sent.map((s) => s.url)).toEqual([
+    'https://gitlab.example.com/api/v4/projects/team%2Fsub%2Fapp/merge_requests/7',
+    'https://gitlab.example.com:8443/api/v4/projects/team%2Fapp/merge_requests/7',
+  ])
+
+  for (const badRemote of [
+    '/srv/repos/app.git',
+    'file:///srv/app.git',
+    'git@gitlab.com:app.git',
+    'https://gitlab.example.com/team/../app',
+    'https://gitlab.example.com/team/%2e%2e/app',
+    'https://evil.com#@gitlab.example.com/team/app',
+    'git@bad_host:team/app.git',
+    'https://user:secret@h.io/app',
+  ]) {
+    host.remote = badRemote
+    const res = await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)
+    expect(res.isError, badRemote).toBe(true)
+    expect(text(res), badRemote).toContain('not a GitLab project URL')
+    expect(text(res), badRemote).not.toContain('secret')
+  }
+})
+
+test('locate falls back to the first named remote when origin is absent, and single-host fallback spawns git locate once', async ($, on) => {
+  const calls: string[] = []
+  const { sent } = world(on, { remote: '' })
+  const baseGit = on.deps!.git
+  on.deps!.git = async (args) => {
+    const line = args.join(' ')
+    calls.push(line)
+    if (line === 'remote get-url origin') return { exitCode: 2, stdout: '' }
+    if (line === 'remote') return { exitCode: 0, stdout: 'upstream\nfork\n' }
+    if (line === 'remote get-url upstream') return { exitCode: 0, stdout: 'https://gitlab.example.com/team/app.git\n' }
+    return baseGit(args)
+  }
+  on.options = { tokens: `gitlab.example.com=${WORK}` }
+  on.deps!.fetch = async () => ({ status: 200, ok: true, text: MR_JSON, headers: {} })
+
+  const ok = await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)
+  expect(ok.isError).toBeUndefined()
+  expect(calls).toEqual(['remote get-url origin', 'remote', 'remote get-url upstream'])
+
+  // Single-host fallback outside a git repo should not call locate(git) twice
+  const noRepoCalls: string[] = []
+  on.deps!.git = async (args) => {
+    noRepoCalls.push(args.join(' '))
+    return { exitCode: 2, stdout: '' }
+  }
+  on.deps!.fetch = async () => ({ status: 200, ok: true, text: '{"id":1,"username":"ann"}', headers: {} })
+  const userRes = await $.tool.call({ tool: id('gitlab_user') } as never)
+  expect(userRes.isError).toBeUndefined()
+  expect(noRepoCalls).toEqual(['remote get-url origin', 'remote'])
+  expect(sent).toEqual([])
+})
+
+test('token parsing rejects malformed pairs, unexpanded placeholders, and invalid hosts without leaking tokens', async ($, on) => {
+  const { sent } = world(on)
+  for (const placeholder of [undefined, ' , ', '${GITLAB_MCP_TOKENS}']) {
+    on.options = { tokens: placeholder }
+    const res = await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)
+    expect(res.isError, String(placeholder)).toBe(true)
+    expect(text(res)).toContain('GITLAB_MCP_TOKENS is not set')
+  }
+  for (const bad of [5, 'glpat-only', '=glpat-x', 'gitlab.com=', 'gitlab.com=a=b', 'a b.com=x', 'h=x,h=y', 'h/x=t', '-bad=x']) {
+    on.options = { tokens: bad }
+    const res = await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never)
+    expect(res.isError, String(bad)).toBe(true)
+    expect(text(res)).toContain('GITLAB_MCP_TOKENS is not a valid list')
+  }
+  expect(sent).toEqual([])
+})
+
+test('GitLab HTTP error hints cover 401, 403 GET/POST, 404, 409, and 422', ON, async ($, on) => {
+  world(on, {
+    api: {
+      [`${WORK_API}/merge_requests/7`]: [
+        { status: 401, text: '{"message":"401 Unauthorized"}' },
+        { status: 403, text: '{"message":"403 Forbidden"}' },
+        { status: 404, text: '{"message":"404 Project Not Found"}' },
+        { status: 422, text: '{"message":"Bad thing."}' },
+        { text: OWN_MR },
+      ],
+      [`${WORK_API}/merge_requests/7/merge`]: { status: 409, text: '{"message":"409 Conflict"}' },
+      [USER]: { text: '{"id":1,"username":"ann"}' },
+      [`${WORK_API}/merge_requests/7/notes`]: { status: 403, text: '{"message":"403 Forbidden"}' },
+    },
+  })
+  expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toBe(
+    'GitLab answered 401 for team/app: 401 Unauthorized. The token for gitlab.example.com was refused (expired or revoked?). Replace it in GITLAB_MCP_TOKENS.',
+  )
+  expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toContain("The token's user may have no access to team/app.")
+  expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toBe(
+    "GitLab answered 404 for team/app: 404 Project Not Found. team/app may not exist or the token's user cannot see it; check the project path and the iid or id.",
+  )
+  expect(text(await $.tool.call({ tool: MR, action: 'get', iid: 7 } as never))).toBe('GitLab answered 422 for team/app: Bad thing')
+  expect(text(await $.tool.call({ tool: id('gitlab_mr_comment'), action: 'comment', iid: 7, body: 'LGTM' } as never))).toContain(
+    'The token may lack the api scope (read_api only reads)',
+  )
+  expect(text(await $.tool.call({ tool: MR, action: 'merge', iid: 7, sha: '0123456789abcdef0123456789abcdef01234567' } as never))).toContain('the head moved')
+})

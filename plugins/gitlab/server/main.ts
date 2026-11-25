@@ -2,8 +2,7 @@
 import { createInterface } from 'node:readline'
 import { server } from './mcp.ts'
 import { nodeDeps, resolveCwd } from './node.ts'
-import { run } from './run.ts'
-import { ENV_NAME } from './tokens.ts'
+import { ENV_NAME, run } from './run.ts'
 import { TOOLS } from './tools.ts'
 
 /** Captured at startup from Antigravity plugin variables (or user environment), then scrubbed from process.env. */

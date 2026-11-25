@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 - 2026-11-25
+
+- Consolidate GitLab remote, token, and API error resolution into `server/run.ts` with a single-pass token parser, unified host validation, and single `git` remote lookup on fallback.
+
 ## 0.3.0 - 2026-11-23
 
 - Remove `GITLAB_MCP_DEFAULT_HOST` and `options.defaultHost`. Outside a GitLab repository without `host`, the server still auto-targets the sole configured host when only one host exists in `GITLAB_MCP_TOKENS`; when multiple hosts are configured, it refuses and lists the configured hosts so `host` can be passed explicitly.
