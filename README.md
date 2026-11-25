@@ -7,7 +7,7 @@ Native plugins for [Google Antigravity](https://antigravity.google) by [anderson
 | Plugin | Version | Description |
 | :--- | :--- | :--- |
 | [`gitlab`](./plugins/gitlab) | `0.5.0` | Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and labels with an interactive MR Dashboard (multi-repo tracking, isolated worktree checkout, Global sidebar & side pane) across `gitlab.com` and self-hosted GitLab instances. |
-| [`usage-monitor`](./plugins/usage-monitor) | `1.1.0` | Local offline monitor for token usage, generation speed (`tok/s`), TTFT, context breakdown, and quota pools with pace tracking. |
+| [`usage-monitor`](./plugins/usage-monitor) | `1.2.0` | Local offline monitor for token usage, generation speed (`tok/s`), TTFT, context breakdown, and quota pools with pace tracking (Global sidebar full-page MCP App, right side pane, and CLI `statusLine`). |
 
 ## Prerequisites
 

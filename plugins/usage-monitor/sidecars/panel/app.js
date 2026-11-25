@@ -3045,6 +3045,7 @@ function detectHostColorScheme(targetEl = null) {
     }
   }
   const bgProps = [
+    '--color-background-primary',
     '--background',
     '--card',
     '--vscode-sideBar-background',
@@ -3067,7 +3068,13 @@ function detectHostColorScheme(targetEl = null) {
   }
 
   // 3. Computed / inline foreground text luminance
-  const fgProps = ['--foreground', '--vscode-foreground', '--vscode-editor-foreground', 'color'];
+  const fgProps = [
+    '--color-text-primary',
+    '--foreground',
+    '--vscode-foreground',
+    '--vscode-editor-foreground',
+    'color',
+  ];
   for (const el of bgTargets) {
     let cs = null;
     try {
@@ -6147,7 +6154,11 @@ async function requestTelemetry(params, force) {
 
     if (payload?.uiBundleVersion) {
       if (activeBundleVersion && activeBundleVersion !== payload.uiBundleVersion) {
+        const isMcpAppFrame =
+          typeof document !== 'undefined' &&
+          document.documentElement?.getAttribute?.('data-mcp-app') === 'true';
         if (
+          !isMcpAppFrame &&
           !isWindowOverlayMode() &&
           typeof window !== 'undefined' &&
           typeof window.location?.reload === 'function'

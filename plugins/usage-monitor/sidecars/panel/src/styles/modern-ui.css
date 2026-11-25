@@ -150,12 +150,14 @@
 }
 
 /* --- 1. 外壳画布、顶层卡片与按量贴合滑动轨道 (Canvas, Top-Level Cards & Fit-Content Sliding Tracks) --- */
-html[data-standalone="true"][data-modern-ui="true"] #app-root {
+html[data-standalone="true"][data-modern-ui="true"] #app-root,
+html[data-mcp-app="true"][data-modern-ui="true"] #app-root {
   min-height: 100dvh;
   background: var(--modern-canvas-bg);
 }
 
-html[data-standalone="true"][data-modern-ui="true"] .app-shell {
+html[data-standalone="true"][data-modern-ui="true"] .app-shell,
+html[data-mcp-app="true"][data-modern-ui="true"] .app-shell {
   border-left: none;
   border-right: none;
 }

@@ -191,6 +191,25 @@
   }
 }
 
+html[data-mcp-app="true"] {
+  --background: var(--color-background-primary, hsl(0 0% 100%));
+  --card: var(--color-background-secondary, var(--color-background-primary, hsl(0 0% 100%)));
+  --border: var(--color-border-primary, color-mix(in srgb, var(--foreground) 18%, var(--background)));
+  --foreground: var(--color-text-primary, hsl(215 22% 15%));
+  --muted-foreground: var(--color-text-secondary, hsl(215 12% 44%));
+  --primary: var(--color-ring-primary, var(--color-text-info, hsl(217 82% 51%)));
+}
+
+html[data-mcp-app="true"][data-theme="dark"] {
+  color-scheme: dark;
+  --background: var(--color-background-primary, hsl(222 18% 10%));
+  --card: var(--color-background-secondary, var(--color-background-primary, hsl(222 16% 13%)));
+  --border: var(--color-border-primary, hsl(220 14% 21%));
+  --foreground: var(--color-text-primary, hsl(214 24% 92%));
+  --muted-foreground: var(--color-text-secondary, hsl(215 14% 63%));
+  --primary: var(--color-ring-primary, var(--color-text-info, hsl(217 86% 61%)));
+}
+
 /* --- src/styles/base.css --- */
 /*
  * Base reset, viewport-locked shell (preventing ultra-long px scroll pages),
@@ -277,13 +296,15 @@ input[type="number"]::-webkit-outer-spin-button {
   position: relative;
 }
 
-html[data-standalone="true"] .app-shell {
-  max-width: 960px;
+html[data-standalone="true"] .app-shell,
+html[data-mcp-app="true"] .app-shell {
+  max-width: 1040px;
   margin: 0 auto;
 }
 
 @media (min-width: 980px) {
-  html[data-standalone="true"] .app-shell {
+  html[data-standalone="true"] .app-shell,
+  html[data-mcp-app="true"] .app-shell {
     padding: var(--space-4) var(--space-5);
     border-left: 1px solid var(--border-hairline);
     border-right: 1px solid var(--border-hairline);
@@ -6319,12 +6340,14 @@ html[data-standalone="true"] .app-shell {
 }
 
 /* --- 1. 外壳画布、顶层卡片与按量贴合滑动轨道 (Canvas, Top-Level Cards & Fit-Content Sliding Tracks) --- */
-html[data-standalone="true"][data-modern-ui="true"] #app-root {
+html[data-standalone="true"][data-modern-ui="true"] #app-root,
+html[data-mcp-app="true"][data-modern-ui="true"] #app-root {
   min-height: 100dvh;
   background: var(--modern-canvas-bg);
 }
 
-html[data-standalone="true"][data-modern-ui="true"] .app-shell {
+html[data-standalone="true"][data-modern-ui="true"] .app-shell,
+html[data-mcp-app="true"][data-modern-ui="true"] .app-shell {
   border-left: none;
   border-right: none;
 }

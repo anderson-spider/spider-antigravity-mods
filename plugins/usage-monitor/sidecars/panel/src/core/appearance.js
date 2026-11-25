@@ -288,6 +288,7 @@ export function detectHostColorScheme(targetEl = null) {
     }
   }
   const bgProps = [
+    '--color-background-primary',
     '--background',
     '--card',
     '--vscode-sideBar-background',
@@ -310,7 +311,13 @@ export function detectHostColorScheme(targetEl = null) {
   }
 
   // 3. Computed / inline foreground text luminance
-  const fgProps = ['--foreground', '--vscode-foreground', '--vscode-editor-foreground', 'color'];
+  const fgProps = [
+    '--color-text-primary',
+    '--foreground',
+    '--vscode-foreground',
+    '--vscode-editor-foreground',
+    'color',
+  ];
   for (const el of bgTargets) {
     let cs = null;
     try {
