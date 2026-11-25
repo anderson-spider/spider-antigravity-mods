@@ -54,6 +54,24 @@ test('filterAndSortMrs orders by Merge readiness and groupMrs splits Reviewing v
   expect(groups[1]?.entries.map((m) => m.iid)).toEqual([1, 3])
 })
 
+test('filterAndSortMrs supports waiting/others involvement and mine scope, and groupMrs labels Other MRs', () => {
+  const waiting = sampleMr({ id: '1', iid: 1, isAuthored: false, isReviewing: true, isWaitingOnMe: true, involvement: 'reviewing' })
+  const approvedReview = sampleMr({ id: '2', iid: 2, isAuthored: false, isReviewing: true, isWaitingOnMe: false, involvement: 'reviewing' })
+  const authored = sampleMr({ id: '3', iid: 3, isAuthored: true, isReviewing: false, isWaitingOnMe: false, involvement: 'authored' })
+  const other = sampleMr({ id: '4', iid: 4, isAuthored: false, isReviewing: false, isWaitingOnMe: false, involvement: 'other' })
+
+  const all = [waiting, approvedReview, authored, other]
+  expect(filterAndSortMrs(all, { q: '', state: 'opened', involvement: 'waiting', sort: 'ready', hostOrProject: 'mine' }).map((m) => m.iid)).toEqual([1])
+  expect(filterAndSortMrs(all, { q: '', state: 'opened', involvement: 'others', sort: 'ready', hostOrProject: 'all' }).map((m) => m.iid)).toEqual([4])
+
+  const groups = groupMrs(all, 'all')
+  expect(groups.map((g) => [g.key, g.label])).toEqual([
+    ['reviewing', 'Reviewing'],
+    ['authored', 'Authored'],
+    ['others', 'Other MRs'],
+  ])
+})
+
 test('formatRelativeTime formats seconds, minutes, hours, and days', () => {
   const now = Date.parse('2026-11-25T12:00:00Z')
   expect(formatRelativeTime('2026-11-25T11:59:30Z', now)).toBe('just now')

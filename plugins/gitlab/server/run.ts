@@ -74,7 +74,7 @@ export async function resolveEnv(deps: Deps, options: Options): Promise<Resolved
 }
 
 /** Validates a GitLab host name (without scheme or path), returning normalized lowercase or undefined. */
-export { hostName, projectPath, errorText }
+export { hostName, projectPath, errorText, parseRemote, sshHostname, locate }
 
 /** A tool: what it answers for its input, through the context of its call. */
 export type Tool = (ctx: Ctx, input: Record<string, unknown>) => Promise<string>

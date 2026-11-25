@@ -27,9 +27,10 @@ const UI_ACTIONS = allOf<Inputs['gitlab_ui_action']['action']>()(
   'approve', 'unapprove', 'rebase', 'toggle_draft', 'close', 'reopen', 'update_description', 'merge',
   'comment', 'reply', 'line_comment', 'edit_note', 'resolve', 'unresolve', 'publish_draft', 'publish_all_drafts',
   'retry_job', 'cancel_job', 'play_job', 'retry_pipeline', 'cancel_pipeline', 'run_pipeline',
+  'checkout_worktree', 'remove_worktree',
 )
 const STATE_ACTIONS = allOf<Inputs['gitlab_ui_state']['action']>()(
-  'get', 'save_preferences', 'save_view', 'delete_view', 'set_file_viewed',
+  'get', 'save_preferences', 'save_view', 'delete_view', 'set_file_viewed', 'add_repo', 'remove_repo',
 )
 
 const IID = { type: 'integer', description: 'MR !iid. Default: the open MR of the current branch.' } as const
@@ -41,7 +42,8 @@ const PAGE = { type: 'integer' } as const
 const PER_PAGE = { type: 'integer', description: 'Max 100.' } as const
 const ALLOW_OTHERS = { type: 'boolean', description: "Write on someone else's MR; only when the user asked." } as const
 const MR_STATES = allOf<'opened' | 'merged' | 'closed' | 'all'>()('opened', 'merged', 'closed', 'all')
-const INVOLVEMENTS = allOf<'all' | 'reviewing' | 'authored'>()('all', 'reviewing', 'authored')
+const INVOLVEMENTS = allOf<'all' | 'waiting' | 'reviewing' | 'authored' | 'others'>()('all', 'waiting', 'reviewing', 'authored', 'others')
+const LIST_SCOPES = allOf<'projects' | 'mine'>()('projects', 'mine')
 
 const APP_ONLY_META = { ui: { visibility: ['app'] } } as const
 const DASHBOARD_META = {
@@ -257,6 +259,7 @@ export const SPECS: readonly ToolSpec[] = [
         project: PROJECT,
         state: { type: 'string', enum: MR_STATES },
         involvement: { type: 'string', enum: INVOLVEMENTS },
+        scope: { type: 'string', enum: LIST_SCOPES },
       },
       required: [],
     } satisfies SchemaFor<Inputs['gitlab_ui_list']>,
@@ -335,6 +338,8 @@ export const SPECS: readonly ToolSpec[] = [
         oldLine: { type: 'integer' },
         jobId: { type: 'integer' },
         pipelineId: { type: 'integer' },
+        force: { type: 'boolean' },
+        worktreePath: { type: 'string' },
       },
       required: ['host', 'project', 'action'],
     } satisfies SchemaFor<Inputs['gitlab_ui_action']>,

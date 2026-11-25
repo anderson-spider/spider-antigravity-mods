@@ -87,10 +87,12 @@ export function filterAndSortMrs(mrs: readonly MrListItem[], opts: FilterOptions
   const parsed = parseSearchQuery(opts.q)
   const filtered = mrs.filter((mr) => {
     if (opts.state !== 'all' && mr.state !== opts.state) return false
+    if (opts.involvement === 'waiting' && !mr.isWaitingOnMe) return false
     if (opts.involvement === 'authored' && !mr.isAuthored) return false
     if (opts.involvement === 'reviewing' && !mr.isReviewing) return false
+    if (opts.involvement === 'others' && (mr.isAuthored || mr.isReviewing)) return false
 
-    if (opts.hostOrProject && opts.hostOrProject !== 'all') {
+    if (opts.hostOrProject && opts.hostOrProject !== 'all' && opts.hostOrProject !== 'mine') {
       if (opts.hostOrProject.startsWith('host:')) {
         if (mr.host !== opts.hostOrProject.slice(5)) return false
       } else if (opts.hostOrProject.startsWith('proj:')) {
@@ -159,7 +161,7 @@ export function groupMrs(mrs: readonly MrListItem[], involvement: InvolvementFil
   const groups: MrGroup[] = []
   if (reviewing.length > 0) groups.push({ key: 'reviewing', label: 'Reviewing', entries: reviewing })
   if (authored.length > 0) groups.push({ key: 'authored', label: 'Authored', entries: authored })
-  if (others.length > 0) groups.push({ key: 'others', label: 'Project MRs', entries: others })
+  if (others.length > 0) groups.push({ key: 'others', label: 'Other MRs', entries: others })
   return groups
 }
 

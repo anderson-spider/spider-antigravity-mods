@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { FetchResponse } from '../server/api.ts'
 import { runDashboardTool } from '../server/dashboard.ts'
 import type { Deps } from '../server/run.ts'
@@ -453,4 +456,335 @@ test('gitlab_ui_action toggle_draft delegates directly to mr update without a re
   expect(toReady.isError).toBeUndefined()
   expect(getCount).toBe(2)
   expect(putBodies[1]).toEqual({ title: 'Add dashboard filters' })
+})
+
+test('gitlab_ui_state add_repo / remove_repo validates local repos, expands ~/, and merges with workspace cwds', async () => {
+  const store = createStore()
+  const gitByCwd: Record<string, string> = {
+    '/home/dev/work/service-a': 'git@gitlab.example.com:team/service-a.git',
+    '/home/dev/work/service-b': 'git@work-alias:team/service-b.git',
+  }
+  const deps = makeDeps({})
+  deps.ssh = async (args) =>
+    args[1] === 'work-alias' ? { exitCode: 0, stdout: 'hostname gitlab.example.com\n' } : { exitCode: 1, stdout: '' }
+
+  const runtime = {
+    cwds: ['/home/dev/work/service-a'],
+    homedir: () => '/home/dev',
+    isDir: async (p: string) => p in gitByCwd || p === '/home/dev/work/service-b/subdir',
+    gitAt: async (cwd: string, args: string[]) => {
+      const repoRoot = cwd.startsWith('/home/dev/work/service-b') ? '/home/dev/work/service-b' : cwd
+      if (!(repoRoot in gitByCwd)) return { exitCode: 128, stdout: '' }
+      if (args.includes('--git-common-dir')) return { exitCode: 0, stdout: `${repoRoot}/.git\n` }
+      if (args[0] === 'remote' && args[1] === 'get-url') return { exitCode: 0, stdout: `${gitByCwd[repoRoot]}\n` }
+      return { exitCode: 1, stdout: '' }
+    },
+  }
+
+  const added = await runDashboardTool(
+    'gitlab_ui_state',
+    deps,
+    { action: 'add_repo', path: '~/work/service-b/subdir' },
+    { tokens: 'gitlab.example.com=glpat-secret' },
+    store,
+    runtime,
+  )
+  expect(added.isError).toBeUndefined()
+  const addSc = added.structuredContent as {
+    added: { path: string; host: string; project: string }
+    registeredRepos: { path: string; host: string; project: string; source: string }[]
+  }
+  expect(addSc.added).toEqual({ path: '/home/dev/work/service-b', host: 'gitlab.example.com', project: 'team/service-b' })
+  expect(addSc.registeredRepos).toEqual([
+    { path: '/home/dev/work/service-a', host: 'gitlab.example.com', project: 'team/service-a', source: 'workspace' },
+    { path: '/home/dev/work/service-b', host: 'gitlab.example.com', project: 'team/service-b', source: 'registered' },
+  ])
+
+  const removed = await runDashboardTool(
+    'gitlab_ui_state',
+    deps,
+    { action: 'remove_repo', path: '/home/dev/work/service-b' },
+    { tokens: 'gitlab.example.com=glpat-secret' },
+    store,
+    runtime,
+  )
+  expect(removed.isError).toBeUndefined()
+  const remSc = removed.structuredContent as { registeredRepos: { project: string; source: string }[] }
+  expect(remSc.registeredRepos).toEqual([{ path: '/home/dev/work/service-a', host: 'gitlab.example.com', project: 'team/service-a', source: 'workspace' }])
+
+  // Pure store writes (e.g. save_preferences / set_file_viewed) do NOT spawn git/ssh
+  let gitCallsDuringPrefSave = 0
+  const spyRuntime = {
+    ...runtime,
+    gitAt: async (cwd: string, args: string[]) => {
+      gitCallsDuringPrefSave++
+      return runtime.gitAt(cwd, args)
+    },
+  }
+  const spyDeps = makeDeps({})
+  spyDeps.git = async () => {
+    gitCallsDuringPrefSave++
+    return { exitCode: 1, stdout: '' }
+  }
+  const prefRes = await runDashboardTool(
+    'gitlab_ui_state',
+    spyDeps,
+    { action: 'save_preferences', diffMode: 'split' },
+    { tokens: 'gitlab.example.com=glpat-secret' },
+    store,
+    spyRuntime,
+  )
+  expect(prefRes.isError).toBeUndefined()
+  expect(gitCallsDuringPrefSave).toBe(0)
+})
+
+test('gitlab_ui_list batches multi-repo queries in groups of 3, isolates null projects to REST, computes isWaitingOnMe/fork, and falls back to mine when empty', async () => {
+  const store = createStore()
+  const gqlBatches: Record<string, unknown>[] = []
+  const deps = makeDeps({
+    fetch: async (url, init) => {
+      if (url === 'https://gitlab.example.com/api/graphql') {
+        const body = JSON.parse(init.body ?? '{}') as { query: string; variables?: Record<string, unknown> }
+        if (body.query.includes('DashboardBatchProjectMrs')) {
+          gqlBatches.push(body.variables ?? {})
+          const vars = body.variables ?? {}
+          if (vars.p0 === 'g/p1') {
+            return okJson({
+              data: {
+                currentUser: { username: 'ann' },
+                p0: {
+                  mergeRequests: {
+                    nodes: [
+                      {
+                        iid: '1',
+                        title: 'Waiting MR',
+                        state: 'opened',
+                        draft: false,
+                        sourceBranch: 'feat/1',
+                        targetBranch: 'main',
+                        webUrl: 'https://gitlab.example.com/g/p1/-/merge_requests/1',
+                        updatedAt: '2026-11-25T11:00:00Z',
+                        author: { username: 'bob' },
+                        reviewers: { nodes: [{ username: 'ann' }] },
+                        approvedBy: { nodes: [] },
+                        project: { fullPath: 'g/p1' },
+                        sourceProject: { fullPath: 'fork-user/p1' },
+                      },
+                    ],
+                  },
+                },
+                p1: null, // Missing in GraphQL -> isolated to REST without dropping p0/p2
+                p2: {
+                  mergeRequests: {
+                    nodes: [
+                      {
+                        iid: '3',
+                        title: 'Already approved MR',
+                        state: 'opened',
+                        draft: false,
+                        sourceBranch: 'feat/3',
+                        targetBranch: 'main',
+                        webUrl: 'https://gitlab.example.com/g/p3/-/merge_requests/3',
+                        updatedAt: '2026-11-25T11:00:00Z',
+                        author: { username: 'bob' },
+                        reviewers: { nodes: [{ username: 'ann' }] },
+                        approvedBy: { nodes: [{ username: 'ann' }] },
+                        project: { fullPath: 'g/p3' },
+                        sourceProject: { fullPath: 'g/p3' },
+                      },
+                    ],
+                  },
+                },
+              },
+            })
+          }
+          return okJson({
+            data: {
+              currentUser: { username: 'ann' },
+              p0: {
+                mergeRequests: {
+                  nodes: [
+                    {
+                      iid: '4',
+                      title: 'Fourth repo MR',
+                      state: 'opened',
+                      draft: false,
+                      sourceBranch: 'feat/4',
+                      targetBranch: 'main',
+                      webUrl: 'https://gitlab.example.com/g/p4/-/merge_requests/4',
+                      updatedAt: '2026-11-25T11:00:00Z',
+                      author: { username: 'carol' },
+                      reviewers: { nodes: [] },
+                      project: { fullPath: 'g/p4' },
+                    },
+                  ],
+                },
+              },
+            },
+          })
+        }
+        // Fallback mine GraphQL query when no repos are registered
+        return okJson({ data: { currentUser: { username: 'ann', authored: { nodes: [] }, reviewing: { nodes: [] }, assigned: { nodes: [] } } } })
+      }
+      if (url.startsWith('https://gitlab.example.com/api/v4/projects/g%2Fp2/merge_requests')) {
+        return okJson([
+          {
+            iid: 2,
+            title: 'Isolated REST MR',
+            state: 'opened',
+            draft: false,
+            source_branch: 'feat/2',
+            target_branch: 'main',
+            updated_at: '2026-11-25T11:00:00Z',
+            author: { username: 'dan' },
+            assignees: [],
+            reviewers: [],
+            labels: [],
+            source_project_id: 100,
+            target_project_id: 200,
+            references: { full: 'g/p2!2' },
+            web_url: 'https://gitlab.example.com/g/p2/-/merge_requests/2',
+          },
+        ])
+      }
+      return { status: 404, ok: false, text: '{}' }
+    },
+  })
+
+  // With zero repos: falls back to currentUser and reports usedFallbackMine: true
+  const emptyRes = await runDashboardTool('gitlab_ui_list', deps, { state: 'opened' }, { tokens: 'gitlab.example.com=tok' }, store)
+  expect(emptyRes.isError).toBeUndefined()
+  expect(emptyRes.structuredContent?.usedFallbackMine).toBe(true)
+
+  // Register 4 repos -> batched as 3 + 1
+  for (const p of ['g/p1', 'g/p2', 'g/p3', 'g/p4']) {
+    await store.addRepo({ path: `/repos/${p}`, host: 'gitlab.example.com', project: p })
+  }
+  const multiRes = await runDashboardTool('gitlab_ui_list', deps, { state: 'opened', scope: 'projects' }, { tokens: 'gitlab.example.com=tok' }, store)
+  expect(multiRes.isError).toBeUndefined()
+  expect(gqlBatches).toHaveLength(2)
+  const sc = multiRes.structuredContent as {
+    mergeRequests: { iid: number; isWaitingOnMe: boolean; fork?: boolean }[]
+    enriched: boolean
+    usedFallbackMine: boolean
+    errors: unknown[]
+  }
+  expect(sc.usedFallbackMine).toBe(false)
+  expect(sc.enriched).toBe(true)
+  expect(sc.errors).toEqual([])
+  expect(sc.mergeRequests.map((m) => m.iid).sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
+  expect(sc.mergeRequests.find((m) => m.iid === 1)).toMatchObject({ isWaitingOnMe: true, fork: true })
+  expect(sc.mergeRequests.find((m) => m.iid === 2)).toMatchObject({ isWaitingOnMe: false, fork: true })
+  expect(sc.mergeRequests.find((m) => m.iid === 3)).toMatchObject({ isWaitingOnMe: false, fork: false })
+})
+
+test('gitlab_ui_detail includes localRepoPath and activeWorktree, and checkout_worktree/remove_worktree actions work', async () => {
+  const store = createStore()
+  await store.addRepo({ path: '/repos/app', host: 'gitlab.example.com', project: 'g/p' })
+  const dataDir = mkdtempSync(join(tmpdir(), 'gitlab-dash-wt-'))
+  const managedWt = join(realpathSync(dataDir), 'worktrees', 'app', 'feat-wt')
+  let worktreeActive = false
+
+  try {
+    const deps = makeDeps({
+      fetch: async (url) => {
+        if (url === 'https://gitlab.example.com/api/v4/user') return okJson({ id: 1, username: 'ann' })
+        if (url === 'https://gitlab.example.com/api/v4/projects/g%2Fp/merge_requests/55') {
+          return okJson({
+            iid: 55,
+            title: 'Worktree MR',
+            state: 'opened',
+            draft: false,
+            source_branch: 'feat/wt',
+            target_branch: 'main',
+            author: { username: 'bob' },
+            source_project_id: 10,
+            target_project_id: 10,
+            web_url: 'https://gitlab.example.com/g/p/-/merge_requests/55',
+          })
+        }
+        if (url.includes('/discussions') || url.includes('/draft_notes') || url.includes('/labels')) return okJson([])
+        return { status: 404, ok: false, text: '{}' }
+      },
+    })
+
+    const runtime = {
+      dataDir,
+      gitAt: async (_cwd: string, args: string[]) => {
+        if (args.includes('--git-common-dir')) return { exitCode: 0, stdout: '/repos/app/.git\n' }
+        if (args[0] === 'fetch') return { exitCode: 0, stdout: '' }
+        if (args[0] === 'worktree' && args[1] === 'list') {
+          return {
+            exitCode: 0,
+            stdout: worktreeActive
+              ? `worktree /repos/app\nbranch refs/heads/main\n\nworktree ${managedWt}\nbranch refs/heads/feat/wt\n`
+              : 'worktree /repos/app\nbranch refs/heads/main\n',
+          }
+        }
+        if (args[0] === 'show-ref') return { exitCode: 1, stdout: '' }
+        if (args[0] === 'worktree' && args[1] === 'add') {
+          worktreeActive = true
+          return { exitCode: 0, stdout: '' }
+        }
+        if (args[0] === 'status') return { exitCode: 0, stdout: ' M file.ts\n' }
+        if (args[0] === 'rev-list') return { exitCode: 0, stdout: '0\n' }
+        if (args[0] === 'worktree' && args[1] === 'remove') {
+          worktreeActive = false
+          return { exitCode: 0, stdout: '' }
+        }
+        return { exitCode: 0, stdout: '' }
+      },
+    }
+
+    const checkout = await runDashboardTool(
+      'gitlab_ui_action',
+      deps,
+      { host: 'gitlab.example.com', project: 'g/p', iid: 55, action: 'checkout_worktree' },
+      { tokens: 'gitlab.example.com=tok' },
+      store,
+      runtime,
+    )
+    expect(checkout.isError).toBeUndefined()
+    expect(checkout.structuredContent).toMatchObject({ ok: true, branch: 'feat/wt', path: managedWt, reused: false })
+
+    const detail = await runDashboardTool(
+      'gitlab_ui_detail',
+      deps,
+      { host: 'gitlab.example.com', project: 'g/p', iid: 55 },
+      { tokens: 'gitlab.example.com=tok' },
+      store,
+      runtime,
+    )
+    expect(detail.isError).toBeUndefined()
+    expect(detail.structuredContent?.detail).toMatchObject({
+      localRepoPath: '/repos/app',
+      activeWorktree: { path: managedWt, branch: 'feat/wt' },
+    })
+
+    // Guarded remove refuses when dirty without force
+    const rmGuard = await runDashboardTool(
+      'gitlab_ui_action',
+      deps,
+      { host: 'gitlab.example.com', project: 'g/p', iid: 55, action: 'remove_worktree', worktreePath: managedWt },
+      { tokens: 'gitlab.example.com=tok' },
+      store,
+      runtime,
+    )
+    expect(rmGuard.isError).toBeUndefined()
+    expect(rmGuard.structuredContent).toMatchObject({ ok: false, removed: false, needsForce: true, dirty: 1 })
+
+    // Forced remove succeeds
+    const rmForce = await runDashboardTool(
+      'gitlab_ui_action',
+      deps,
+      { host: 'gitlab.example.com', project: 'g/p', iid: 55, action: 'remove_worktree', worktreePath: managedWt, force: true },
+      { tokens: 'gitlab.example.com=tok' },
+      store,
+      runtime,
+    )
+    expect(rmForce.isError).toBeUndefined()
+    expect(rmForce.structuredContent).toMatchObject({ ok: true, removed: true, path: managedWt })
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true })
+  }
 })

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ServerBridge } from '../bridge.ts'
 import { formatRelativeTime } from '../lib/query.ts'
 import type {
+  ActiveRepo,
   BootstrapPayload,
   DashboardState,
   DetailTab,
@@ -19,7 +20,7 @@ import type {
 } from '../types.ts'
 import { CodeDiffTab } from './CodeDiffTab.tsx'
 import { DiscussionsTab } from './DiscussionsTab.tsx'
-import { Avatar, BackIcon, CloseIcon, ExternalLinkIcon, MaximizeIcon, PipelineGlyph, SparkleIcon } from './Icons.tsx'
+import { Avatar, BackIcon, CloseIcon, CopyIcon, ExternalLinkIcon, GitBranchIcon, MaximizeIcon, PipelineGlyph, SparkleIcon } from './Icons.tsx'
 import { MergeModal } from './MergeModal.tsx'
 import { MrListColumn } from './MrListColumn.tsx'
 import { SummaryTab } from './SummaryTab.tsx'
@@ -33,7 +34,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'gitlab-mr-dashboard', version: '0.4.0' },
+    appInfo: { name: 'gitlab-mr-dashboard', version: '0.5.0' },
     capabilities: {},
     onAppCreated: (instance) => {
       instance.ontoolresult = (result) => {
@@ -95,6 +96,9 @@ export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [workspaceScoped, setWorkspaceScoped] = useState(false)
   const [configuredHosts, setConfiguredHosts] = useState<string[]>([])
+  const [registeredRepos, setRegisteredRepos] = useState<ActiveRepo[]>([])
+  const [usedFallbackMine, setUsedFallbackMine] = useState(false)
+  const [pendingForceRemove, setPendingForceRemove] = useState<{ key: string; message: string } | null>(null)
 
   // List state
   const [mrs, setMrs] = useState<MrListItem[]>([])
@@ -129,6 +133,7 @@ export function App() {
     if (!bootstrap) return
     setConfiguredHosts(bootstrap.configuredHosts ?? [])
     setWorkspace(bootstrap.workspace ?? null)
+    if (bootstrap.registeredRepos) setRegisteredRepos(bootstrap.registeredRepos)
     if (bootstrap.state) {
       setPersisted(bootstrap.state)
       if (!bootstrappedRef.current) {
@@ -194,6 +199,8 @@ export function App() {
       if (workspace && workspaceScoped) {
         args.host = workspace.host
         args.project = workspace.project
+      } else if (hostOrProject === 'mine') {
+        args.scope = 'mine'
       } else if (hostOrProject.startsWith('host:')) {
         args.host = hostOrProject.slice(5)
       } else if (hostOrProject.startsWith('proj:')) {
@@ -203,11 +210,14 @@ export function App() {
           args.host = spec.slice(0, sep)
           args.project = spec.slice(sep + 1)
         }
+      } else {
+        args.scope = 'projects'
       }
       const res = await bridge.callTool<{
         mergeRequests: MrListItem[]
         enriched: boolean
         errors: { host: string; message: string }[]
+        usedFallbackMine?: boolean
       }>('gitlab_ui_list', args)
       if (reqId !== listReqIdRef.current) return
       setListLoading(false)
@@ -221,6 +231,7 @@ export function App() {
         setMrs(res.data.mergeRequests ?? [])
         setListEnriched(Boolean(res.data.enriched))
         setListErrors(res.data.errors ?? [])
+        setUsedFallbackMine(Boolean(res.data.usedFallbackMine))
       }
     },
     [bridge, configuredHosts.length, stateFilter, workspace, workspaceScoped, hostOrProject],
@@ -318,6 +329,10 @@ export function App() {
   const activeTab = useMemo(() => openTabs.find((t) => t.id === activeTabId) ?? null, [openTabs, activeTabId])
   const activeDetail = activeTab ? detailsById[activeTab.id] ?? null : null
   const activeDiff = activeTab ? diffsById[activeTab.id] ?? null : null
+
+  useEffect(() => {
+    setPendingForceRemove(null)
+  }, [activeTabId])
 
   useEffect(() => {
     if (activeTab) void loadDetail(activeTab)
@@ -434,23 +449,119 @@ export function App() {
     window.addEventListener('mouseup', onUp)
   }
 
+  const handleAddRepo = async (path: string): Promise<string | undefined> => {
+    if (!bridge) return 'Not connected to MCP server.'
+    const res = await bridge.callTool<{ state: DashboardState; added?: { project: string }; registeredRepos?: ActiveRepo[] }>('gitlab_ui_state', {
+      action: 'add_repo',
+      path,
+    })
+    if (!res.ok) return res.text || 'Failed to add repository.'
+    if (res.data?.state) setPersisted(res.data.state)
+    if (res.data?.registeredRepos) setRegisteredRepos(res.data.registeredRepos)
+    pushToast(`Added repository${res.data?.added ? ` ${res.data.added.project}` : ''}`, undefined, 'success')
+    void fetchList(true)
+    if (activeTab) void loadDetail(activeTab, true)
+    return undefined
+  }
+
+  const handleRemoveRepo = async (target: string): Promise<void> => {
+    if (!bridge) return
+    const res = await bridge.callTool<{ state: DashboardState; registeredRepos?: ActiveRepo[] }>('gitlab_ui_state', {
+      action: 'remove_repo',
+      path: target,
+    })
+    if (!res.ok) {
+      pushToast('Failed to remove repository', res.text, 'error')
+      return
+    }
+    if (res.data?.state) setPersisted(res.data.state)
+    if (res.data?.registeredRepos) setRegisteredRepos(res.data.registeredRepos)
+    pushToast('Removed repository')
+    void fetchList(true)
+    if (activeTab) void loadDetail(activeTab, true)
+  }
+
+  const copyText = (text: string): void => {
+    try {
+      void navigator.clipboard?.writeText(text)
+    } catch {}
+  }
+
+  const handleCheckoutWorktree = async () => {
+    if (!bridge || !activeTab) return
+    setActionBusy(true)
+    const res = await bridge.callTool<{ path: string; branch: string; reused: boolean; warnings?: string[] }>('gitlab_ui_action', {
+      host: activeTab.host,
+      project: activeTab.project,
+      iid: activeTab.iid,
+      action: 'checkout_worktree',
+    })
+    setActionBusy(false)
+    if (!res.ok) {
+      pushToast('Worktree checkout failed', res.text, 'error')
+      return
+    }
+    setPendingForceRemove(null)
+    const wtPath = res.data?.path
+    if (wtPath) copyText(wtPath)
+    const warnings = res.data?.warnings ?? []
+    const title = res.data?.reused ? 'Worktree synced (path copied)' : 'Worktree ready (path copied)'
+    const detail = warnings.length > 0 ? `${wtPath ?? ''}\n${warnings.join(' ')}`.trim() : wtPath
+    pushToast(title, detail, warnings.length > 0 ? 'warning' : 'success')
+    await loadDetail(activeTab, true)
+  }
+
+  const handleRemoveWorktree = async (worktreePath: string) => {
+    if (!bridge || !activeTab) return
+    const key = `${activeTab.id}:${worktreePath}`
+    const force = pendingForceRemove?.key === key
+    setActionBusy(true)
+    const res = await bridge.callTool<{ removed?: boolean; needsForce?: boolean; message?: string; warnings?: string[] }>('gitlab_ui_action', {
+      host: activeTab.host,
+      project: activeTab.project,
+      iid: activeTab.iid,
+      action: 'remove_worktree',
+      worktreePath,
+      ...(force ? { force: true } : {}),
+    })
+    setActionBusy(false)
+    if (!res.ok) {
+      pushToast('Failed to remove worktree', res.text, 'error')
+      return
+    }
+    if (res.data?.needsForce && !res.data.removed) {
+      const msg = res.data.message || 'Worktree has uncommitted or unpushed changes. Click again to force remove.'
+      setPendingForceRemove({ key, message: msg })
+      pushToast('Confirm force removal', msg, 'warning')
+      return
+    }
+    setPendingForceRemove(null)
+    const warnings = res.data?.warnings ?? []
+    pushToast('Worktree removed', warnings.join(' ') || undefined, warnings.length > 0 ? 'warning' : 'success')
+    await loadDetail(activeTab, true)
+  }
+
   // Agent handoff helpers (only rendered when host offers message/updateModelContext)
   const handoffToAgent = async (kind: 'review' | 'fix-ci' | 'threads' | 'attach') => {
     if (!bridge || !activeDetail) return
     const ref = `${activeDetail.project}!${activeDetail.iid} (${activeDetail.host})`
+    const branches = `${activeDetail.source} -> ${activeDetail.target}`
+    const wtNote = activeDetail.activeWorktree
+      ? `\nLocal worktree: ${activeDetail.activeWorktree.path} (branch ${activeDetail.activeWorktree.branch})`
+      : ''
     if (kind === 'attach') {
-      const ctx = `GitLab MR ${ref}\nTitle: ${activeDetail.title}\nBranches: ${activeDetail.source} -> ${activeDetail.target}\nURL: ${activeDetail.url}\nBlockers: ${activeDetail.blockers.join(', ') || 'none'}`
+      const ctx = `GitLab MR ${ref}\nTitle: ${activeDetail.title}\nBranches: ${branches}${wtNote}\nURL: ${activeDetail.url}\nBlockers: ${activeDetail.blockers.join(', ') || 'none'}`
       const ok = await bridge.updateContext(ctx)
       pushToast(ok ? 'Attached MR context to next message' : 'Could not attach context', ref, ok ? 'success' : 'error')
       return
     }
     const prompts = {
-      review: `Review GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${activeDetail.url}) and save any findings as draft notes.`,
-      'fix-ci': `Inspect the failing pipeline #${activeDetail.pipeline?.id ?? ''} jobs and logs for GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${activeDetail.url}) and help fix the failure.`,
-      threads: `Inspect all unresolved discussions on GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${activeDetail.url}) and help address them.`,
+      review: `Review GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and save any findings as draft notes.`,
+      'fix-ci': `Inspect the failing pipeline #${activeDetail.pipeline?.id ?? ''} jobs and logs for GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help fix the failure.`,
+      threads: `Inspect all unresolved discussions on GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help address them.`,
     }
-    const ok = await bridge.sendMessage(prompts[kind])
-    pushToast(ok ? 'Sent request to conversation' : 'Could not message conversation', ref, ok ? 'success' : 'error')
+    const ok = await bridge.sendMessage(prompts[kind], { target: 'new' })
+    pushToast(ok ? 'Started new agent conversation' : 'Could not start conversation', ref, ok ? 'success' : 'error')
   }
 
   if (connectError) {
@@ -492,6 +603,8 @@ export function App() {
           enriched={listEnriched}
           errors={listErrors}
           configuredHosts={configuredHosts}
+          registeredRepos={registeredRepos}
+          usedFallbackMine={usedFallbackMine}
           workspace={workspace}
           workspaceScoped={workspaceScoped}
           selectedMrId={activeTabId}
@@ -569,6 +682,8 @@ export function App() {
               }
             })
           }}
+          onAddRepo={handleAddRepo}
+          onRemoveRepo={handleRemoveRepo}
           onToggleAutoRefresh={() => {
             const next = !autoRefresh
             setAutoRefresh(next)
@@ -676,16 +791,23 @@ export function App() {
                         <button
                           className="btn btn-sm"
                           disabled={actionBusy}
+                          title={activeDetail.draft ? 'Mark this MR as ready for review' : 'Convert this MR back to draft'}
                           onClick={() => void runAction('toggle_draft', { draft: !activeDetail.draft })}
                         >
                           {activeDetail.draft ? 'Mark ready' : 'Draft'}
                         </button>
-                        <button className="btn btn-sm" disabled={actionBusy} onClick={() => void runAction('rebase')}>
+                        <button
+                          className="btn btn-sm"
+                          disabled={actionBusy}
+                          title="Rebase this MR's source branch onto its target branch on GitLab"
+                          onClick={() => void runAction('rebase')}
+                        >
                           Rebase
                         </button>
                         <button
                           className={`btn btn-sm ${iApproved ? 'btn-success' : ''}`}
                           disabled={actionBusy}
+                          title={iApproved ? 'Remove your approval from this MR' : 'Approve this merge request'}
                           onClick={() => void runAction(iApproved ? 'unapprove' : 'approve')}
                         >
                           {iApproved ? '✓ Approved' : 'Approve'}
@@ -693,14 +815,34 @@ export function App() {
                         <button
                           className={`btn btn-sm ${activeDetail.blockers.length === 0 ? 'btn-primary' : ''}`}
                           disabled={actionBusy}
+                          title="Open merge options and safety checks"
                           onClick={() => setMergeModalOpen(true)}
                         >
                           Merge…
                         </button>
                       </>
                     ) : null}
+                    <button
+                      className="btn btn-sm"
+                      disabled={actionBusy || !activeDetail.localRepoPath}
+                      title={
+                        activeDetail.localRepoPath
+                          ? activeDetail.activeWorktree
+                            ? `Sync isolated worktree (${activeDetail.activeWorktree.branch}) and copy its path`
+                            : 'Create an isolated git worktree for this MR and copy its path'
+                          : 'Register this repository in Repos to enable local worktree checkout'
+                      }
+                      onClick={() => void handleCheckoutWorktree()}
+                    >
+                      <GitBranchIcon />
+                      {activeDetail.activeWorktree ? 'Sync' : 'Checkout'}
+                    </button>
                     {caps.canOpenLinks ? (
-                      <button className="btn btn-sm btn-icon" onClick={() => void bridge?.openLink(activeDetail.url)} title="Open in GitLab">
+                      <button
+                        className="btn btn-sm btn-icon"
+                        onClick={() => void bridge?.openLink(activeDetail.url)}
+                        title="Open this MR in GitLab"
+                      >
                         <ExternalLinkIcon />
                       </button>
                     ) : null}
@@ -728,6 +870,54 @@ export function App() {
                 </div>
               </div>
 
+              {/* Active Local Worktree Strip */}
+              {activeDetail.activeWorktree ? (
+                <div className="worktree-bar">
+                  <div className="row" style={{ gap: 6, minWidth: 0, flex: 1 }}>
+                    <span className="pill pill-info mono" style={{ flexShrink: 0 }}>
+                      <GitBranchIcon />
+                      {activeDetail.activeWorktree.branch}
+                    </span>
+                    <span className="mono truncate" style={{ color: 'var(--fg-secondary)' }} title={activeDetail.activeWorktree.path}>
+                      {activeDetail.activeWorktree.path}
+                    </span>
+                  </div>
+                  <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-sm"
+                      title="Copy worktree path to clipboard"
+                      onClick={() => {
+                        copyText(activeDetail.activeWorktree!.path)
+                        pushToast('Copied worktree path', activeDetail.activeWorktree!.path)
+                      }}
+                    >
+                      <CopyIcon />
+                      Copy
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      disabled={actionBusy}
+                      title="Fast-forward this worktree to the latest MR commit"
+                      onClick={() => void handleCheckoutWorktree()}
+                    >
+                      Sync
+                    </button>
+                    <button
+                      className={`btn btn-sm ${pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}` ? 'btn-danger' : ''}`}
+                      disabled={actionBusy}
+                      title={
+                        pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}`
+                          ? pendingForceRemove.message
+                          : 'Remove this isolated review worktree'
+                      }
+                      onClick={() => void handleRemoveWorktree(activeDetail.activeWorktree!.path)}
+                    >
+                      {pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}` ? 'Force remove?' : 'Remove'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {/* Agent Handoff Bar (strictly gated on host capabilities -> shown in aux_pane, hidden in global) */}
               {caps.canMessage || caps.canUpdateContext ? (
                 <div className="agent-bar">
@@ -737,23 +927,40 @@ export function App() {
                   </span>
                   {caps.canMessage ? (
                     <>
-                      <button className="btn btn-sm" onClick={() => void handoffToAgent('review')}>
+                      <button
+                        className="btn btn-sm"
+                        title="Start a new agent conversation to review this MR and save findings as draft notes"
+                        onClick={() => void handoffToAgent('review')}
+                      >
                         Review MR
                       </button>
                       {activeDetail.pipeline?.status === 'failed' ? (
-                        <button className="btn btn-sm btn-danger" onClick={() => void handoffToAgent('fix-ci')}>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          title="Start a new agent conversation to inspect failing CI jobs and help fix the pipeline"
+                          onClick={() => void handoffToAgent('fix-ci')}
+                        >
                           Fix failing pipeline
                         </button>
                       ) : null}
                       {unresolvedCount > 0 ? (
-                        <button className="btn btn-sm" onClick={() => void handoffToAgent('threads')}>
+                        <button
+                          className="btn btn-sm"
+                          title="Start a new agent conversation to inspect and address unresolved review threads"
+                          onClick={() => void handoffToAgent('threads')}
+                        >
                           Address {unresolvedCount} thread{unresolvedCount === 1 ? '' : 's'}
                         </button>
                       ) : null}
                     </>
                   ) : null}
                   {caps.canUpdateContext ? (
-                    <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => void handoffToAgent('attach')}>
+                    <button
+                      className="btn btn-sm"
+                      style={{ marginLeft: 'auto' }}
+                      title="Attach this MR's summary to your next chat message without sending"
+                      onClick={() => void handoffToAgent('attach')}
+                    >
                       Attach context
                     </button>
                   ) : null}

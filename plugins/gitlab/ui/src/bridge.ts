@@ -72,10 +72,17 @@ export class ServerBridge {
     } catch {}
   }
 
-  async sendMessage(text: string): Promise<boolean> {
+  async sendMessage(text: string, opts?: { target?: 'new' }): Promise<boolean> {
     if (!this.capabilities.canMessage) return false
     try {
-      const res = await this.app.sendMessage({ role: 'user', content: [{ type: 'text', text }] })
+      const payload: Record<string, unknown> = {
+        role: 'user',
+        content: [{ type: 'text', text }],
+      }
+      if (opts?.target === 'new') {
+        payload._meta = { 'com.google.antigravity/message': { target: 'new' } }
+      }
+      const res = await this.app.sendMessage(payload as Parameters<App['sendMessage']>[0])
       return !res.isError
     } catch {
       return false

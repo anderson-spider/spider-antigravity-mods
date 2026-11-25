@@ -103,13 +103,14 @@ export interface ToolInputs {
     project?: string | number
     iid?: number
     state?: 'opened' | 'merged' | 'closed' | 'all'
-    involvement?: 'all' | 'reviewing' | 'authored'
+    involvement?: 'all' | 'waiting' | 'reviewing' | 'authored' | 'others'
   }
   gitlab_ui_list: {
     host?: string
     project?: string | number
     state?: 'opened' | 'merged' | 'closed' | 'all'
-    involvement?: 'all' | 'reviewing' | 'authored'
+    involvement?: 'all' | 'waiting' | 'reviewing' | 'authored' | 'others'
+    scope?: 'projects' | 'mine'
   }
   gitlab_ui_detail: {
     host: string
@@ -157,6 +158,8 @@ export interface ToolInputs {
       | 'retry_pipeline'
       | 'cancel_pipeline'
       | 'run_pipeline'
+      | 'checkout_worktree'
+      | 'remove_worktree'
     iid?: number
     draft?: boolean
     description?: string
@@ -174,14 +177,16 @@ export interface ToolInputs {
     oldLine?: number
     jobId?: number
     pipelineId?: number
+    force?: boolean
+    worktreePath?: string
   }
   gitlab_ui_state: {
-    action: 'get' | 'save_preferences' | 'save_view' | 'delete_view' | 'set_file_viewed'
+    action: 'get' | 'save_preferences' | 'save_view' | 'delete_view' | 'set_file_viewed' | 'add_repo' | 'remove_repo'
     id?: string
     name?: string
     q?: string
     state?: 'opened' | 'merged' | 'closed' | 'all'
-    involvement?: 'all' | 'reviewing' | 'authored'
+    involvement?: 'all' | 'waiting' | 'reviewing' | 'authored' | 'others'
     sort?: 'ready' | 'updated' | 'newest' | 'oldest' | 'largest'
     hostOrProject?: string
     diffMode?: 'unified' | 'split'

@@ -5,9 +5,15 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type MrStateFilter = 'opened' | 'merged' | 'closed' | 'all'
-export type InvolvementFilter = 'all' | 'reviewing' | 'authored'
+export type InvolvementFilter = 'all' | 'waiting' | 'reviewing' | 'authored' | 'others'
 export type SortOrder = 'ready' | 'updated' | 'newest' | 'oldest' | 'largest'
 export type DiffMode = 'unified' | 'split'
+
+export type RegisteredRepo = {
+  path: string
+  host: string
+  project: string
+}
 
 export type DashboardPreferences = {
   state: MrStateFilter
@@ -44,6 +50,7 @@ export type DashboardState = {
   preferences: DashboardPreferences
   savedViews: SavedView[]
   filesViewed: Record<string, ViewedRecord>
+  repos: RegisteredRepo[]
 }
 
 export type Store = {
@@ -52,13 +59,16 @@ export type Store = {
   saveView: (input: { id?: string; name: string; filters: Partial<SavedViewFilters> }) => Promise<DashboardState>
   deleteView: (id: string) => Promise<DashboardState>
   setFileViewed: (mrKey: string, sha: string, path: string, viewed: boolean) => Promise<DashboardState>
+  addRepo: (repo: RegisteredRepo) => Promise<DashboardState>
+  removeRepo: (target: string) => Promise<DashboardState>
 }
 
 const MAX_VIEWS = 50
+const MAX_REPOS = 50
 const MAX_VIEWED_MRS = 500
 const MAX_VIEWED_PATHS = 1_000
 const STATES = new Set<MrStateFilter>(['opened', 'merged', 'closed', 'all'])
-const INVOLVEMENTS = new Set<InvolvementFilter>(['all', 'reviewing', 'authored'])
+const INVOLVEMENTS = new Set<InvolvementFilter>(['all', 'waiting', 'reviewing', 'authored', 'others'])
 const SORTS = new Set<SortOrder>(['ready', 'updated', 'newest', 'oldest', 'largest'])
 const DIFF_MODES = new Set<DiffMode>(['unified', 'split'])
 
@@ -79,6 +89,7 @@ export function defaultState(): DashboardState {
     preferences: { ...DEFAULT_PREFERENCES },
     savedViews: [],
     filesViewed: {},
+    repos: [],
   }
 }
 
@@ -150,6 +161,39 @@ function sanitizeViewed(raw: unknown): Record<string, ViewedRecord> {
   return out
 }
 
+function normalizeRepoPath(raw: string): string {
+  const trimmed = raw.trim()
+  if (trimmed === '/' || trimmed === '\\') return trimmed
+  return trimmed.replace(/[\\/]+$/, '')
+}
+
+function repoProjectKey(host: string, project: string): string {
+  return `${host.toLowerCase()}|${project.toLowerCase()}`
+}
+
+function sanitizeRepos(raw: unknown): RegisteredRepo[] {
+  if (!Array.isArray(raw)) return []
+  const out: RegisteredRepo[] = []
+  const seenKeys = new Set<string>()
+  const seenPaths = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    const rawPath = cleanStr(rec.path, 1024)
+    const host = cleanStr(rec.host, 256)?.toLowerCase()
+    const project = cleanStr(rec.project, 512)
+    if (!rawPath || !host || !project) continue
+    const normPath = normalizeRepoPath(rawPath)
+    const key = repoProjectKey(host, project)
+    if (seenKeys.has(key) || seenPaths.has(normPath)) continue
+    seenKeys.add(key)
+    seenPaths.add(normPath)
+    out.push({ path: normPath, host, project })
+    if (out.length >= MAX_REPOS) break
+  }
+  return out
+}
+
 export function sanitizeState(raw: unknown): DashboardState {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultState()
   const obj = raw as Record<string, unknown>
@@ -158,6 +202,7 @@ export function sanitizeState(raw: unknown): DashboardState {
     preferences: sanitizePreferences(obj.preferences),
     savedViews: sanitizeViews(obj.savedViews),
     filesViewed: sanitizeViewed(obj.filesViewed),
+    repos: sanitizeRepos(obj.repos),
   }
 }
 
@@ -245,6 +290,34 @@ export function createStore(dataDir?: string): Store {
         const oldest = keys.shift()
         if (oldest) delete current.filesViewed[oldest]
       }
+      return persist(current)
+    },
+
+    async addRepo(repo) {
+      const rawPath = cleanStr(repo.path, 1024)
+      const host = cleanStr(repo.host, 256)?.toLowerCase()
+      const project = cleanStr(repo.project, 512)
+      if (!rawPath || !host || !project) throw new Error('Repo requires path, host, and project.')
+      const normPath = normalizeRepoPath(rawPath)
+      const key = repoProjectKey(host, project)
+      const current = await readDisk()
+      current.repos = current.repos.filter(
+        (r) => repoProjectKey(r.host, r.project) !== key && normalizeRepoPath(r.path) !== normPath,
+      )
+      current.repos.push({ path: normPath, host, project })
+      if (current.repos.length > MAX_REPOS) current.repos.shift()
+      return persist(current)
+    },
+
+    async removeRepo(target) {
+      const cleaned = cleanStr(target, 1024)
+      if (!cleaned) return readDisk()
+      const normPath = normalizeRepoPath(cleaned)
+      const lowerTarget = cleaned.toLowerCase()
+      const current = await readDisk()
+      current.repos = current.repos.filter(
+        (r) => normalizeRepoPath(r.path) !== normPath && repoProjectKey(r.host, r.project) !== lowerTarget,
+      )
       return persist(current)
     },
   }

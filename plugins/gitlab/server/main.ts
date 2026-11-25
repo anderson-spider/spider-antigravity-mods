@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { DASHBOARD_MIME, DASHBOARD_URI, runDashboardTool, type DashboardToolName } from './dashboard.ts'
 import { server } from './mcp.ts'
-import { nodeDeps, resolveCwd } from './node.ts'
+import { gitAt, nodeDeps, resolveCwd } from './node.ts'
 import { ENV_NAME, run } from './run.ts'
 import { createStore } from './store.ts'
 import { DASHBOARD_TOOLS, TOOLS, type CoreToolName } from './tools.ts'
@@ -32,7 +32,8 @@ function parseDataDir(argv: readonly string[]): string | undefined {
   return undefined
 }
 
-const store = createStore(parseDataDir(process.argv.slice(2)))
+const dataDir = parseDataDir(process.argv.slice(2))
+const store = createStore(dataDir)
 const defaultHtmlPath = fileURLToPath(new URL('../ui/dist/app.html', import.meta.url))
 
 const mcp = server({
@@ -54,7 +55,8 @@ const mcp = server({
     if (resolved.error !== undefined) return { text: resolved.error, isError: true }
     const deps = nodeDeps(resolved.cwd, () => context.progress('waiting'))
     if (DASHBOARD_TOOLS.has(name)) {
-      return runDashboardTool(name as DashboardToolName, deps, input, options, store)
+      const cwds = [...new Set([resolved.cwd, ...(context.cwds ?? [])])]
+      return runDashboardTool(name as DashboardToolName, deps, input, options, store, { cwds, dataDir, gitAt })
     }
     return run(deps, TOOLS[name as CoreToolName], input, options)
   },

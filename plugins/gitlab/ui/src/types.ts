@@ -1,8 +1,23 @@
 export type MrStateFilter = 'opened' | 'merged' | 'closed' | 'all'
-export type InvolvementFilter = 'all' | 'reviewing' | 'authored'
+export type InvolvementFilter = 'all' | 'waiting' | 'reviewing' | 'authored' | 'others'
 export type SortOrder = 'ready' | 'updated' | 'newest' | 'oldest' | 'largest'
 export type DiffMode = 'unified' | 'split'
 export type DetailTab = 'summary' | 'discussions' | 'code'
+
+export type RegisteredRepo = {
+  path: string
+  host: string
+  project: string
+}
+
+export type ActiveRepo = RegisteredRepo & {
+  source: 'workspace' | 'registered'
+}
+
+export type WorktreeInfo = {
+  path: string
+  branch: string
+}
 
 export type DashboardPreferences = {
   state: MrStateFilter
@@ -39,6 +54,7 @@ export type DashboardState = {
   preferences: DashboardPreferences
   savedViews: SavedView[]
   filesViewed: Record<string, ViewedRecord>
+  repos: RegisteredRepo[]
 }
 
 export type WorkspaceInfo = {
@@ -50,6 +66,7 @@ export type WorkspaceInfo = {
 export type BootstrapPayload = {
   configuredHosts: string[]
   workspace?: WorkspaceInfo | null
+  registeredRepos?: ActiveRepo[]
   initialScope?: 'project' | 'all'
   initialSelection?: { host: string; project: string; iid: number }
   initialState?: MrStateFilter
@@ -71,6 +88,8 @@ export type MrListItem = {
   involvement: 'authored' | 'reviewing' | 'other'
   isAuthored: boolean
   isReviewing: boolean
+  isWaitingOnMe?: boolean
+  fork?: boolean
   author: { username: string; name?: string }
   assignees: string[]
   reviewers: string[]
@@ -159,6 +178,8 @@ export type MrDetail = {
   conflicts?: boolean
   discussionsResolved?: boolean
   isProtectedTarget?: boolean
+  localRepoPath?: string
+  activeWorktree?: WorktreeInfo | null
   createdAt: string
   updatedAt: string
   pipeline: {
