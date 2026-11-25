@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 - 2026-11-25
+
+- Add multi-root MCP `roots/list` discovery (`foldersOf` and `CallContext.cwds`) so every workspace root is automatically detected alongside persistent registered local repositories (`Repos` popover, backed by `dashboard-state.json`).
+- Add multi-repo batched MR listing in **All projects** scope (`scope: 'projects'`, 3 projects per GraphQL query with max concurrency 4, CE-safe fallback, and per-project REST isolation), plus `My MRs (all hosts)` (`scope: 'mine'`), `Waiting on me` and `Others` involvement filters, `you` review pill, and graceful fallback banner when no repositories are tracked yet.
+- Add isolated git worktree checkout (`Checkout` / `Sync`) and safe removal (`Remove` with strict path containment inside the managed worktree root and 2-click force confirmation for uncommitted or unpushed changes), including fork MR support via GitLab's `merge-requests/<iid>/head` ref.
+- Route Agent Handoff actions (`Review MR`, `Fix failing pipeline`, `Address N threads`) to new Antigravity conversations (`_meta['com.google.antigravity/message'].target = 'new'`) with branch and local worktree context, and add descriptive tooltips across header and Agent bar actions.
+
 ## 0.4.0 - 2026-11-25
 
 - Add an interactive **GitLab MR Dashboard** MCP App (`ui://gitlab/mr-dashboard.html`) served directly by the `gitlab_gitlab` MCP server with **Global** (full-page sidebar) and **Aux Pane** (side pane beside chat) entrypoints.

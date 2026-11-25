@@ -22,12 +22,17 @@ export function childEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 
 /** A process's exit code and output; one that cannot start or times out exits non-zero with what it printed. */
 function processRun(command: string, timeoutMs: number, cwd?: string) {
-  return (args: string[]) => new Promise<{ exitCode: number; stdout: string }>(resolvePromise => {
-    execFile(command, args, { cwd, env: childEnv(), timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: 'utf8' }, (err, stdout) => {
+  return (args: string[]) => new Promise<{ exitCode: number; stdout: string; stderr: string }>(resolvePromise => {
+    execFile(command, args, { cwd, env: childEnv(), timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0
-      resolvePromise({ exitCode: code, stdout: stdout ?? '' })
+      resolvePromise({ exitCode: code, stdout: stdout ?? '', stderr: stderr ?? '' })
     })
   })
+}
+
+/** Runs `git <args>` in an explicit directory with credential environment variables scrubbed. */
+export function gitAt(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return processRun('git', 60_000, cwd)(args)
 }
 
 const REDIRECTS = 3

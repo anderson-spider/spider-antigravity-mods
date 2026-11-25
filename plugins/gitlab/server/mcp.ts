@@ -7,13 +7,13 @@ import { SPECS, type ToolSpec } from './tools.ts'
 import type { Reply } from './run.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.4.0'
+export const SERVER_VERSION = '0.5.0'
 
 type Id = string | number
 type Message = { jsonrpc?: string; id?: Id | null; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown }
 
-/** What a tool call gets beyond its input: the session's folder, and a beat that keeps a long call alive. */
-export type CallContext = { cwd: string | undefined; progress: (message: string) => void }
+/** What a tool call gets beyond its input: the session's folder(s), and a beat that keeps a long call alive. */
+export type CallContext = { cwd: string | undefined; cwds?: readonly string[]; progress: (message: string) => void }
 
 /** An MCP resource served via `resources/list` and `resources/read` (such as an MCP App `ui://` HTML bundle). */
 export type ResourceEntry = {
@@ -43,16 +43,29 @@ export type ServerDeps = {
 
 const NAMES: ReadonlySet<string> = new Set(SPECS.map(spec => spec.name))
 
+/** All valid `file:` root folders in order, deduplicated. */
+export function foldersOf(roots: unknown): string[] {
+  const list = (roots as { roots?: unknown } | undefined)?.roots
+  if (!Array.isArray(list)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of list) {
+    const uri = (item as { uri?: unknown } | undefined)?.uri
+    if (typeof uri !== 'string' || !uri.startsWith('file://')) continue
+    try {
+      const folder = fileURLToPath(uri)
+      if (!seen.has(folder)) {
+        seen.add(folder)
+        out.push(folder)
+      }
+    } catch {}
+  }
+  return out
+}
+
 /** The folder of the first `file:` root, or undefined. */
 export function folderOf(roots: unknown): string | undefined {
-  const list = (roots as { roots?: unknown } | undefined)?.roots
-  const uri = Array.isArray(list) ? (list[0] as { uri?: unknown } | undefined)?.uri : undefined
-  if (typeof uri !== 'string' || !uri.startsWith('file://')) return undefined
-  try {
-    return fileURLToPath(uri)
-  } catch {
-    return undefined
-  }
+  return foldersOf(roots)[0]
 }
 
 export function server(deps: ServerDeps): Server {
@@ -64,15 +77,15 @@ export function server(deps: ServerDeps): Server {
   const resourceMap = new Map(resourceList.map(r => [r.uri, r]))
 
   let rootsSupported = false
-  let cwd: string | undefined
+  let cwds: string[] = []
   let stale = true
   let epoch = 0
   let next = 0
   const pending = new Map<Id, (message: Message) => void>()
 
-  /** The session's folder: asked once, and again after the client says its roots changed; on no answer, the last one. */
-  async function folder(): Promise<string | undefined> {
-    if (!rootsSupported || !stale) return cwd
+  /** The session's folders: asked once, and again after the client says its roots changed; on no answer, the last ones. */
+  async function folders(): Promise<readonly string[]> {
+    if (!rootsSupported || !stale) return cwds
     const askedEpoch = epoch
     const id = `roots-${++next}`
     const reply = await new Promise<Message | undefined>(resolve => {
@@ -81,10 +94,10 @@ export function server(deps: ServerDeps): Server {
       send({ id, method: 'roots/list' })
     })
     if (reply && 'result' in reply && askedEpoch === epoch) {
-      cwd = folderOf(reply.result)
+      cwds = foldersOf(reply.result)
       stale = false
     }
-    return cwd
+    return cwds
   }
 
   async function call(id: Id, params: Record<string, unknown>): Promise<void> {
@@ -99,7 +112,8 @@ export function server(deps: ServerDeps): Server {
     }
     let reply: Reply
     try {
-      reply = await deps.call(name as ToolSpec['name'], input, { cwd: await folder(), progress })
+      const roots = await folders()
+      reply = await deps.call(name as ToolSpec['name'], input, { cwd: roots[0], cwds: roots, progress })
     } catch (err) {
       deps.log?.(`gitlab: ${name} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
       reply = { text: 'The gitlab tool failed before it could answer. Try again; if it repeats, check the Antigravity MCP logs.', isError: true }

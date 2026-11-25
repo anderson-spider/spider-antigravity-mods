@@ -1,17 +1,31 @@
 // GitLab MR Dashboard MCP App backend: entrypoint tool (`gitlab_mr_dashboard`) plus app-only (`visibility: ['app']`)
-// tools for multi-host GraphQL/REST listing, detail aggregation, diff loading, job logs, guarded UI actions, and
-// persistent local UI state. Reuses existing tool logic and preserves every credential/merge safety invariant.
+// tools for multi-host/multi-repo batched GraphQL/REST listing, local repository registration, isolated git worktree
+// checkout/removal, detail aggregation, diff loading, job logs, guarded UI actions, and persistent local UI state.
+import { stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
 import { GitlabError, NoProjectError, gitlab, type Api } from './api.ts'
 import { comment } from './comments.ts'
 import { InputError, bool, id, items, makeCtx, need, paging, str, type Ctx, type User } from './context.ts'
 import { jobLog } from './joblog.ts'
 import { mr, statusView } from './mr.ts'
 import { jobView, pipeline } from './pipelines.ts'
-import { errorText, hostName, maskSecrets, projectPath, resolveEnv, type Deps, type Options, type Reply } from './run.ts'
-import type { DashboardPreferences, SavedViewFilters, Store } from './store.ts'
+import { errorText, hostName, locate, maskSecrets, projectPath, resolveEnv, sshHostname, type Deps, type Options, type Reply } from './run.ts'
+import type { DashboardPreferences, RegisteredRepo, SavedViewFilters, Store } from './store.ts'
+import { checkoutWorktree, findWorktree, removeWorktree, type GitAt, type WorktreeInfo } from './worktree.ts'
 
 export const DASHBOARD_URI = 'ui://gitlab/mr-dashboard.html'
 export const DASHBOARD_MIME = 'text/html;profile=mcp-app'
+
+export type ActiveRepo = RegisteredRepo & { source: 'workspace' | 'registered' }
+
+export type DashboardRuntime = {
+  cwds?: readonly string[]
+  dataDir?: string
+  gitAt?: GitAt
+  isDir?: (path: string) => Promise<boolean>
+  homedir?: () => string
+}
 
 export type DashboardToolName =
   | 'gitlab_mr_dashboard'
@@ -33,6 +47,8 @@ export type DashboardMrItem = {
   involvement: 'authored' | 'reviewing' | 'other'
   isAuthored: boolean
   isReviewing: boolean
+  isWaitingOnMe: boolean
+  fork?: boolean
   author: { username: string; name?: string }
   assignees: string[]
   reviewers: string[]
@@ -78,6 +94,7 @@ const MR_FIELDS_BASE = `
 
 const MR_FIELDS_EE = `
   ${MR_FIELDS_BASE}
+  sourceProject { fullPath }
   approved
   approvalsRequired
   approvalsLeft
@@ -108,6 +125,20 @@ function buildProjectListQuery(fields: string, withState: boolean): string {
   }`
 }
 
+function buildBatchProjectListQuery(fields: string, count: number, withState: boolean, limit: number): string {
+  const vars = Array.from({ length: count }, (_, i) => `$p${i}: ID!`)
+  if (withState) vars.push('$state: MergeRequestState!')
+  const args = withState ? `(state: $state, first: ${limit}, sort: UPDATED_DESC)` : `(first: ${limit}, sort: UPDATED_DESC)`
+  const aliases = Array.from(
+    { length: count },
+    (_, i) => `p${i}: project(fullPath: $p${i}) { mergeRequests${args} { nodes { ${fields} } } }`,
+  ).join('\n    ')
+  return `query DashboardBatchProjectMrs(${vars.join(', ')}) {
+    currentUser { username }
+    ${aliases}
+  }`
+}
+
 type GqlNode = {
   iid?: string | number
   title?: string
@@ -133,6 +164,7 @@ type GqlNode = {
   diffStatsSummary?: { additions?: number; deletions?: number; fileCount?: number } | null
   userDiscussionsCount?: number | null
   project?: { fullPath?: string } | null
+  sourceProject?: { fullPath?: string } | null
 }
 
 function parseGidNumber(raw: string | undefined): number | undefined {
@@ -157,6 +189,11 @@ function fromGraphqlNode(host: string, node: GqlNode, me: string | undefined, fa
   const isReviewing = me !== undefined && !isAuthored && (reviewers.some((r) => r.toLowerCase() === me.toLowerCase()) || assignees.some((a) => a.toLowerCase() === me.toLowerCase()))
   const involvement: DashboardMrItem['involvement'] = isAuthored ? 'authored' : isReviewing ? 'reviewing' : 'other'
   const approvedBy = (node.approvedBy?.nodes ?? []).map((u) => u?.username).filter((u): u is string => Boolean(u))
+  const approvedByMe = me !== undefined && approvedBy.some((u) => u.toLowerCase() === me.toLowerCase())
+  const isWaitingOnMe = isReviewing && !approvedByMe
+  const fork = node.sourceProject?.fullPath
+    ? node.sourceProject.fullPath.toLowerCase() !== project.toLowerCase()
+    : undefined
   const hasApprovals = typeof node.approved === 'boolean' || typeof node.approvalsRequired === 'number' || approvedBy.length > 0
   return {
     id: `${host}:${project}:${iid}`,
@@ -169,6 +206,8 @@ function fromGraphqlNode(host: string, node: GqlNode, me: string | undefined, fa
     involvement,
     isAuthored,
     isReviewing,
+    isWaitingOnMe,
+    ...(fork !== undefined ? { fork } : {}),
     author: { username: authorUser, ...(node.author?.name ? { name: node.author.name } : {}) },
     assignees,
     reviewers,
@@ -228,6 +267,8 @@ type RestMr = {
   references?: { full?: string }
   web_url: string
   diff_refs?: { base_sha: string; start_sha: string; head_sha: string }
+  source_project_id?: number
+  target_project_id?: number
 }
 
 function projectFromRestMr(item: RestMr, fallback?: string): string | undefined {
@@ -255,6 +296,10 @@ function fromRestMr(host: string, item: RestMr, me: string | undefined, fallback
   const isAuthored = me !== undefined && authorUser.toLowerCase() === me.toLowerCase()
   const isReviewing = me !== undefined && !isAuthored && (reviewers.some((r) => r.toLowerCase() === me.toLowerCase()) || assignees.some((a) => a.toLowerCase() === me.toLowerCase()))
   const involvement: DashboardMrItem['involvement'] = isAuthored ? 'authored' : isReviewing ? 'reviewing' : 'other'
+  const fork =
+    typeof item.source_project_id === 'number' && typeof item.target_project_id === 'number'
+      ? item.source_project_id !== item.target_project_id
+      : undefined
   return {
     id: `${host}:${project}:${item.iid}`,
     host,
@@ -266,6 +311,8 @@ function fromRestMr(host: string, item: RestMr, me: string | undefined, fallback
     involvement,
     isAuthored,
     isReviewing,
+    isWaitingOnMe: isReviewing,
+    ...(fork !== undefined ? { fork } : {}),
     author: { username: authorUser, ...(item.author?.name ? { name: item.author.name } : {}) },
     assignees,
     reviewers,
@@ -423,6 +470,274 @@ function requireHostAndProject(tokens: Map<string, string>, input: Record<string
   return { host, token, project }
 }
 
+async function runPool<T, R>(list: readonly T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(list.length)
+  let nextIdx = 0
+  const workers = Array.from({ length: Math.min(concurrency, list.length) }, async () => {
+    while (nextIdx < list.length) {
+      const idx = nextIdx++
+      results[idx] = await fn(list[idx]!)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+const MULTI_REPO_BATCH_SIZE = 3
+const MULTI_REPO_CONCURRENCY = 4
+
+async function listHostProjectBatchGraphql(
+  api: Api,
+  host: string,
+  projects: readonly string[],
+  state: 'opened' | 'merged' | 'closed' | 'all',
+  limit: number,
+): Promise<{ me?: string; items: DashboardMrItem[]; missing: string[] }> {
+  const withState = state !== 'all'
+  const variables: Record<string, unknown> = { ...(withState ? { state } : {}) }
+  for (let i = 0; i < projects.length; i++) variables[`p${i}`] = projects[i]
+
+  const runBatch = async (fields: string, strictErrors: boolean) => {
+    const query = buildBatchProjectListQuery(fields, projects.length, withState, limit)
+    const reply = await api.graphql(query, variables)
+    const errorMsg = (reply.errors ?? []).map((e) => e.message).filter(Boolean).join('; ')
+    const data = reply.data ?? {}
+    const anyProject = projects.some((_, i) => data[`p${i}`] != null)
+    if (reply.errors?.length) {
+      if (strictErrors || !reply.data || (!data.currentUser && !anyProject)) {
+        throw new GitlabError(400, errorMsg || 'GraphQL batch query returned errors', 'POST')
+      }
+    }
+    if (!anyProject || data.currentUser == null) {
+      throw new GitlabError(400, errorMsg || 'Projects or currentUser not resolved in GraphQL batch response', 'POST')
+    }
+    return data
+  }
+
+  let data: Record<string, unknown>
+  try {
+    data = await runBatch(MR_FIELDS_EE, true)
+  } catch (err) {
+    if (err instanceof GitlabError && err.status === 400) {
+      data = await runBatch(MR_FIELDS_BASE, false)
+    } else {
+      throw err
+    }
+  }
+
+  const currentUser = data.currentUser as { username?: string } | null | undefined
+  const me = currentUser?.username
+  const dedup = new Map<string, DashboardMrItem>()
+  const missing: string[] = []
+
+  for (let i = 0; i < projects.length; i++) {
+    const projPath = projects[i]!
+    const proj = data[`p${i}`] as { mergeRequests?: { nodes?: GqlNode[] } } | null | undefined
+    if (proj == null) {
+      missing.push(projPath)
+      continue
+    }
+    for (const node of proj.mergeRequests?.nodes ?? []) {
+      const mapped = fromGraphqlNode(host, node, me, projPath)
+      if (mapped && !dedup.has(mapped.id)) dedup.set(mapped.id, mapped)
+    }
+  }
+  return { me, items: [...dedup.values()], missing }
+}
+
+async function listHostProjectsMulti(
+  deps: Deps,
+  host: string,
+  token: string,
+  projects: readonly string[],
+  state: 'opened' | 'merged' | 'closed' | 'all',
+  limit: number,
+): Promise<{ host: string; enriched: boolean; me?: string; items: DashboardMrItem[]; errors: { host: string; message: string }[] }> {
+  const numericProjects = projects.filter((p) => /^\d+$/.test(p))
+  const pathProjects = projects.filter((p) => !/^\d+$/.test(p))
+  const chunks: string[][] = []
+  for (let i = 0; i < pathProjects.length; i += MULTI_REPO_BATCH_SIZE) {
+    chunks.push(pathProjects.slice(i, i + MULTI_REPO_BATCH_SIZE))
+  }
+
+  const rootApi = gitlab(deps.fetch, host, undefined, token)
+  const dedup = new Map<string, DashboardMrItem>()
+  const restProjects: string[] = [...numericProjects]
+  const errors: { host: string; message: string }[] = []
+  let me: string | undefined
+  let usedGraphql = false
+  let authError: string | undefined
+
+  if (chunks.length > 0) {
+    const batchResults = await runPool(chunks, MULTI_REPO_CONCURRENCY, async (chunk) => {
+      try {
+        const res = await listHostProjectBatchGraphql(rootApi, host, chunk, state, limit)
+        return { ok: true as const, chunk, res }
+      } catch (err) {
+        return { ok: false as const, chunk, err }
+      }
+    })
+    for (const r of batchResults) {
+      if (r.ok) {
+        usedGraphql = true
+        if (r.res.me && !me) me = r.res.me
+        for (const item of r.res.items) {
+          if (!dedup.has(item.id)) dedup.set(item.id, item)
+        }
+        restProjects.push(...r.res.missing)
+      } else if (r.err instanceof GitlabError && r.err.status === 401) {
+        authError = errorText(r.err, host, host)
+      } else {
+        restProjects.push(...r.chunk)
+      }
+    }
+  }
+
+  if (authError) {
+    return { host, enriched: false, me: undefined, items: [], errors: [{ host, message: authError }] }
+  }
+
+  if (restProjects.length > 0) {
+    if (me === undefined) {
+      try {
+        const user = (await rootApi.root('/user')) as User
+        me = user?.username
+      } catch (err) {
+        if (err instanceof GitlabError && err.status === 401) {
+          return { host, enriched: usedGraphql, me: undefined, items: [...dedup.values()], errors: [{ host, message: errorText(err, host, host) }] }
+        }
+      }
+    }
+    const restResults = await runPool(restProjects, MULTI_REPO_CONCURRENCY, async (proj) => {
+      try {
+        const api = gitlab(deps.fetch, host, proj, token)
+        const page = await api.page('/merge_requests', { state, order_by: 'updated_at', per_page: limit })
+        return { ok: true as const, proj, list: items<RestMr>(page) }
+      } catch (err) {
+        const msg = err instanceof GitlabError
+          ? errorText(err, proj, host)
+          : `Call to ${host} failed: ${err instanceof Error ? err.message : String(err)}`
+        return { ok: false as const, proj, msg }
+      }
+    })
+    for (const r of restResults) {
+      if (r.ok) {
+        for (const item of r.list) {
+          const mapped = fromRestMr(host, item, me, r.proj)
+          if (mapped && !dedup.has(mapped.id)) dedup.set(mapped.id, mapped)
+        }
+      } else {
+        errors.push({ host: `${host}/${r.proj}`, message: r.msg })
+      }
+    }
+  }
+
+  return { host, enriched: usedGraphql, me, items: [...dedup.values()], errors }
+}
+
+function defaultIsDir(path: string): Promise<boolean> {
+  return stat(path).then((s) => s.isDirectory(), () => false)
+}
+
+function expandHome(raw: string, getHome: () => string): string {
+  const trimmed = raw.trim()
+  if (trimmed === '~') return getHome()
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) return join(getHome(), trimmed.slice(2))
+  return trimmed
+}
+
+function runtimeGitAt(deps: Deps, runtime: DashboardRuntime): GitAt {
+  return runtime.gitAt ?? ((_cwd, args) => deps.git(args))
+}
+
+async function resolveLocalRepo(
+  rawPath: string,
+  tokens: Map<string, string>,
+  deps: Deps,
+  runtime: DashboardRuntime,
+): Promise<RegisteredRepo> {
+  const getHome = runtime.homedir ?? homedir
+  const isDir = runtime.isDir ?? defaultIsDir
+  const gitAt = runtimeGitAt(deps, runtime)
+
+  const expanded = expandHome(rawPath, getHome)
+  if (!expanded || !isAbsolute(expanded)) {
+    throw new InputError('Repository path must be an absolute path or start with ~/.')
+  }
+  const normalized = resolve(expanded)
+  if (!(await isDir(normalized))) {
+    throw new InputError(`Directory does not exist: ${normalized}`)
+  }
+
+  let repoPath: string | undefined
+  const common = await gitAt(normalized, ['rev-parse', '--path-format=absolute', '--git-common-dir'])
+  if (common.exitCode === 0 && common.stdout.trim()) {
+    const rawCommon = common.stdout.trim().replace(/[\\/]+$/, '')
+    const absCommon = isAbsolute(rawCommon) ? rawCommon : resolve(normalized, rawCommon)
+    if (absCommon.endsWith('/.git') || absCommon.endsWith('\\.git')) {
+      repoPath = absCommon.slice(0, -5)
+    }
+  }
+  if (!repoPath) {
+    const top = await gitAt(normalized, ['rev-parse', '--show-toplevel'])
+    if (top.exitCode === 0 && top.stdout.trim()) {
+      repoPath = resolve(top.stdout.trim())
+    }
+  }
+  if (!repoPath) {
+    throw new InputError(`Directory is not a git repository: ${normalized}`)
+  }
+
+  const where = await locate((args) => gitAt(repoPath, args))
+  if ('error' in where) {
+    throw new InputError(where.error)
+  }
+
+  let host = where.host
+  if (!tokens.has(host) && where.ssh) {
+    const real = await sshHostname(deps.ssh, host)
+    if (real) host = real
+  }
+  if (!tokens.has(host)) {
+    throw new InputError(`No token configured for ${host}. Configured hosts: ${[...tokens.keys()].join(', ')}.`)
+  }
+  return { path: repoPath, host, project: where.project }
+}
+
+async function resolveActiveRepos(
+  stateRepos: readonly RegisteredRepo[],
+  tokens: Map<string, string> | undefined,
+  deps: Deps,
+  runtime: DashboardRuntime,
+): Promise<ActiveRepo[]> {
+  const out: ActiveRepo[] = []
+  const seen = new Set<string>()
+  const keyOf = (host: string, project: string) => `${host.toLowerCase()}|${project.toLowerCase()}`
+
+  if (tokens && runtime.cwds && runtime.cwds.length > 0) {
+    for (const dir of runtime.cwds) {
+      try {
+        const resolved = await resolveLocalRepo(dir, tokens, deps, runtime)
+        const key = keyOf(resolved.host, resolved.project)
+        if (!seen.has(key)) {
+          seen.add(key)
+          out.push({ ...resolved, source: 'workspace' })
+        }
+      } catch {}
+    }
+  }
+
+  for (const repo of stateRepos) {
+    const key = keyOf(repo.host, repo.project)
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push({ ...repo, source: 'registered' })
+    }
+  }
+
+  return out
+}
+
 const VALID_STATES = new Set(['opened', 'merged', 'closed', 'all'])
 const OPEN_TARGETS = new Set(['main', 'master', 'develop'])
 
@@ -433,11 +748,17 @@ export async function runDashboardTool(
   input: Record<string, unknown>,
   options: Options,
   store: Store,
+  runtime: DashboardRuntime = {},
 ): Promise<Reply> {
   if (name === 'gitlab_ui_state') {
+    const action = str(input.action) ?? 'get'
+    const needsRepos = action === 'get' || action === 'add_repo' || action === 'remove_repo'
+    const env = needsRepos ? await resolveEnv(deps, options) : undefined
+    const secrets = env?.tokens ? [...env.tokens.values()] : []
+    const wrapState = (reply: Reply): Reply => maskSecrets(reply, secrets)
     try {
-      const action = str(input.action) ?? 'get'
       let nextState
+      let added: RegisteredRepo | undefined
       switch (action) {
         case 'get':
           nextState = await store.load()
@@ -478,12 +799,34 @@ export async function runDashboardTool(
             bool(input.viewed) === true,
           )
           break
+        case 'add_repo': {
+          if (!env || env.error !== undefined) return { text: env?.error ?? 'GitLab credentials required.', isError: true }
+          const rawPath = need(str(input.path), 'add_repo requires path.')
+          added = await resolveLocalRepo(rawPath, env.tokens, deps, runtime)
+          nextState = await store.addRepo(added)
+          break
+        }
+        case 'remove_repo': {
+          const target = need(str(input.path), 'remove_repo requires path.')
+          nextState = await store.removeRepo(target)
+          break
+        }
         default:
           throw new InputError(`Unknown state action: ${action}`)
       }
-      return { text: 'Dashboard state updated.', structuredContent: { state: nextState } }
+      const registeredRepos = needsRepos
+        ? await resolveActiveRepos(nextState.repos, env?.tokens, deps, runtime)
+        : undefined
+      return wrapState({
+        text: added ? `Registered repository ${added.project}.` : 'Dashboard state updated.',
+        structuredContent: {
+          state: nextState,
+          ...(added ? { added } : {}),
+          ...(registeredRepos !== undefined ? { registeredRepos } : {}),
+        },
+      })
     } catch (err) {
-      return { text: err instanceof Error ? err.message : String(err), isError: true }
+      return wrapState({ text: err instanceof Error ? err.message : String(err), isError: true })
     }
   }
 
@@ -508,6 +851,7 @@ export async function runDashboardTool(
       case 'gitlab_mr_dashboard': {
         const state = await store.load()
         const configuredHosts = [...tokens.keys()]
+        const registeredRepos = await resolveActiveRepos(state.repos, tokens, deps, runtime)
         const requestedHost = input.host !== undefined ? hostName(input.host) : undefined
         const requestedProject = input.project !== undefined ? projectPath(input.project) : undefined
         const requestedIid = id(input.iid, 'iid')
@@ -519,6 +863,7 @@ export async function runDashboardTool(
         const structuredContent: Record<string, unknown> = {
           configuredHosts,
           workspace: workspace ?? null,
+          registeredRepos,
           initialScope: workspace ? 'project' : 'all',
           ...(initialSelection ? { initialSelection } : {}),
           ...(str(input.state) && VALID_STATES.has(str(input.state)!) ? { initialState: str(input.state) } : {}),
@@ -540,6 +885,58 @@ export async function runDashboardTool(
         if (input.host !== undefined && !requestedHost) throw new InputError('host must be a valid GitLab host name.')
         const requestedProject = input.project !== undefined ? projectPath(input.project) : undefined
         if (input.project !== undefined && !requestedProject) throw new InputError('project must be a valid project path or numeric id.')
+        const requestedScope = str(input.scope)
+        if (requestedScope !== undefined && requestedScope !== 'projects' && requestedScope !== 'mine') {
+          throw new InputError('scope must be projects or mine.')
+        }
+
+        // Default to 'projects' when neither host nor project nor explicit scope is passed
+        const useMultiProjects = !requestedHost && !requestedProject && requestedScope !== 'mine'
+        let usedFallbackMine = false
+
+        if (useMultiProjects) {
+          const state = await store.load()
+          const activeRepos = (await resolveActiveRepos(state.repos, tokens, deps, runtime)).filter((r) => tokens.has(r.host))
+          if (activeRepos.length > 0) {
+            const perProjectLimit = stateFilter === 'opened' ? 20 : 10
+            const byHost = new Map<string, string[]>()
+            for (const repo of activeRepos) {
+              const list = byHost.get(repo.host) ?? []
+              list.push(repo.project)
+              byHost.set(repo.host, list)
+            }
+            const hostList = [...byHost.keys()]
+            const hostResults = await Promise.all(
+              hostList.map((host) => listHostProjectsMulti(deps, host, tokens.get(host)!, byHost.get(host)!, stateFilter, perProjectLimit)),
+            )
+            const dedup = new Map<string, DashboardMrItem>()
+            const meByHost: Record<string, string> = {}
+            const errors: { host: string; message: string }[] = []
+            let enriched = false
+            for (const r of hostResults) {
+              if (r.me) meByHost[r.host] = r.me
+              if (r.enriched) enriched = true
+              errors.push(...r.errors)
+              for (const item of r.items) {
+                if (!dedup.has(item.id)) dedup.set(item.id, item)
+              }
+            }
+            const merged = [...dedup.values()]
+            return wrap({
+              text: `Loaded ${merged.length} merge requests from ${activeRepos.length} project(s).`,
+              structuredContent: {
+                mergeRequests: merged,
+                meByHost,
+                enriched,
+                errors,
+                hosts: hostList,
+                usedFallbackMine: false,
+                fetchedAt: new Date(deps.clock.now()).toISOString(),
+              },
+            })
+          }
+          usedFallbackMine = true
+        }
 
         let targetHosts: string[]
         if (requestedHost) {
@@ -608,6 +1005,7 @@ export async function runDashboardTool(
             enriched,
             errors,
             hosts: targetHosts,
+            ...(usedFallbackMine ? { usedFallbackMine: true } : {}),
             fetchedAt: new Date(deps.clock.now()).toISOString(),
           },
         })
@@ -725,6 +1123,26 @@ export async function runDashboardTool(
           }
         })
 
+        // Detect matching local repo & active review worktree
+        let localRepoPath: string | undefined
+        let activeWorktree: WorktreeInfo | null = null
+        try {
+          const state = await store.load()
+          const repos = await resolveActiveRepos(state.repos, tokens, deps, runtime)
+          const matched = repos.find(
+            (r) => r.host.toLowerCase() === host.toLowerCase() && r.project.toLowerCase() === project.toLowerCase(),
+          )
+          if (matched) {
+            localRepoPath = matched.path
+            activeWorktree = await findWorktree(runtimeGitAt(deps, runtime), {
+              repoPath: matched.path,
+              sourceBranch: rawMr.source_branch,
+              iid,
+              dataDir: runtime.dataDir,
+            })
+          }
+        } catch {}
+
         const view = statusView(rawMr, approvals, approvalState)
         const detailed: Record<string, unknown> = {
           ...view,
@@ -736,6 +1154,8 @@ export async function runDashboardTool(
           updatedAt: rawMr.updated_at ?? '',
           authorName: rawMr.author?.name,
           isProtectedTarget,
+          ...(localRepoPath ? { localRepoPath } : {}),
+          activeWorktree,
           labels: (rawMr.labels ?? []).map((l) => ({ name: l, ...(labelColors.get(l) ? { color: labelColors.get(l) } : {}) })),
           pipeline: headPipeline ? { id: headPipeline.id, status: headPipeline.status, sha: headPipeline.sha, url: headPipeline.web_url, jobs, downstream } : null,
           discussions,
@@ -899,6 +1319,72 @@ export async function runDashboardTool(
           case 'run_pipeline':
             message = await pipeline(ctx, { action: 'run', iid: need(iid, 'run_pipeline requires iid.'), allowOthers: true })
             break
+          case 'checkout_worktree': {
+            const targetIid = need(iid, 'checkout_worktree requires iid.')
+            const state = await store.load()
+            const repos = await resolveActiveRepos(state.repos, tokens, deps, runtime)
+            const matched = repos.find(
+              (r) => r.host.toLowerCase() === host.toLowerCase() && r.project.toLowerCase() === project.toLowerCase(),
+            )
+            if (!matched) {
+              throw new InputError(`No local repository registered for ${project} on ${host}. Add it in the Repos menu first.`)
+            }
+            const rawMr = (await ctx.api.get(`/merge_requests/${targetIid}`)) as RestMr
+            const fork =
+              typeof rawMr.source_project_id === 'number' && typeof rawMr.target_project_id === 'number'
+                ? rawMr.source_project_id !== rawMr.target_project_id
+                : false
+            const result = await checkoutWorktree(runtimeGitAt(deps, runtime), {
+              repoPath: matched.path,
+              sourceBranch: rawMr.source_branch,
+              targetBranch: rawMr.target_branch,
+              iid: targetIid,
+              fork,
+              dataDir: runtime.dataDir,
+            })
+            const summary = result.reused
+              ? `Synced worktree (${result.branch}) at ${result.path}`
+              : `Checked out ${result.branch} at ${result.path}`
+            return wrap({
+              text: summary,
+              structuredContent: { ok: true, action, message: summary, ...result },
+            })
+          }
+          case 'remove_worktree': {
+            const state = await store.load()
+            const repos = await resolveActiveRepos(state.repos, tokens, deps, runtime)
+            const matched = repos.find(
+              (r) => r.host.toLowerCase() === host.toLowerCase() && r.project.toLowerCase() === project.toLowerCase(),
+            )
+            if (!matched) {
+              throw new InputError(`No local repository registered for ${project} on ${host}.`)
+            }
+            let targetPath = str(input.worktreePath)
+            if (!targetPath && iid !== undefined) {
+              const rawMr = (await ctx.api.get(`/merge_requests/${iid}`)) as RestMr
+              const found = await findWorktree(runtimeGitAt(deps, runtime), {
+                repoPath: matched.path,
+                sourceBranch: rawMr.source_branch,
+                iid,
+                dataDir: runtime.dataDir,
+              })
+              targetPath = found?.path
+            }
+            const worktreePath = need(targetPath, 'remove_worktree requires worktreePath.')
+            const result = await removeWorktree(runtimeGitAt(deps, runtime), {
+              repoPath: matched.path,
+              worktreePath,
+              force: bool(input.force) === true,
+              dataDir: runtime.dataDir,
+            })
+            const summary = result.removed
+              ? `Removed worktree at ${result.path}`
+              : result.message
+            return wrap({
+              text: summary,
+              structuredContent: { ok: result.removed, action, message: summary, ...result },
+            })
+          }
           default:
             throw new InputError(`Unknown UI action: ${action}`)
         }

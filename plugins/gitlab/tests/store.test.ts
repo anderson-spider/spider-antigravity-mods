@@ -60,3 +60,44 @@ test('recovers cleanly from corrupted JSON on disk and supports in-memory fallba
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('persists registered repos with deduplication, removal, backwards compat, and new involvement filters', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gitlab-store-repos-'))
+  try {
+    // Backwards compatibility: existing v0.4.0 state file without `repos`
+    writeFileSync(
+      join(dir, 'dashboard-state.json'),
+      JSON.stringify({
+        version: 1,
+        preferences: { state: 'opened', involvement: 'waiting', sort: 'ready', hostOrProject: 'all', diffMode: 'unified', autoRefresh: true, showFileIndex: true, listWidthPct: 40 },
+        savedViews: [{ id: 'v1', name: 'Others', filters: { q: '', state: 'opened', involvement: 'others', sort: 'ready', hostOrProject: 'all' } }],
+        filesViewed: {},
+      }),
+      'utf8',
+    )
+    const store = createStore(dir)
+    const loaded = await store.load()
+    expect(loaded.repos).toEqual([])
+    expect(loaded.preferences.involvement).toBe('waiting')
+    expect(loaded.savedViews[0]?.filters.involvement).toBe('others')
+
+    await store.addRepo({ path: '/repos/api/', host: 'GitLab.Example.Com', project: 'team/api' })
+    await store.addRepo({ path: '/repos/web', host: 'gitlab.example.com', project: 'team/web' })
+    // Deduplicates case-insensitively by host+project (updates path)
+    const afterDedup = await store.addRepo({ path: '/repos/api-v2', host: 'gitlab.example.com', project: 'Team/API' })
+    expect(afterDedup.repos).toEqual([
+      { path: '/repos/web', host: 'gitlab.example.com', project: 'team/web' },
+      { path: '/repos/api-v2', host: 'gitlab.example.com', project: 'Team/API' },
+    ])
+
+    // Remove by path
+    const afterRemovePath = await store.removeRepo('/repos/web/')
+    expect(afterRemovePath.repos).toHaveLength(1)
+
+    // Remove by host|project (case-insensitive)
+    const afterRemoveKey = await store.removeRepo('gitlab.example.com|team/api')
+    expect(afterRemoveKey.repos).toEqual([])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

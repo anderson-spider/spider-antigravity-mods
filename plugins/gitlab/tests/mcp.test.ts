@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DASHBOARD_MIME, DASHBOARD_URI } from '../server/dashboard.ts'
-import { SERVER_VERSION, folderOf, server, type CallContext, type ResourceEntry } from '../server/mcp.ts'
+import { SERVER_VERSION, folderOf, foldersOf, server, type CallContext, type ResourceEntry } from '../server/mcp.ts'
 import { SPECS } from '../server/tools.ts'
 import { expect, test } from './expect.ts'
 
@@ -206,9 +206,38 @@ test('non-object JSON lines return Invalid Request and clearing roots resets cwd
   expect(out.filter((m) => m.method === 'roots/list')).toHaveLength(2)
 })
 
-test('folderOf reads the first file root and nothing else', () => {
+test('folderOf reads the first file root and foldersOf returns all deduplicated file roots', () => {
   expect(folderOf({ roots: [{ uri: 'file:///a/b%20c' }, { uri: 'file:///d' }] })).toBe('/a/b c')
-  for (const bad of [undefined, {}, { roots: [] }, { roots: [{ uri: 'https://x' }] }, { roots: [{}] }]) expect(folderOf(bad)).toBeUndefined()
+  expect(
+    foldersOf({
+      roots: [
+        { uri: 'https://ignored.example.com' },
+        { uri: 'file:///a/b%20c' },
+        { uri: 'file:///d' },
+        { uri: 'file:///a/b%20c' },
+      ],
+    }),
+  ).toEqual(['/a/b c', '/d'])
+  for (const bad of [undefined, {}, { roots: [] }, { roots: [{ uri: 'https://x' }] }, { roots: [{}] }]) {
+    expect(folderOf(bad)).toBeUndefined()
+    expect(foldersOf(bad)).toEqual([])
+  }
+})
+
+test('CallContext exposes all workspace roots in cwds alongside cwd', async () => {
+  const { out, calls, send } = session()
+  await send({ id: 1, method: 'initialize', params: { capabilities: { roots: { listChanged: true } } } })
+  void send({ id: 2, method: 'tools/call', params: { name: 'gitlab_mr_dashboard', arguments: {} } })
+  await settle()
+  const asked = out.filter((m) => m.method === 'roots/list').at(-1)!
+  await send({
+    id: asked.id,
+    result: { roots: [{ uri: 'file:///work/one' }, { uri: 'file:///work/two' }] },
+  })
+  await settle()
+
+  expect(calls[0]?.context.cwd).toBe('/work/one')
+  expect(calls[0]?.context.cwds).toEqual(['/work/one', '/work/two'])
 })
 
 test('node runs server/main.ts over stdio, serves the built dashboard HTML resource, validates cwd, and reports configured hosts', async () => {

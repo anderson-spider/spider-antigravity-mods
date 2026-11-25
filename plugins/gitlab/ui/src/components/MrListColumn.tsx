@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { filterAndSortMrs, formatRelativeTime, groupMrs, parseSearchQuery } from '../lib/query.ts'
-import type { InvolvementFilter, MrListItem, MrStateFilter, SavedView, SortOrder, WorkspaceInfo } from '../types.ts'
-import { Avatar, BookmarkIcon, CloseIcon, EyeIcon, LabelBadge, MrStateGlyph, PenIcon, PipelineGlyph, RefreshIcon, SearchIcon } from './Icons.tsx'
+import type { ActiveRepo, InvolvementFilter, MrListItem, MrStateFilter, SavedView, SortOrder, WorkspaceInfo } from '../types.ts'
+import { Avatar, BookmarkIcon, CloseIcon, EyeIcon, FolderIcon, LabelBadge, MrStateGlyph, PenIcon, PipelineGlyph, RefreshIcon, SearchIcon } from './Icons.tsx'
 
 export function MrListColumn({
   mrs,
@@ -9,6 +9,8 @@ export function MrListColumn({
   enriched,
   errors,
   configuredHosts,
+  registeredRepos,
+  usedFallbackMine,
   workspace,
   workspaceScoped,
   selectedMrId,
@@ -31,6 +33,8 @@ export function MrListColumn({
   onApplyView,
   onSaveView,
   onDeleteView,
+  onAddRepo,
+  onRemoveRepo,
   onToggleAutoRefresh,
   onRefresh,
   onSelectMr,
@@ -40,6 +44,8 @@ export function MrListColumn({
   enriched: boolean
   errors: readonly { host: string; message: string }[]
   configuredHosts: readonly string[]
+  registeredRepos: readonly ActiveRepo[]
+  usedFallbackMine: boolean
   workspace: WorkspaceInfo | null
   workspaceScoped: boolean
   selectedMrId: string | null
@@ -62,24 +68,38 @@ export function MrListColumn({
   onApplyView: (v: SavedView) => void
   onSaveView: (name: string) => void
   onDeleteView: (id: string) => void
+  onAddRepo: (path: string) => Promise<string | undefined>
+  onRemoveRepo: (target: string) => Promise<void>
   onToggleAutoRefresh: () => void
   onRefresh: () => void
   onSelectMr: (mr: MrListItem) => void
 }) {
   const [viewsOpen, setViewsOpen] = useState(false)
+  const [reposOpen, setReposOpen] = useState(false)
+  const [repoInput, setRepoInput] = useState('')
+  const [repoError, setRepoError] = useState<string | null>(null)
+  const [repoBusy, setRepoBusy] = useState(false)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [viewName, setViewName] = useState('')
   const viewsWrapRef = useRef<HTMLDivElement | null>(null)
+  const reposWrapRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (!viewsOpen) return
+    if (!viewsOpen && !reposOpen) return
     const onPointerDown = (e: PointerEvent) => {
-      if (viewsWrapRef.current && !viewsWrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (viewsOpen && viewsWrapRef.current && !viewsWrapRef.current.contains(target)) {
         setViewsOpen(false)
+      }
+      if (reposOpen && reposWrapRef.current && !reposWrapRef.current.contains(target)) {
+        setReposOpen(false)
       }
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewsOpen(false)
+      if (e.key === 'Escape') {
+        setViewsOpen(false)
+        setReposOpen(false)
+      }
     }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -87,7 +107,21 @@ export function MrListColumn({
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [viewsOpen])
+  }, [viewsOpen, reposOpen])
+
+  const submitAddRepo = async () => {
+    const trimmed = repoInput.trim()
+    if (!trimmed || repoBusy) return
+    setRepoBusy(true)
+    setRepoError(null)
+    const err = await onAddRepo(trimmed)
+    setRepoBusy(false)
+    if (err) {
+      setRepoError(err)
+    } else {
+      setRepoInput('')
+    }
+  }
 
   const effectiveHostOrProject = workspace && workspaceScoped ? `proj:${workspace.host}|${workspace.project}` : hostOrProject
 
@@ -108,6 +142,10 @@ export function MrListColumn({
 
   const projectOptions = useMemo(() => {
     const map = new Map<string, { key: string; label: string }>()
+    for (const r of registeredRepos) {
+      const key = `proj:${r.host}|${r.project}`
+      if (!map.has(key)) map.set(key, { key, label: r.project })
+    }
     for (const m of mrs) {
       const key = `proj:${m.host}|${m.project}`
       if (!map.has(key)) map.set(key, { key, label: m.project })
@@ -119,7 +157,7 @@ export function MrListColumn({
       if (label) map.set(hostOrProject, { key: hostOrProject, label })
     }
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label))
-  }, [mrs, hostOrProject])
+  }, [registeredRepos, mrs, hostOrProject])
 
   const activeView = savedViews.find((v) => v.id === activeViewId)
 
@@ -195,8 +233,10 @@ export function MrListColumn({
 
           <select className="select" value={involvement} onChange={(e) => onChangeInvolvement(e.target.value as InvolvementFilter)} aria-label="Involvement">
             <option value="all">All</option>
+            <option value="waiting">Waiting on me</option>
             <option value="reviewing">Reviewing</option>
             <option value="authored">Authored</option>
+            <option value="others">Others</option>
           </select>
 
           <select className="select" value={sort} onChange={(e) => onChangeSort(e.target.value as SortOrder)} aria-label="Sort order">
@@ -214,7 +254,8 @@ export function MrListColumn({
               onChange={(e) => onChangeHostOrProject(e.target.value)}
               aria-label="Host or project"
             >
-              <option value="all">All hosts ({configuredHosts.length})</option>
+              <option value="all">All projects</option>
+              <option value="mine">My MRs (all hosts)</option>
               {configuredHosts.map((h) => (
                 <option key={h} value={`host:${h}`}>
                   {h}
@@ -229,67 +270,158 @@ export function MrListColumn({
             </select>
           ) : null}
 
-          <div ref={viewsWrapRef} className="popover-wrap" style={{ marginLeft: 'auto' }}>
-            <button className="btn btn-sm" onClick={() => setViewsOpen((o) => !o)}>
-              <BookmarkIcon />
-              <span className="truncate" style={{ maxWidth: 96 }}>
-                {activeView ? activeView.name : 'Views'}
-              </span>
-            </button>
+          <div className="row" style={{ gap: 5, marginLeft: 'auto' }}>
+            <div ref={reposWrapRef} className="popover-wrap">
+              <button
+                className="btn btn-sm"
+                title="Manage local GitLab repositories tracked by the dashboard and enabled for worktree checkout"
+                onClick={() => {
+                  setViewsOpen(false)
+                  setRepoError(null)
+                  setReposOpen((o) => !o)
+                }}
+              >
+                <FolderIcon />
+                <span>Repos</span>
+                {registeredRepos.length > 0 ? <span className="mono" style={{ opacity: 0.7 }}>{registeredRepos.length}</span> : null}
+              </button>
 
-            {viewsOpen ? (
-              <div className="popover-menu">
-                <div className="card-header" style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-secondary)' }}>
-                  Saved Views
-                </div>
-                <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
-                  {savedViews.length === 0 ? (
-                    <div style={{ padding: '8px 8px', color: 'var(--fg-tertiary)' }}>No saved views yet.</div>
-                  ) : (
-                    savedViews.map((v) => (
-                      <div key={v.id} className="row-between" style={{ padding: '3px 6px', borderRadius: 5 }}>
-                        <button
-                          className="btn btn-ghost btn-sm truncate"
-                          style={{
-                            flex: 1,
-                            justifyContent: 'flex-start',
-                            padding: '2px 4px',
-                            color: v.id === activeViewId ? 'var(--fg-info)' : 'var(--fg-primary)',
-                            fontWeight: v.id === activeViewId ? 600 : 400,
-                          }}
-                          onClick={() => {
-                            onApplyView(v)
-                            setViewsOpen(false)
-                          }}
-                        >
-                          {v.name}
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="Delete view"
-                          onClick={() => onDeleteView(v.id)}
-                        >
-                          <CloseIcon size={11} />
-                        </button>
+              {reposOpen ? (
+                <div className="popover-menu" style={{ width: 290 }}>
+                  <div className="card-header" style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-secondary)' }}>
+                    Local Repositories
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+                    {registeredRepos.length === 0 ? (
+                      <div style={{ padding: '8px 8px', color: 'var(--fg-tertiary)' }}>
+                        No local repositories tracked yet. Add a clone path below to browse all its MRs and enable worktree checkout.
                       </div>
-                    ))
-                  )}
+                    ) : (
+                      registeredRepos.map((r) => (
+                        <div key={`${r.host}|${r.project}`} className="row-between" style={{ padding: '4px 6px', borderRadius: 5, gap: 6 }}>
+                          <div style={{ minWidth: 0, flex: 1 }} title={`${r.host}/${r.project}\n${r.path}`}>
+                            <div className="truncate" style={{ fontWeight: 500 }}>{r.project}</div>
+                            <div className="row" style={{ gap: 4, color: 'var(--fg-tertiary)', fontSize: 10.5 }}>
+                              <span className="truncate">{r.host}</span>
+                              <span className="pill" style={{ padding: '0 4px', fontSize: 10 }}>
+                                {r.source}
+                              </span>
+                            </div>
+                          </div>
+                          {r.source === 'registered' ? (
+                            <button
+                              className="btn btn-ghost btn-icon"
+                              title={`Remove ${r.project}`}
+                              onClick={() => void onRemoveRepo(r.path)}
+                            >
+                              <CloseIcon size={11} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--bd-primary)', padding: 6 }} className="stack">
+                    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                      <input
+                        className="input"
+                        style={{ flex: 1, minWidth: 0, padding: '4px 7px' }}
+                        placeholder="~/path/to/repo"
+                        value={repoInput}
+                        disabled={repoBusy}
+                        onChange={(e) => {
+                          setRepoInput(e.target.value)
+                          if (repoError) setRepoError(null)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void submitAddRepo()
+                        }}
+                      />
+                      <button
+                        className="btn btn-sm btn-primary"
+                        disabled={repoBusy || !repoInput.trim()}
+                        onClick={() => void submitAddRepo()}
+                      >
+                        {repoBusy ? '…' : 'Add'}
+                      </button>
+                    </div>
+                    {repoError ? (
+                      <div style={{ color: 'var(--fg-danger)', fontSize: 11, lineHeight: 1.35 }}>{repoError}</div>
+                    ) : null}
+                  </div>
                 </div>
-                <div style={{ borderTop: '1px solid var(--bd-primary)', padding: 6 }}>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--fg-info)' }}
-                    onClick={() => {
-                      setViewsOpen(false)
-                      setViewName('')
-                      setSaveModalOpen(true)
-                    }}
-                  >
-                    + Save current view…
-                  </button>
+              ) : null}
+            </div>
+
+            <div ref={viewsWrapRef} className="popover-wrap">
+              <button
+                className="btn btn-sm"
+                title="Load or save filter views"
+                onClick={() => {
+                  setReposOpen(false)
+                  setViewsOpen((o) => !o)
+                }}
+              >
+                <BookmarkIcon />
+                <span className="truncate" style={{ maxWidth: 96 }}>
+                  {activeView ? activeView.name : 'Views'}
+                </span>
+              </button>
+
+              {viewsOpen ? (
+                <div className="popover-menu">
+                  <div className="card-header" style={{ padding: '6px 10px', fontSize: 11, color: 'var(--fg-secondary)' }}>
+                    Saved Views
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+                    {savedViews.length === 0 ? (
+                      <div style={{ padding: '8px 8px', color: 'var(--fg-tertiary)' }}>No saved views yet.</div>
+                    ) : (
+                      savedViews.map((v) => (
+                        <div key={v.id} className="row-between" style={{ padding: '3px 6px', borderRadius: 5 }}>
+                          <button
+                            className="btn btn-ghost btn-sm truncate"
+                            style={{
+                              flex: 1,
+                              justifyContent: 'flex-start',
+                              padding: '2px 4px',
+                              color: v.id === activeViewId ? 'var(--fg-info)' : 'var(--fg-primary)',
+                              fontWeight: v.id === activeViewId ? 600 : 400,
+                            }}
+                            onClick={() => {
+                              onApplyView(v)
+                              setViewsOpen(false)
+                            }}
+                          >
+                            {v.name}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon"
+                            title="Delete view"
+                            onClick={() => onDeleteView(v.id)}
+                          >
+                            <CloseIcon size={11} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--bd-primary)', padding: 6 }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--fg-info)' }}
+                      onClick={() => {
+                        setViewsOpen(false)
+                        setViewName('')
+                        setSaveModalOpen(true)
+                      }}
+                    >
+                      + Save current view…
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -303,6 +435,27 @@ export function MrListColumn({
           </div>
         ) : null}
       </div>
+
+      {/* Fallback banner when no repos are registered yet */}
+      {usedFallbackMine && registeredRepos.length === 0 ? (
+        <div style={{ padding: '8px 10px 0' }}>
+          <div className="banner row-between" style={{ padding: '6px 10px', gap: 8 }}>
+            <span style={{ color: 'var(--fg-secondary)' }}>
+              Showing your MRs. Add local repos to track all project MRs and enable worktree checkout.
+            </span>
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                setViewsOpen(false)
+                setRepoError(null)
+                setReposOpen(true)
+              }}
+            >
+              Add repo
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Host errors banner */}
       {errors.length > 0 ? (
@@ -359,6 +512,11 @@ export function MrListColumn({
                             !{mr.iid}
                           </span>
                           <span className="mr-row-title truncate">{mr.title}</span>
+                          {mr.isWaitingOnMe ? (
+                            <span className="pill pill-info" style={{ padding: '0 5px', fontSize: 10, flexShrink: 0 }} title="Waiting on your review">
+                              you
+                            </span>
+                          ) : null}
                           <PipelineGlyph status={mr.pipeline?.status} />
                           {approvedOk ? (
                             <span style={{ color: 'var(--fg-success)', fontWeight: 700, flexShrink: 0 }} title="Approved">
