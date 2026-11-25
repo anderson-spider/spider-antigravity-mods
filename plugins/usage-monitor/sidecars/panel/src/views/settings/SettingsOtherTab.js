@@ -4,18 +4,25 @@
  * Local Trajectory Cache Rebuild, and Two-Step Factory Preference Reset.
  */
 
-import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
-import { createSvgIcon } from '../../icons/SvgIcon.js';
-import { setI18nLanguage, t } from '../../i18n/index.js';
 import {
-  normalizeClientModelDisplayMode,
-  normalizeClientOrchestratorIdMode,
+  defineComponent } from '../../core/component.js';
+import { h,
+  patchAttr,
+  patchClasses,
+  patchText } from '../../core/domPatch.js';
+import { createSvgIcon } from '../../icons/SvgIcon.js';
+import { setI18nLanguage,
+  t } from '../../i18n/index.js';
+import {
+  normalizeModelDisplayMode,
   rebuildTrajectoryCache,
   resetAllSettings,
   saveModelContextWindow,
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
+import {
+  normalizeOrchestratorIdMode,
+} from "../../../shared/settings-normalization.mjs";
 import { CustomSelect } from '../../components/ui/CustomSelect.js';
 import { BridgeStatusNotice } from '../../components/settings/BridgeStatusNotice.js';
 
@@ -110,7 +117,7 @@ export const SettingsOtherTab = defineComponent({
       icon: 'table',
       options: getStepModelDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientModelDisplayMode(val);
+        const nextMode = normalizeModelDisplayMode(val);
         draftModelDisplayMode = nextMode;
         stepModelSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
@@ -132,7 +139,7 @@ export const SettingsOtherTab = defineComponent({
       icon: 'layers',
       options: getOrchestratorIdDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientOrchestratorIdMode(val);
+        const nextMode = normalizeOrchestratorIdMode(val);
         draftOrchestratorIdMode = nextMode;
         orchestratorIdSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
@@ -507,11 +514,11 @@ export const SettingsOtherTab = defineComponent({
       contextWindowModels = models;
       if (windowBridge !== undefined) latestWindowBridge = windowBridge;
       if (hostPlatform) latestHostPlatform = hostPlatform;
-      draftModelDisplayMode = normalizeClientModelDisplayMode(
+      draftModelDisplayMode = normalizeModelDisplayMode(
         settings.modelDisplayMode,
         settings.showUpstreamModel
       );
-      draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
+      draftOrchestratorIdMode = normalizeOrchestratorIdMode(settings.orchestratorIdMode);
       if (!acceptingContextRisk) {
         draftContextRiskAccepted = Boolean(settings.contextWindowRiskAccepted);
       }

@@ -27,6 +27,34 @@ export const readLocalAsync = async (relPath) => {
   return readFileSync(fullPath, 'utf8');
 };
 
+export const NO_STORE_HEADERS = Object.freeze({
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
+  'X-Content-Type-Options': 'nosniff',
+});
+
+export const STATIC_PANEL_ASSETS = Object.freeze([
+  Object.freeze({ path: '/', file: 'index.html', contentType: 'text/html; charset=utf-8' }),
+  Object.freeze({ path: '/app.js', file: 'app.js', contentType: 'application/javascript; charset=utf-8' }),
+  Object.freeze({ path: '/styles.css', file: 'styles.css', contentType: 'text/css; charset=utf-8' }),
+]);
+
+const STATIC_ASSET_BY_PATH = new Map([
+  ...STATIC_PANEL_ASSETS.map((entry) => [entry.path, entry]),
+  ['/index.html', STATIC_PANEL_ASSETS[0]],
+]);
+
+export async function readStaticPanelAsset(pathname, readAsset = readLocalAsync) {
+  const asset = STATIC_ASSET_BY_PATH.get(pathname);
+  if (!asset) return null;
+  const body = await readAsset(asset.file);
+  return {
+    status: 200,
+    contentType: asset.contentType,
+    headers: NO_STORE_HEADERS,
+    body,
+  };
+}
+
 /**
  * 校验请求是否来自本机回环同端口地址 (`127.0.0.1` / `localhost` / `[::1]`) 或受信 Webview Origin，
  * 阻止跨端口本地服务（如本地其他端口的开发服务器）或跨站 DNS Rebinding 访问 API。

@@ -13,19 +13,11 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseIsoMs } from '../trajectory-metrics.mjs';
 import {
-  DEFAULT_ARCHIVE_FALLBACK_URL,
-  DEFAULT_DOWNLOAD_URL,
-  DEFAULT_RELEASE_URL,
-  LEGACY_GITHUB_REPOS,
   LOCAL_CATALOG_FILE,
-  OFFICIAL_GITHUB_REPO,
   PLUGIN_MANIFEST_FILE,
   PLUGIN_ROOT,
-  REMOTE_CATALOG_CACHE_FILE,
   cloudSyncState,
-  detectCustomGitForkRepo,
   loadJson,
-  pluginUpdateState,
 } from './config.mjs';
 
 /**
@@ -64,66 +56,6 @@ export function isValidSemver(v) {
     typeof v === 'string' &&
     /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(v.trim())
   );
-}
-
-const OFFICIAL_REPO_PATH_PREFIX = `/${OFFICIAL_GITHUB_REPO.toLowerCase()}`;
-const LEGACY_REPO_PATH_PREFIXES = LEGACY_GITHUB_REPOS.map((repo) => `/${repo.toLowerCase()}`);
-
-/**
- * 判断来源 URL 是否属于已迁移的旧官方 GitHub 仓库地址。
- *
- * @param {*} rawUrl
- * @returns {boolean}
- */
-function isLegacyGithubRepoUrl(rawUrl) {
-  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return false;
-  try {
-    const parsed = new URL(rawUrl.trim());
-    const host = parsed.hostname.toLowerCase();
-    const pathname = parsed.pathname.toLowerCase();
-    if (
-      host !== 'github.com' &&
-      host !== 'raw.githubusercontent.com' &&
-      host !== 'codeload.github.com'
-    ) {
-      return false;
-    }
-    return LEGACY_REPO_PATH_PREFIXES.some(
-      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 校验更新/下载链接是否属于可信的 GitHub 官方仓库与 HTTPS 域名白名单。
- *
- * @param {*} rawUrl
- * @param {string} fallbackUrl
- * @returns {string}
- */
-function sanitizeTrustedGithubUrl(rawUrl, fallbackUrl) {
-  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return fallbackUrl;
-  try {
-    const parsed = new URL(rawUrl.trim());
-    if (parsed.protocol !== 'https:') return fallbackUrl;
-    const host = parsed.hostname.toLowerCase();
-    const pathname = parsed.pathname.toLowerCase();
-    if (
-      host === 'github.com' ||
-      host === 'raw.githubusercontent.com' ||
-      host === 'codeload.github.com'
-    ) {
-      const hasRepoPrefix =
-        pathname === OFFICIAL_REPO_PATH_PREFIX ||
-        pathname.startsWith(`${OFFICIAL_REPO_PATH_PREFIX}/`);
-      return hasRepoPrefix ? parsed.toString() : fallbackUrl;
-    }
-    return fallbackUrl;
-  } catch {
-    return fallbackUrl;
-  }
 }
 
 /**
@@ -340,12 +272,6 @@ export function sanitizeCatalogPayload(raw) {
     return null;
   }
 
-  const explicitReleaseUrl = sanitizeTrustedGithubUrl(raw.releaseUrl, '');
-  const explicitDownloadUrl = sanitizeTrustedGithubUrl(raw.downloadUrl, '');
-  const explicitArchiveUrl = sanitizeTrustedGithubUrl(raw.archiveFallbackUrl, '');
-  const rawSourceUrl = typeof raw.sourceUrl === 'string' ? raw.sourceUrl.trim() : '';
-  const isLegacySource = isLegacyGithubRepoUrl(rawSourceUrl);
-
   return {
     schemaVersion: Number(raw.schemaVersion || 1),
     catalogVersion:
@@ -355,84 +281,29 @@ export function sanitizeCatalogPayload(raw) {
     updatedAt:
       typeof raw.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt.trim() : null,
     latestPluginVersion,
-    releaseUrl: explicitReleaseUrl || DEFAULT_RELEASE_URL,
-    downloadUrl: explicitDownloadUrl || DEFAULT_DOWNLOAD_URL,
-    archiveFallbackUrl: explicitArchiveUrl || DEFAULT_ARCHIVE_FALLBACK_URL,
-    hasReleaseUrl: Boolean(explicitReleaseUrl),
-    hasDownloadUrl: Boolean(explicitDownloadUrl),
-    hasArchiveFallbackUrl: Boolean(explicitArchiveUrl),
-    fetchedAtMs: isLegacySource ? 0 : Number(raw.fetchedAtMs || 0),
-    sourceUrl: isLegacySource ? '' : rawSourceUrl,
     pricing,
     placeholders,
   };
 }
 
 /**
- * 按「随包本地目录 -> 云端缓存（按 `updatedAt` 新旧自动裁决优先级）」合并重建内存价格表。
+ * 从随包本地目录加载并重建内存价格表。
  */
 export function rebuildActiveCatalog() {
   const localRaw = loadJson(LOCAL_CATALOG_FILE, null);
-  const remoteRaw = loadJson(REMOTE_CATALOG_CACHE_FILE, null);
   const localCat = sanitizeCatalogPayload(localRaw);
-  const remoteCat = sanitizeCatalogPayload(remoteRaw);
 
-  const localUpdatedMs = parseIsoMs(localCat?.updatedAt);
-  const remoteUpdatedMs = parseIsoMs(remoteCat?.updatedAt);
-
-  const layers = [];
-  if (localCat && remoteCat) {
-    if (localUpdatedMs > remoteUpdatedMs) {
-      layers.push({ kind: 'remote', cat: remoteCat }, { kind: 'local', cat: localCat });
-    } else {
-      layers.push({ kind: 'local', cat: localCat }, { kind: 'remote', cat: remoteCat });
-    }
-  } else if (remoteCat) {
-    layers.push({ kind: 'remote', cat: remoteCat });
-  } else if (localCat) {
-    layers.push({ kind: 'local', cat: localCat });
-  }
-
-  const nextPricing = {};
-  const nextPlaceholders = {};
-  let activeSource = 'builtin';
-  let catalogVersion = 'builtin';
-  let updatedAt = null;
+  const nextPricing = localCat ? { ...localCat.pricing } : {};
+  const nextPlaceholders = localCat ? { ...localCat.placeholders } : {};
   const installedVersion = readInstalledPluginVersion();
-  const customForkRepo = detectCustomGitForkRepo();
-  const customForkPrefix = customForkRepo ? `/${customForkRepo.toLowerCase()}` : '';
-  let latestPluginVersion = installedVersion;
-  let releaseUrl = DEFAULT_RELEASE_URL;
-  let downloadUrl = DEFAULT_DOWNLOAD_URL;
-  let archiveFallbackUrl = DEFAULT_ARCHIVE_FALLBACK_URL;
-
-  for (const { kind, cat } of layers) {
-    Object.assign(nextPricing, cat.pricing);
-    Object.assign(nextPlaceholders, cat.placeholders);
-    if (kind === 'remote' || cat.catalogVersion || cat.updatedAt) {
-      activeSource = kind;
-    }
-    if (cat.catalogVersion) catalogVersion = cat.catalogVersion;
-    if (cat.updatedAt) updatedAt = cat.updatedAt;
-    const isFromCustomFork = Boolean(
-      customForkPrefix &&
-        typeof cat.sourceUrl === 'string' &&
-        cat.sourceUrl.toLowerCase().includes(customForkPrefix)
-    );
-    const shouldAcceptCatalogReleaseMeta = !customForkRepo || isFromCustomFork;
-    if (shouldAcceptCatalogReleaseMeta && cat.latestPluginVersion) {
-      // 以当前更高优先级层的 latestPluginVersion 为准，但永不低于本地已安装版本；自定义 Fork 忽略上游版本号
-      latestPluginVersion =
-        compareSemver(cat.latestPluginVersion, installedVersion) > 0
-          ? cat.latestPluginVersion
-          : installedVersion;
-    }
-    if (shouldAcceptCatalogReleaseMeta) {
-      if (cat.hasReleaseUrl) releaseUrl = cat.releaseUrl;
-      if (cat.hasDownloadUrl) downloadUrl = cat.downloadUrl;
-      if (cat.hasArchiveFallbackUrl) archiveFallbackUrl = cat.archiveFallbackUrl;
-    }
-  }
+  const activeSource =
+    localCat && (localCat.catalogVersion || localCat.updatedAt) ? 'local' : 'builtin';
+  const catalogVersion = localCat?.catalogVersion || 'builtin';
+  const updatedAt = localCat?.updatedAt || null;
+  const latestPluginVersion =
+    localCat?.latestPluginVersion && compareSemver(localCat.latestPluginVersion, installedVersion) > 0
+      ? localCat.latestPluginVersion
+      : installedVersion;
 
   for (const k of Object.keys(MODEL_PRICING)) delete MODEL_PRICING[k];
   Object.assign(MODEL_PRICING, nextPricing);
@@ -454,43 +325,34 @@ export function rebuildActiveCatalog() {
   cloudSyncState.source = activeSource;
   cloudSyncState.catalogVersion = catalogVersion;
   cloudSyncState.updatedAt = updatedAt;
-  cloudSyncState.fetchedAtMs = remoteCat?.fetchedAtMs || cloudSyncState.fetchedAtMs || 0;
-  cloudSyncState.sourceUrl = remoteCat?.sourceUrl || cloudSyncState.sourceUrl || '';
   cloudSyncState.latestPluginVersion = latestPluginVersion;
-  cloudSyncState.releaseUrl = releaseUrl;
-  cloudSyncState.downloadUrl = downloadUrl;
-  cloudSyncState.archiveFallbackUrl = archiveFallbackUrl;
 }
 
 // 模块初始化时立即构建一次当前生效的价格目录
 rebuildActiveCatalog();
 
 /**
- * 获取供前端展示的云端价格目录状态与插件更新状态快照。
+ * 获取供前端展示的离线价格目录状态快照。
  */
 export function getCloudStatus() {
   const currentPluginVersion = readInstalledPluginVersion();
-  const rawLatest = cloudSyncState.latestPluginVersion || currentPluginVersion;
-  const latestPluginVersion =
-    compareSemver(rawLatest, currentPluginVersion) > 0 ? rawLatest : currentPluginVersion;
-  const updateAvailable = compareSemver(latestPluginVersion, currentPluginVersion) > 0;
   return {
     currentPluginVersion,
-    latestPluginVersion,
-    updateAvailable,
+    latestPluginVersion: currentPluginVersion,
+    updateAvailable: false,
     installMode: existsSync(join(PLUGIN_ROOT, '.git')) ? 'git' : 'zip',
-    releaseUrl: cloudSyncState.releaseUrl || DEFAULT_RELEASE_URL,
-    downloadUrl: cloudSyncState.downloadUrl || DEFAULT_DOWNLOAD_URL,
+    releaseUrl: '',
+    downloadUrl: '',
     catalogVersion: cloudSyncState.catalogVersion || 'builtin',
     catalogUpdatedAt: cloudSyncState.updatedAt || null,
-    lastSyncedAtMs: cloudSyncState.fetchedAtMs || 0,
+    lastSyncedAtMs: 0,
     source: cloudSyncState.source || 'builtin',
     modelCount: Object.keys(MODEL_PRICING).length,
     placeholderCount: Object.keys(PLACEHOLDER_MAP).length,
-    isSyncing: Boolean(cloudSyncState.isSyncing),
-    lastSyncError: cloudSyncState.lastError || null,
-    isUpdating: Boolean(pluginUpdateState.isUpdating),
-    lastUpdateResult: pluginUpdateState.lastResult || null,
-    lastUpdateError: pluginUpdateState.lastError || null,
+    isSyncing: false,
+    lastSyncError: null,
+    isUpdating: false,
+    lastUpdateResult: null,
+    lastUpdateError: null,
   };
 }

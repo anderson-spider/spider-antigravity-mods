@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DAEMON_DIRS, lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
 
 const LS_DISC_COOLDOWN_MS = 4000;
 
@@ -510,7 +511,7 @@ export async function ensureLsEndpointDiscovered({
   respectCooldown = false,
   ancestorPids = [],
 } = {}) {
-  if (lsRuntimeEndpoint.addr === 'test.invalid') {
+  if (isTestRuntime()) {
     return false;
   }
   if (!force && lsRuntimeEndpoint.baseUrl && (lsRuntimeEndpoint.csrfToken || !lsRuntimeEndpoint.isDynamic)) {

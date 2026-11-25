@@ -7,7 +7,7 @@ import {
   normalizeExperimentalModernUi,
   normalizeFullSettings,
   normalizeModernUi,
-} from '../backend/settings-schema.mjs';
+} from '../shared/settings-normalization.mjs';
 import {
   applyAppearanceToRoot,
   detectHostColorScheme,

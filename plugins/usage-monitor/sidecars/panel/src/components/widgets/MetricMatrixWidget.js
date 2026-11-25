@@ -3,7 +3,8 @@
  * Renders 1..4 user-selected telemetry cells dynamically via `metricRegistry.js`.
  */
 
-import { defineComponent } from '../../core/component.js';
+import {
+  defineComponent } from '../../core/component.js';
 import {
   h,
   patchAttr,
@@ -11,14 +12,16 @@ import {
   patchKeyedList,
   patchStyleVar,
   patchText,
-} from '../../core/domPatch.js';
-import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
-import { getEffectiveLocale, t } from '../../i18n/index.js';
+  } from '../../core/domPatch.js';
+import { createSvgIcon,
+  patchSvgIcon } from '../../icons/SvgIcon.js';
+import { getEffectiveLocale,
+  t } from '../../i18n/index.js';
 import { resolveOverviewMetricCell } from '../../registries/metricRegistry.js';
 import {
-  normalizeClientOverviewMetrics,
   resolveScopedConversation,
 } from '../../store/telemetryStore.js';
+import { normalizeOverviewMetrics } from '../../../shared/settings-normalization.mjs';
 import { uiStore } from '../../store/uiStore.js';
 
 export const MetricMatrixWidget = defineComponent({
@@ -53,7 +56,7 @@ export const MetricMatrixWidget = defineComponent({
 
     function update({ data } = {}) {
       patchAttr(matrixEl, 'aria-label', t('module.metrics'));
-      const metricKeys = normalizeClientOverviewMetrics(data?.settings?.overviewMetrics);
+      const metricKeys = normalizeOverviewMetrics(data?.settings?.overviewMetrics);
       const colCount = Math.max(1, Math.min(4, metricKeys.length));
       patchAttr(matrixEl, 'data-cols', String(colCount));
       patchStyleVar(matrixEl, '--matrix-cols', String(colCount));

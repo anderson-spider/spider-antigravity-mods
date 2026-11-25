@@ -4,12 +4,14 @@
  * and single-viewport functional views.
  */
 
-import { defineComponent } from './core/component.js';
-import { h, patchAttr } from './core/domPatch.js';
+import {
+  defineComponent } from './core/component.js';
+import { h,
+  patchAttr } from './core/domPatch.js';
 import { isWindowOverlayMode } from './core/httpClient.js';
 import { i18nStore } from './i18n/index.js';
 import {
-  normalizeClientWindowMountMode,
+  normalizeWindowMountMode,
   resolveScopedConversation,
   telemetryStore,
 } from './store/telemetryStore.js';
@@ -51,7 +53,7 @@ export const App = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       const mountMode = settings
-        ? normalizeClientWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
+        ? normalizeWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
         : 'sidebar';
       const hasCtxOverrides = Boolean(
         settings?.modelContextWindows && Object.keys(settings.modelContextWindows).length > 0

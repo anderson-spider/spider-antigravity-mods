@@ -15,52 +15,57 @@ import {
   WINDOW_OVERLAY_KEY,
   WINDOW_OVERLAY_METHODS,
   readInjectedWindowBridge,
-} from '../../../shared/window-bridge-protocol.mjs';
+  } from '../../../shared/window-bridge-protocol.mjs';
 import { App } from '../../App.js';
 import {
   PANEL_SCALE_FACTORS,
   applyAppearanceToRoot,
   normalizeClientFontScale,
   resolveSettingsModernUi,
-} from '../../core/appearance.js';
+  } from '../../core/appearance.js';
 import {
   h,
   isEventInside,
   patchAttr,
   patchClasses,
   patchText,
-} from '../../core/domPatch.js';
-import { deliverCdpBridgeResponses, getWindowBridgeConfig } from '../../core/httpClient.js';
-import { i18nStore, setI18nLanguage, t } from '../../i18n/index.js';
-import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
+  } from '../../core/domPatch.js';
+import { deliverCdpBridgeResponses,
+  getWindowBridgeConfig } from '../../core/httpClient.js';
+import { i18nStore,
+  setI18nLanguage,
+  t } from '../../i18n/index.js';
+import { createSvgIcon,
+  patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   buildCapsuleSlotContext,
   createCapsuleSlotNode,
   patchCapsuleOdometerText,
   resolveMultiSessionCapsuleState,
   syncCapsuleSlotNodes,
-} from '../widgets/CapsuleBarWidget.js';
+  } from '../widgets/CapsuleBarWidget.js';
 import { LiveActivityWidget } from '../widgets/LiveActivityWidget.js';
 import { createDynamicWidgetHost } from '../../registries/widgetRegistry.js';
 import {
-  DEFAULT_CLIENT_HOVER_MODULES,
+  DEFAULT_HOVER_MODULES,
   extractHostRouteCascadeId,
   fetchTelemetry,
   isMacHostPlatform,
-  normalizeClientHoverModules,
-  normalizeClientPopoverWidth,
-  normalizeClientPopoverWidthMode,
-  normalizeClientTopbarSlots,
-  normalizeClientUpdateMode,
-  normalizeClientWindowMountMode,
   resetTelemetryForEndpointSwitch,
   resolveScopedConversation,
   selectConversation,
   startAsyncTelemetryLoop,
   stopAsyncTelemetryLoop,
   telemetryStore,
-  triggerPluginUpdate,
 } from '../../store/telemetryStore.js';
+import {
+  normalizeHoverModules,
+  normalizePluginUpdateMode,
+  normalizePopoverWidth,
+  normalizePopoverWidthMode,
+  normalizeTopbarCapsuleSlots,
+  normalizeWindowMountMode,
+} from "../../../shared/settings-normalization.mjs";
 import { uiStore } from '../../store/uiStore.js';
 
 const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
@@ -842,7 +847,7 @@ function resolveActiveDockTarget(options = undefined) {
     readInjectedWindowBridge()?.mountMode;
   const mountMode =
     options?.mountMode ||
-    normalizeClientWindowMountMode(rawMode, settings?.enableWindowOverlay);
+    normalizeWindowMountMode(rawMode, settings?.enableWindowOverlay);
   if (isIdeExtensionChatFrame()) {
     if (mountMode !== 'composer') return null;
     return findHostComposerAutoTarget(
@@ -1199,34 +1204,10 @@ export function mountWindowOverlay() {
       hidden: true,
       'aria-label': t('capsule.ariaUpdateTitle'),
       title: t('capsule.ariaUpdateTitle'),
-      onClick: async (e) => {
+      onClick: (e) => {
         e.stopPropagation();
-        if (isTopbarUpdating) return;
-        isTopbarUpdating = true;
-        patchClasses(topbarUpdateBtn, { 'is-updating': true });
-        patchSvgIcon(topbarUpdateIcon, 'refresh');
-        patchText(topbarUpdateLabel, t('capsule.updating'));
-        patchAttr(topbarUpdateBtn, 'disabled', true);
-        try {
-          const res = await triggerPluginUpdate();
-          if (!res?.ok) {
-            uiStore.setState({ activeView: 'settings' });
-            setPopoverOpen(true);
-          }
-        } catch {
-          uiStore.setState({ activeView: 'settings' });
-          setPopoverOpen(true);
-        } finally {
-          isTopbarUpdating = false;
-          patchClasses(topbarUpdateBtn, { 'is-updating': false });
-          patchSvgIcon(topbarUpdateIcon, 'arrow-down');
-          patchAttr(topbarUpdateBtn, 'disabled', false);
-          const cs = telemetryStore.getState().telemetry?.cloudStatus;
-          patchText(
-            topbarUpdateLabel,
-            cs?.latestPluginVersion ? `v${cs.latestPluginVersion}` : t('capsule.newVersion')
-          );
-        }
+        uiStore.setState({ activeView: 'settings' });
+        setPopoverOpen(true);
       },
       onMouseenter: (e) => {
         recordPointerCoords(e);
@@ -1374,7 +1355,7 @@ export function mountWindowOverlay() {
     containerEl: hoverWidgetsContainer,
     mode: 'hover',
     isVisibleFn: () => Boolean(tooltipOpen && !disposed),
-    initialModuleKeys: DEFAULT_CLIENT_HOVER_MODULES,
+    initialModuleKeys: DEFAULT_HOVER_MODULES,
   });
 
   const hoverTipEl = h(
@@ -1911,11 +1892,11 @@ export function mountWindowOverlay() {
 
       if (popoverOpen) {
         const maxPopCardW = Math.max(280, vw - minLeft - 12);
-        const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
+        const popWidthMode = normalizePopoverWidthMode(curSettings?.popoverWidthMode);
         let desiredPopW = Math.min(Math.round(POPOVER_BASE_WIDTH * panelScale), maxPopCardW);
         if (popWidthMode === 'custom') {
           desiredPopW = Math.min(
-            normalizeClientPopoverWidth(curSettings?.popoverWidth),
+            normalizePopoverWidth(curSettings?.popoverWidth),
             maxPopCardW
           );
         } else if (typeof popoverEl.querySelectorAll === 'function') {
@@ -2046,12 +2027,12 @@ export function mountWindowOverlay() {
     const avail = measureAvailableTitlebarWidth(dockTarget);
     const curTel = telemetryStore.getState().telemetry;
     const showMulti = curTel?.settings?.showTopbarMultiSession !== false;
-    const curUpdateMode = normalizeClientUpdateMode(
+    const curUpdateMode = normalizePluginUpdateMode(
       curTel?.settings?.pluginUpdateMode,
       curTel?.settings?.autoUpdatePlugin
     );
     const hasUpdate = Boolean(curTel?.cloudStatus?.updateAvailable) && curUpdateMode !== 'off';
-    const slotCount = normalizeClientTopbarSlots(curTel?.settings?.topbarCapsuleSlots).length;
+    const slotCount = normalizeTopbarCapsuleSlots(curTel?.settings?.topbarCapsuleSlots).length;
     const nextMode = computeCapsuleLayoutMode(avail, layoutMode, {
       showMulti,
       hasUpdate,
@@ -2259,8 +2240,8 @@ export function mountWindowOverlay() {
 
   function canOpenHoverTooltip() {
     const curTel = telemetryStore.getState().telemetry;
-    const hoverMods = normalizeClientHoverModules(curTel?.settings?.hoverModules);
-    const curUpdateMode = normalizeClientUpdateMode(
+    const hoverMods = normalizeHoverModules(curTel?.settings?.hoverModules);
+    const curUpdateMode = normalizePluginUpdateMode(
       curTel?.settings?.pluginUpdateMode,
       curTel?.settings?.autoUpdatePlugin
     );
@@ -2360,7 +2341,7 @@ export function mountWindowOverlay() {
   function renderHoverWidgets() {
     const { telemetry, minuteTick } = telemetryStore.getState();
     hoverWidgetHost.update({
-      moduleKeys: normalizeClientHoverModules(telemetry?.settings?.hoverModules),
+      moduleKeys: normalizeHoverModules(telemetry?.settings?.hoverModules),
       data: telemetry,
       minuteTick: Number(minuteTick || Math.floor(Date.now() / 30000)),
     });
@@ -2384,7 +2365,7 @@ export function mountWindowOverlay() {
       setMultiOpen(false);
     }
 
-    const slotKeys = normalizeClientTopbarSlots(telemetry?.settings?.topbarCapsuleSlots);
+    const slotKeys = normalizeTopbarCapsuleSlots(telemetry?.settings?.topbarCapsuleSlots);
     const layoutInputsChanged =
       showMulti !== lastShowMulti || slotKeys.length !== lastSlotCount;
     if (layoutInputsChanged) {
@@ -2448,7 +2429,7 @@ export function mountWindowOverlay() {
     patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
     applyCapsuleSlots(slotKeys, slotCtx);
 
-    const updateMode = normalizeClientUpdateMode(
+    const updateMode = normalizePluginUpdateMode(
       telemetry.settings?.pluginUpdateMode,
       telemetry.settings?.autoUpdatePlugin
     );
@@ -2487,7 +2468,7 @@ export function mountWindowOverlay() {
     }
 
     // --- 同步动态悬停组件宿主（0 项且无更新提示时自动关闭悬停窗，点击完整浮窗不受影响） ---
-    const hoverModuleKeys = normalizeClientHoverModules(telemetry.settings?.hoverModules);
+    const hoverModuleKeys = normalizeHoverModules(telemetry.settings?.hoverModules);
     patchAttr(hoverWidgetsContainer, 'hidden', hoverModuleKeys.length === 0);
     if (hoverModuleKeys.length === 0 && !showUpdatePrompt && tooltipOpen) {
       setTooltipOpen(false);
@@ -2498,7 +2479,7 @@ export function mountWindowOverlay() {
     }
   }
 
-  let lastAppliedMountMode = normalizeClientWindowMountMode(
+  let lastAppliedMountMode = normalizeWindowMountMode(
     telemetryStore.getState().telemetry?.settings?.windowMountMode,
     telemetryStore.getState().telemetry?.settings?.enableWindowOverlay
   );
@@ -2511,7 +2492,7 @@ export function mountWindowOverlay() {
       selectedConversationId: st.selectedConversationId,
     }),
     (slice) => {
-      const nextMountMode = normalizeClientWindowMountMode(
+      const nextMountMode = normalizeWindowMountMode(
         slice.telemetry?.settings?.windowMountMode,
         slice.telemetry?.settings?.enableWindowOverlay
       );
@@ -2832,7 +2813,7 @@ export function mountWindowOverlay() {
     [WINDOW_OVERLAY_METHODS.getMountMode]: () => lastAppliedMountMode,
     [WINDOW_OVERLAY_METHODS.applyMountMode](nextMode) {
       if (disposed) return false;
-      const normalized = normalizeClientWindowMountMode(nextMode, nextMode !== 'sidebar');
+      const normalized = normalizeWindowMountMode(nextMode, nextMode !== 'sidebar');
       const bridgeConfig = readInjectedWindowBridge();
       if (bridgeConfig) bridgeConfig.mountMode = normalized;
       const curTel = telemetryStore.getState().telemetry;

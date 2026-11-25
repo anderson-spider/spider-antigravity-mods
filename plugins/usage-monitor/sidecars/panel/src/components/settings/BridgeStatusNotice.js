@@ -9,7 +9,6 @@ import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
 import { isWindowOverlayMode } from '../../core/httpClient.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import { t } from '../../i18n/index.js';
-import { triggerBridgeHostRelaunch } from '../../store/telemetryStore.js';
 
 const LAUNCH_FLAG_TEXT = '--remote-debugging-port=0';
 
@@ -51,8 +50,6 @@ export const BridgeStatusNotice = defineComponent({
     let dismissed = false;
     let copied = false;
     let copiedTimer = null;
-    let relaunchState = 'idle'; // 'idle' | 'relaunching' | 'failed'
-    let relaunchResetTimer = null;
     let destroyed = false;
 
     const headIconEl = createSvgIcon('warning', { size: 13, className: 'settings-bridge-icon' });
@@ -76,64 +73,6 @@ export const BridgeStatusNotice = defineComponent({
           [createSvgIcon('close', { size: 11 })]
         )
       : null;
-
-    const relaunchBtnIconEl = createSvgIcon('refresh', { size: 11 });
-    const relaunchBtnTextEl = h('span', {
-      className: 'settings-bridge-relaunch-text',
-      text: t('settings.bridge.relaunchBtn'),
-    });
-    const relaunchBtnEl = h(
-      'button',
-      {
-        type: 'button',
-        className: 'settings-bridge-relaunch-btn',
-        onClick: async () => {
-          if (relaunchState === 'relaunching' || destroyed) return;
-          relaunchState = 'relaunching';
-          if (relaunchResetTimer) {
-            clearTimeout(relaunchResetTimer);
-            relaunchResetTimer = null;
-          }
-          syncActionButtons();
-          try {
-            const res = await triggerBridgeHostRelaunch();
-            if (destroyed) return;
-            if (!res || res.ok === false) {
-              relaunchState = 'failed';
-              syncActionButtons();
-              relaunchResetTimer = setTimeout(() => {
-                relaunchResetTimer = null;
-                if (destroyed) return;
-                relaunchState = 'idle';
-                syncActionButtons();
-              }, 3500);
-              relaunchResetTimer?.unref?.();
-              return;
-            }
-            // Reset button if host is still open after 9s (e.g. cancelled close prompt)
-            relaunchResetTimer = setTimeout(() => {
-              relaunchResetTimer = null;
-              if (destroyed) return;
-              relaunchState = 'idle';
-              syncActionButtons();
-            }, 9000);
-            relaunchResetTimer?.unref?.();
-          } catch {
-            if (destroyed) return;
-            relaunchState = 'failed';
-            syncActionButtons();
-            relaunchResetTimer = setTimeout(() => {
-              relaunchResetTimer = null;
-              if (destroyed) return;
-              relaunchState = 'idle';
-              syncActionButtons();
-            }, 3500);
-            relaunchResetTimer?.unref?.();
-          }
-        },
-      },
-      [relaunchBtnIconEl, relaunchBtnTextEl]
-    );
 
     const copyBtnIconEl = createSvgIcon('copy', { size: 11 });
     const copyBtnTextEl = h('span', {
@@ -170,7 +109,6 @@ export const BridgeStatusNotice = defineComponent({
       dismissBtnEl ? [headLeftEl, dismissBtnEl] : [headLeftEl]
     );
     const actionsRowEl = h('div', { className: 'settings-bridge-actions' }, [
-      relaunchBtnEl,
       copyBtnEl,
     ]);
 
@@ -185,21 +123,6 @@ export const BridgeStatusNotice = defineComponent({
     );
 
     function syncActionButtons() {
-      const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
-      const needsAuth = Boolean(lastPayload.windowBridge?.hasReadOnlyShortcuts);
-      patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
-      patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
-      patchText(
-        relaunchBtnTextEl,
-        relaunchState === 'relaunching'
-          ? t('settings.bridge.relaunchingBtn')
-          : relaunchState === 'failed'
-            ? t('settings.bridge.relaunchFailed')
-            : needsAuth
-              ? t('settings.bridge.relaunchAuthBtn')
-              : t('settings.bridge.relaunchBtn')
-      );
-
       patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
       patchText(
         copyBtnTextEl,
@@ -292,10 +215,6 @@ export const BridgeStatusNotice = defineComponent({
         clearTimeout(copiedTimer);
         copiedTimer = null;
       }
-      if (relaunchResetTimer) {
-        clearTimeout(relaunchResetTimer);
-        relaunchResetTimer = null;
-      }
     });
 
     return {
@@ -303,7 +222,6 @@ export const BridgeStatusNotice = defineComponent({
       refs: {
         update,
         refreshLabels: render,
-        relaunchBtnEl,
         copyBtnEl,
         dismissBtnEl,
       },

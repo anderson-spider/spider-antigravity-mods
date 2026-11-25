@@ -5,32 +5,36 @@
  * preview tooltips, and independent Main/Sub agent badges.
  */
 
-import { defineComponent } from '../../core/component.js';
+import {
+  defineComponent } from '../../core/component.js';
 import {
   h,
   patchAttr,
   patchClasses,
   patchKeyedList,
   patchText,
-} from '../../core/domPatch.js';
+  } from '../../core/domPatch.js';
 import {
   buildStepAnomalyDiagnostic,
   buildStepCompactionDiagnostic,
   resolveModelDisplayInfo,
   speedReasonText,
-} from '../../core/formatters.js';
-import { getEffectiveLocale, t } from '../../i18n/index.js';
+  } from '../../core/formatters.js';
+import { getEffectiveLocale,
+  t } from '../../i18n/index.js';
 import {
   DEFAULT_STEP_COLUMN_KEYS,
   STEP_COLUMN_REGISTRY,
   isCompactionStepItem,
-} from '../../registries/stepColumnRegistry.js';
+  } from '../../registries/stepColumnRegistry.js';
 import {
   formatAgentBadgeText,
   formatAgentLabel,
   getAgentBadgeClass,
-  normalizeClientStepTokenComboFormat,
 } from '../../store/telemetryStore.js';
+import {
+  normalizeStepTokenComboFormat,
+} from "../../../shared/settings-normalization.mjs";
 import { parseStepTokenComboSegments } from '../../../shared/settings-normalization.mjs';
 
 export function formatTurnPromptText(rawPrompt, { hasMedia = false, mediaOnly = false } = {}) {
@@ -396,7 +400,7 @@ export const StepTableWidget = defineComponent({
 
     function syncTableHeaderColumns(colKeys, headerCtx = {}) {
       const locale = getEffectiveLocale();
-      const fmtKey = normalizeClientStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
+      const fmtKey = normalizeStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
       const ctx = { stepTokenComboFormat: fmtKey };
       patchKeyedList(stepsTheadRow, colKeys, {
         keyFn: (colKey) => colKey,
@@ -1475,7 +1479,7 @@ export const StepTableWidget = defineComponent({
       }
 
       const colOrderSig = colKeys.join(',');
-      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
+      const normTokenFmt = normalizeStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
         showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,

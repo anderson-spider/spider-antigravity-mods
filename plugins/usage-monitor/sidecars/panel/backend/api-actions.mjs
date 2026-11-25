@@ -18,20 +18,19 @@ import {
 import { isLocalHostRequest, readLocalAsync } from './http-helpers.mjs';
 import { clearScannerRuntimeMemos } from './local-scanner.mjs';
 import {
+  createDefaultSettingsObject,
+  mergeSettingsPatch,
+  normalizeWindowMountMode,
+} from '../shared/settings-normalization.mjs';
+import {
   LS_ADDR,
   SETTINGS_FILE,
   clearRuntimeCaches,
   computeRuntimeCodeVersion,
-  createDefaultSettingsObject,
   inFlightRequests,
   isPlainObject,
   loadSettings,
   lsRuntimeEndpoint,
-  normalizeFullSettings,
-  normalizeModelDisplayMode,
-  normalizeModernUi,
-  normalizePluginUpdateMode,
-  normalizeWindowMountMode,
   saveJson,
 } from './config.mjs';
 import {
@@ -43,6 +42,7 @@ import {
 } from './context-windows.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 import { callLsRpc, getContextModelCatalog } from './ls-rpc.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
 import { buildTelemetryPayload, clearTelemetryBuilderMemo } from './telemetry-builder.mjs';
 import { ensureCliStatusLineConfigured } from './cli-statusline-config.mjs';
 
@@ -54,7 +54,7 @@ function setSidecarRestartHandler(handler) {
 
 function scheduleSidecarRestart(delayMs = 350) {
   const activeAddr = lsRuntimeEndpoint.addr || LS_ADDR;
-  if (!activeAddr || activeAddr === 'test.invalid') return;
+  if (!activeAddr || isTestRuntime()) return;
   if (typeof customSidecarRestartHandler === 'function') {
     const fn = customSidecarRestartHandler;
     setTimeout(() => {
@@ -77,14 +77,6 @@ function scheduleSidecarRestart(delayMs = 350) {
 }
 
 export const bootBundleVersion = computeRuntimeCodeVersion();
-
-let standalonePortListener = null;
-
-export function setStandalonePortListener(listener) {
-  standalonePortListener = typeof listener === 'function' ? listener : null;
-}
-
-export { isLocalHostRequest, readLocalAsync };
 
 const MAX_SAFE_DATE_MS = 8_640_000_000_000_000;
 
@@ -237,7 +229,7 @@ export async function executeTelemetryAction(data, opts = {}) {
   ).trim();
   const convId = rawConvId && !/[\\/]|\.\./.test(rawConvId) ? rawConvId : '';
   const force = data?.force === '1' || data?.force === true;
-  if (lsRuntimeEndpoint.addr !== 'test.invalid') {
+  if (!isTestRuntime()) {
     if (!isRemote && !lsRuntimeEndpoint.baseUrl) {
       await ensureLsEndpointDiscovered({ force: false });
     }
@@ -262,7 +254,7 @@ export async function executeTelemetryAction(data, opts = {}) {
     payload = await buildTelemetryPayload(convId, force, filterOpts);
   } catch (err) {
     if (
-      lsRuntimeEndpoint.addr !== 'test.invalid' &&
+      !isTestRuntime() &&
       bootBundleVersion &&
       String(computeRuntimeCodeVersion()) !== String(bootBundleVersion)
     ) {
@@ -301,63 +293,10 @@ export async function executeTelemetryAction(data, opts = {}) {
   };
 }
 
-function sanitizePositiveSettingNumber(val, fallback) {
-  const num = Number(val);
-  return Number.isFinite(num) && num > 0 ? num : fallback;
-}
-
 export function executeSettingsAction(data) {
   const current = loadSettings();
   const payload = isPlainObject(data) ? stripEndpointField(data) : {};
-  const nextPluginUpdateMode =
-    payload.pluginUpdateMode !== undefined
-      ? normalizePluginUpdateMode(payload.pluginUpdateMode)
-      : typeof payload.autoUpdatePlugin === 'boolean'
-        ? payload.autoUpdatePlugin
-          ? 'auto'
-          : 'manual'
-        : normalizePluginUpdateMode(current.pluginUpdateMode, current.autoUpdatePlugin);
-  const nextWindowMountMode =
-    payload.windowMountMode !== undefined
-      ? normalizeWindowMountMode(payload.windowMountMode)
-      : typeof payload.enableWindowOverlay === 'boolean'
-        ? payload.enableWindowOverlay
-          ? current.windowMountMode === 'composer'
-            ? 'composer'
-            : 'dual'
-          : 'sidebar'
-        : normalizeWindowMountMode(current.windowMountMode, current.enableWindowOverlay);
-  const nextModelDisplayMode =
-    payload.modelDisplayMode !== undefined
-      ? normalizeModelDisplayMode(payload.modelDisplayMode)
-      : typeof payload.showUpstreamModel === 'boolean'
-        ? payload.showUpstreamModel
-          ? 'upstream'
-          : 'short'
-        : normalizeModelDisplayMode(current.modelDisplayMode, current.showUpstreamModel);
-  const nextModernUi =
-    payload.modernUi !== undefined
-      ? normalizeModernUi(payload.modernUi)
-      : payload.experimentalModernUi !== undefined
-        ? normalizeModernUi(payload.experimentalModernUi)
-        : normalizeModernUi(current.modernUi);
-  const updated = normalizeFullSettings({
-    ...current,
-    ...payload,
-    modernUi: nextModernUi,
-    modelContextWindows: current.modelContextWindows,
-    weeklyTokenBudget: sanitizePositiveSettingNumber(
-      payload.weeklyTokenBudget ?? payload.weeklyTokenLimit,
-      current.weeklyTokenBudget
-    ),
-    weeklyCostBudget: sanitizePositiveSettingNumber(
-      payload.weeklyCostBudget,
-      current.weeklyCostBudget
-    ),
-    modelDisplayMode: nextModelDisplayMode,
-    pluginUpdateMode: nextPluginUpdateMode,
-    windowMountMode: nextWindowMountMode,
-  });
+  const updated = mergeSettingsPatch(current, payload);
   if (!saveJson(SETTINGS_FILE, updated)) {
     return {
       ok: false,
@@ -383,16 +322,6 @@ export function executeSettingsAction(data) {
   }
   if ((updated.enableCliStatusLine !== false) !== (current.enableCliStatusLine !== false)) {
     ensureCliStatusLineConfigured({ enabled: updated.enableCliStatusLine !== false });
-  }
-  if (
-    typeof standalonePortListener === 'function' &&
-    Number(updated.standalonePort || 0) !== Number(current.standalonePort || 0)
-  ) {
-    try {
-      standalonePortListener(Number(updated.standalonePort || 0));
-    } catch {
-      // 忽略独立端口热重载回调异常
-    }
   }
   return {
     ok: true,
@@ -496,16 +425,6 @@ export function executeResetSettingsAction() {
   if ((updated.enableCliStatusLine !== false) !== (current.enableCliStatusLine !== false)) {
     ensureCliStatusLineConfigured({ enabled: updated.enableCliStatusLine !== false });
   }
-  if (
-    typeof standalonePortListener === 'function' &&
-    Number(updated.standalonePort || 0) !== Number(current.standalonePort || 0)
-  ) {
-    try {
-      standalonePortListener(Number(updated.standalonePort || 0));
-    } catch {
-      // 忽略独立端口热重载回调异常
-    }
-  }
   return {
     ok: true,
     status: 200,
@@ -583,7 +502,7 @@ export async function dispatchBridgeApiRequest(pathname, method, data, opts = un
  * @param {{ allowDynamicLs?: boolean, onRestart?: () => void }} [options]
  */
 export function bootWindowBridgeRuntime({ allowDynamicLs = false, onRestart = null } = {}) {
-  if (lsRuntimeEndpoint.addr === 'test.invalid') return null;
+  if (isTestRuntime()) return null;
   if (!allowDynamicLs && !lsRuntimeEndpoint.addr) return null;
 
   ensureCliStatusLineConfigured({ enabled: loadSettings().enableCliStatusLine !== false });

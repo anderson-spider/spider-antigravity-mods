@@ -2,7 +2,7 @@
 'use strict';
 
 // --- shared/settings-normalization.mjs ---
-const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeModernUi, normalizeExperimentalModernUi } = (() => {
+const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeModernUi, normalizeExperimentalModernUi, isContextWindowModelId, isContextWindowSettingId, isContextWindowOption, normalizeModelContextWindows, DEFAULT_SETTINGS_SCHEMA, createDefaultSettingsObject, normalizeFullSettings, mergeSettingsPatch } = (() => {
 /**
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
@@ -476,7 +476,209 @@ function normalizeExperimentalModernUi(val) {
   }
   return Boolean(val);
 }
-return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeModernUi, normalizeExperimentalModernUi };
+
+function isContextWindowModelId(value) {
+  return typeof value === 'string' && /^MODEL_[A-Z0-9_]{1,120}$/.test(value) &&
+    value !== 'MODEL_UNSPECIFIED' && value !== 'MODEL_UNKNOWN';
+}
+
+function isContextWindowSettingId(value) {
+  return isContextWindowModelId(value) || (typeof value === 'string' && /^model:[a-z0-9][a-z0-9._-]{0,119}$/.test(value));
+}
+
+function isContextWindowOption(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 80 &&
+    value.trim() === value && value.toLowerCase() !== 'default' && !/[\x00-\x1f\x7f]/.test(value);
+}
+
+function isSettingsPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+function sanitizePositiveSettingNumber(val, fallback) {
+  const num = Number(val);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function normalizeModelContextWindows(value) {
+  return Object.fromEntries(
+    Object.entries(isSettingsPlainObject(value) ? value : {}).filter(
+      ([id, option]) => isContextWindowSettingId(id) && isContextWindowOption(option)
+    )
+  );
+}
+
+const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
+  language: 'auto',
+  themeAccent: 'host',
+  fontScale: 'md',
+  modernUi: true,
+  experimentalModernUi: true,
+  weeklyTokenBudget: 150000000,
+  weeklyCostBudget: 100,
+  weeklyLimitMode: 'official',
+  modelDisplayMode: 'short',
+  showUpstreamModel: false,
+  orchestratorIdMode: 'compact',
+  pluginUpdateMode: 'off',
+  autoUpdatePlugin: false,
+  windowMountMode: 'sidebar',
+  enableWindowOverlay: false,
+  popoverWidthMode: 'auto',
+  popoverWidth: DEFAULT_POPOVER_WIDTH,
+  enableCliStatusLine: true,
+  standalonePort: 0,
+  showTopbarMultiSession: true,
+  topbarCapsuleSlots: DEFAULT_TOPBAR_SLOTS,
+  hoverModules: DEFAULT_HOVER_MODULES,
+  overviewModules: DEFAULT_OVERVIEW_MODULES,
+  overviewMetrics: DEFAULT_OVERVIEW_METRICS,
+  showQuotaPace: true,
+  showStepTurnRail: false,
+  showStepAgentBadge: true,
+  showStepSpeedColor: false,
+  stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
+  contextWindowRiskAccepted: false,
+  modelContextWindows: Object.freeze({}),
+});
+
+/**
+ * 创建一份深拷贝的全新默认偏好设置对象。
+ */
+function createDefaultSettingsObject() {
+  return {
+    ...DEFAULT_SETTINGS_SCHEMA,
+    topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
+    hoverModules: [...DEFAULT_HOVER_MODULES],
+    overviewModules: [...DEFAULT_OVERVIEW_MODULES],
+    overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
+    stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
+    modelContextWindows: {},
+  };
+}
+
+/**
+ * 将原始持久化对象或增量合并结果完整归一化为合法偏好对象。
+ *
+ * @param {unknown} rawInput
+ */
+function normalizeFullSettings(rawInput) {
+  const safeRaw = isSettingsPlainObject(rawInput) ? rawInput : {};
+  const pluginUpdateMode = normalizePluginUpdateMode(
+    safeRaw.pluginUpdateMode,
+    safeRaw.autoUpdatePlugin
+  );
+  const windowMountMode = normalizeWindowMountMode(
+    safeRaw.windowMountMode,
+    safeRaw.enableWindowOverlay
+  );
+  const modelDisplayMode = normalizeModelDisplayMode(
+    safeRaw.modelDisplayMode,
+    safeRaw.showUpstreamModel
+  );
+  const modernUi =
+    safeRaw.modernUi !== undefined ? normalizeModernUi(safeRaw.modernUi) : true;
+  return {
+    language: normalizeLanguageSetting(safeRaw.language),
+    themeAccent: normalizeThemeAccent(safeRaw.themeAccent),
+    fontScale: normalizeFontScale(safeRaw.fontScale),
+    modernUi,
+    experimentalModernUi: modernUi,
+    weeklyTokenBudget: sanitizePositiveSettingNumber(
+      safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit,
+      DEFAULT_SETTINGS_SCHEMA.weeklyTokenBudget
+    ),
+    weeklyCostBudget: sanitizePositiveSettingNumber(
+      safeRaw.weeklyCostBudget,
+      DEFAULT_SETTINGS_SCHEMA.weeklyCostBudget
+    ),
+    weeklyLimitMode: normalizeWeeklyLimitMode(safeRaw.weeklyLimitMode),
+    modelDisplayMode,
+    showUpstreamModel: modelDisplayMode !== 'short',
+    orchestratorIdMode: normalizeOrchestratorIdMode(safeRaw.orchestratorIdMode),
+    pluginUpdateMode,
+    autoUpdatePlugin: pluginUpdateMode === 'auto',
+    windowMountMode,
+    enableWindowOverlay: windowMountMode !== 'sidebar',
+    popoverWidthMode: normalizePopoverWidthMode(safeRaw.popoverWidthMode),
+    popoverWidth: normalizePopoverWidth(safeRaw.popoverWidth),
+    enableCliStatusLine: safeRaw.enableCliStatusLine !== false,
+    standalonePort: normalizeStandalonePort(safeRaw.standalonePort),
+    showTopbarMultiSession: safeRaw.showTopbarMultiSession !== false,
+    topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
+    hoverModules: normalizeHoverModules(safeRaw.hoverModules),
+    overviewModules: normalizeOverviewModules(safeRaw.overviewModules),
+    overviewMetrics: normalizeOverviewMetrics(safeRaw.overviewMetrics),
+    showQuotaPace: safeRaw.showQuotaPace !== false,
+    showStepTurnRail: safeRaw.showStepTurnRail === true,
+    showStepAgentBadge: safeRaw.showStepAgentBadge !== false,
+    showStepSpeedColor: safeRaw.showStepSpeedColor === true,
+    stepTokenComboFormat: normalizeStepTokenComboFormat(safeRaw.stepTokenComboFormat),
+    stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
+    contextWindowRiskAccepted: safeRaw.contextWindowRiskAccepted === true,
+    modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
+  };
+}
+
+/**
+ * Merge a partial settings patch into `current`, preserving legacy-field precedence
+ * and `current.modelContextWindows`, then return the normalized full settings object.
+ */
+function mergeSettingsPatch(current, patch) {
+  const safeCurrent = isSettingsPlainObject(current) ? current : {};
+  const payload = isSettingsPlainObject(patch) ? patch : {};
+  const nextPluginUpdateMode =
+    payload.pluginUpdateMode !== undefined
+      ? normalizePluginUpdateMode(payload.pluginUpdateMode)
+      : typeof payload.autoUpdatePlugin === 'boolean'
+        ? payload.autoUpdatePlugin
+          ? 'auto'
+          : 'manual'
+        : normalizePluginUpdateMode(safeCurrent.pluginUpdateMode, safeCurrent.autoUpdatePlugin);
+  const nextWindowMountMode =
+    payload.windowMountMode !== undefined
+      ? normalizeWindowMountMode(payload.windowMountMode)
+      : typeof payload.enableWindowOverlay === 'boolean'
+        ? payload.enableWindowOverlay
+          ? safeCurrent.windowMountMode === 'composer'
+            ? 'composer'
+            : 'dual'
+          : 'sidebar'
+        : normalizeWindowMountMode(safeCurrent.windowMountMode, safeCurrent.enableWindowOverlay);
+  const nextModelDisplayMode =
+    payload.modelDisplayMode !== undefined
+      ? normalizeModelDisplayMode(payload.modelDisplayMode)
+      : typeof payload.showUpstreamModel === 'boolean'
+        ? payload.showUpstreamModel
+          ? 'upstream'
+          : 'short'
+        : normalizeModelDisplayMode(safeCurrent.modelDisplayMode, safeCurrent.showUpstreamModel);
+  const nextModernUi =
+    payload.modernUi !== undefined
+      ? normalizeModernUi(payload.modernUi)
+      : payload.experimentalModernUi !== undefined
+        ? normalizeModernUi(payload.experimentalModernUi)
+        : normalizeModernUi(safeCurrent.modernUi);
+  return normalizeFullSettings({
+    ...safeCurrent,
+    ...payload,
+    modernUi: nextModernUi,
+    modelContextWindows: safeCurrent.modelContextWindows,
+    weeklyTokenBudget: sanitizePositiveSettingNumber(
+      payload.weeklyTokenBudget ?? payload.weeklyTokenLimit,
+      safeCurrent.weeklyTokenBudget
+    ),
+    weeklyCostBudget: sanitizePositiveSettingNumber(
+      payload.weeklyCostBudget,
+      safeCurrent.weeklyCostBudget
+    ),
+    modelDisplayMode: nextModelDisplayMode,
+    pluginUpdateMode: nextPluginUpdateMode,
+    windowMountMode: nextWindowMountMode,
+  });
+}
+return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeModernUi, normalizeExperimentalModernUi, isContextWindowModelId, isContextWindowSettingId, isContextWindowOption, normalizeModelContextWindows, DEFAULT_SETTINGS_SCHEMA, createDefaultSettingsObject, normalizeFullSettings, mergeSettingsPatch };
 })();
 
 // --- shared/telemetry-display-rules.mjs ---
@@ -728,14 +930,13 @@ return { THIRD_PARTY_POOL_RE, isThirdPartyPoolText, classifySpeedTier, classifyC
 })();
 
 // --- shared/window-bridge-protocol.mjs ---
-const { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_BRIDGE_ENDPOINT_KEY, WINDOW_BRIDGE_ENDPOINT_HEADER, LOCAL_ENDPOINT_ID, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge } = (() => {
+const { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_BRIDGE_ENDPOINT_KEY, WINDOW_BRIDGE_ENDPOINT_HEADER, LOCAL_ENDPOINT_ID, WINDOW_OVERLAY_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge } = (() => {
 const WINDOW_BRIDGE_KEY = '__AGUsageMonitorBridge';
 const WINDOW_BRIDGE_ROUTE_KEY = 'hostRouteCascadeId';
 const WINDOW_BRIDGE_ENDPOINT_KEY = 'endpointId';
 const WINDOW_BRIDGE_ENDPOINT_HEADER = 'X-Usage-Monitor-Endpoint';
 const LOCAL_ENDPOINT_ID = 'local';
 const WINDOW_OVERLAY_KEY = '__AGUsageMonitorOverlay';
-const CONTEXT_WINDOWS_GLOBAL_KEY = '__AGUsageMonitorContextWindows';
 
 const WINDOW_OVERLAY_METHODS = Object.freeze({
   ensureAlive: 'ensureAlive',
@@ -761,7 +962,7 @@ const BRIDGE_API_PATHS = Object.freeze(BRIDGE_API_ROUTE_DEFS.map((r) => r.path))
 function readInjectedWindowBridge() {
   return typeof window === 'undefined' ? undefined : window[WINDOW_BRIDGE_KEY];
 }
-return { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_BRIDGE_ENDPOINT_KEY, WINDOW_BRIDGE_ENDPOINT_HEADER, LOCAL_ENDPOINT_ID, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge };
+return { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_BRIDGE_ENDPOINT_KEY, WINDOW_BRIDGE_ENDPOINT_HEADER, LOCAL_ENDPOINT_ID, WINDOW_OVERLAY_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge };
 })();
 
 // --- src/icons/svgRegistry.js ---
@@ -2565,6 +2766,7 @@ const { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalize
  * while strictly isolating `#ag-usage-monitor-capsule` from font scaling.
  */
 
+
 const THEME_ACCENT_PRESETS = Object.freeze([
   { key: 'host', labelKey: 'settings.gen.accentHost', cssColor: '' },
   { key: 'blue', labelKey: 'settings.gen.accentBlue', cssColor: 'hsl(217 84% 53%)' },
@@ -2589,26 +2791,9 @@ const PANEL_SCALE_FACTORS = Object.freeze({
   xl: 1.18,
 });
 
-function normalizeClientThemeAccent(raw) {
-  const val = String(raw ?? '').trim().toLowerCase();
-  return THEME_ACCENT_PRESETS.some((p) => p.key === val) ? val : 'host';
-}
-
-function normalizeClientFontScale(raw) {
-  const val = String(raw ?? '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(FONT_SCALE_FACTORS, val) ? val : 'md';
-}
-
-function normalizeClientModernUi(raw) {
-  if (raw === undefined || raw === null || raw === '') return true;
-  if (typeof raw === 'string') {
-    const lower = raw.trim().toLowerCase();
-    if (lower === 'false' || lower === '0' || lower === 'off') return false;
-    if (lower === 'true' || lower === '1' || lower === 'on') return true;
-    return true;
-  }
-  return Boolean(raw);
-}
+const normalizeClientThemeAccent = normalizeThemeAccent;
+const normalizeClientFontScale = normalizeFontScale;
+const normalizeClientModernUi = normalizeModernUi;
 
 function resolveSettingsModernUi(settings) {
   if (!settings || typeof settings !== 'object') return true;
@@ -4876,7 +5061,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, resetTelemetryForEndpointSwitch, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, isEquivalentTelemetry, resetTelemetryForEndpointSwitch, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -5254,33 +5439,6 @@ function reconcileIncomingTelemetrySettings(payload, reqSettingsRev) {
   return merged ? { ...payload, settings: merged } : payload;
 }
 
-const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
-const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
-const CLIENT_OVERVIEW_MODULE_KEYS = OVERVIEW_MODULE_KEYS;
-const DEFAULT_CLIENT_OVERVIEW_MODULES = DEFAULT_OVERVIEW_MODULES;
-const DEFAULT_CLIENT_HOVER_MODULES = DEFAULT_HOVER_MODULES;
-const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
-const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
-const CLIENT_STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
-const DEFAULT_CLIENT_STEP_COLUMNS = DEFAULT_STEP_TABLE_COLUMNS;
-const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
-const MIN_CLIENT_POPOVER_WIDTH = MIN_POPOVER_WIDTH;
-const MAX_CLIENT_POPOVER_WIDTH = MAX_POPOVER_WIDTH;
-const DEFAULT_CLIENT_POPOVER_WIDTH = DEFAULT_POPOVER_WIDTH;
-
-const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
-const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
-const normalizeClientPopoverWidthMode = normalizePopoverWidthMode;
-const normalizeClientPopoverWidth = normalizePopoverWidth;
-const normalizeClientModelDisplayMode = normalizeModelDisplayMode;
-const normalizeClientTopbarSlots = normalizeTopbarCapsuleSlots;
-const normalizeClientHoverModules = normalizeHoverModules;
-const normalizeClientOverviewModules = normalizeOverviewModules;
-const normalizeClientOverviewMetrics = normalizeOverviewMetrics;
-const normalizeClientStepColumns = normalizeStepTableColumns;
-const normalizeClientUpdateMode = normalizePluginUpdateMode;
-const normalizeClientOrchestratorIdMode = normalizeOrchestratorIdMode;
-const normalizeClientWindowMountMode = normalizeWindowMountMode;
 
 function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
@@ -5353,8 +5511,8 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.pluginUpdateMode ?? '') !== (nSet?.pluginUpdateMode ?? '')) return false;
   if (pSet?.autoUpdatePlugin !== nSet?.autoUpdatePlugin) return false;
   if (
-    normalizeClientWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
-    normalizeClientWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
+    normalizeWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
+    normalizeWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
   ) {
     return false;
   }
@@ -6500,27 +6658,27 @@ async function saveSettingsPatch(patch) {
     safePatch.showStepSpeedColor = Boolean(safePatch.showStepSpeedColor);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
-    safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
+    safePatch.topbarCapsuleSlots = normalizeTopbarCapsuleSlots(safePatch.topbarCapsuleSlots);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'hoverModules')) {
-    safePatch.hoverModules = normalizeClientHoverModules(safePatch.hoverModules);
+    safePatch.hoverModules = normalizeHoverModules(safePatch.hoverModules);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewModules')) {
-    safePatch.overviewModules = normalizeClientOverviewModules(safePatch.overviewModules);
+    safePatch.overviewModules = normalizeOverviewModules(safePatch.overviewModules);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewMetrics')) {
-    safePatch.overviewMetrics = normalizeClientOverviewMetrics(safePatch.overviewMetrics);
+    safePatch.overviewMetrics = normalizeOverviewMetrics(safePatch.overviewMetrics);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
-    safePatch.stepTableColumns = normalizeClientStepColumns(safePatch.stepTableColumns);
+    safePatch.stepTableColumns = normalizeStepTableColumns(safePatch.stepTableColumns);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTokenComboFormat')) {
-    safePatch.stepTokenComboFormat = normalizeClientStepTokenComboFormat(
+    safePatch.stepTokenComboFormat = normalizeStepTokenComboFormat(
       safePatch.stepTokenComboFormat
     );
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'modelDisplayMode')) {
-    const normDisp = normalizeClientModelDisplayMode(
+    const normDisp = normalizeModelDisplayMode(
       safePatch.modelDisplayMode,
       safePatch.showUpstreamModel
     );
@@ -6531,16 +6689,16 @@ async function saveSettingsPatch(patch) {
     safePatch.modelDisplayMode = safePatch.showUpstreamModel ? 'upstream' : 'short';
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidthMode')) {
-    safePatch.popoverWidthMode = normalizeClientPopoverWidthMode(safePatch.popoverWidthMode);
+    safePatch.popoverWidthMode = normalizePopoverWidthMode(safePatch.popoverWidthMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
-    safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
+    safePatch.popoverWidth = normalizePopoverWidth(safePatch.popoverWidth);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'contextWindowRiskAccepted')) {
     safePatch.contextWindowRiskAccepted = Boolean(safePatch.contextWindowRiskAccepted);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
-    safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
+    safePatch.orchestratorIdMode = normalizeOrchestratorIdMode(safePatch.orchestratorIdMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'standalonePort')) {
     const numPort = Number(safePatch.standalonePort);
@@ -6548,7 +6706,7 @@ async function saveSettingsPatch(patch) {
       Number.isInteger(numPort) && numPort >= 1024 && numPort <= 65535 ? numPort : 0;
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'windowMountMode')) {
-    const normMount = normalizeClientWindowMountMode(
+    const normMount = normalizeWindowMountMode(
       safePatch.windowMountMode,
       safePatch.enableWindowOverlay
     );
@@ -6723,43 +6881,6 @@ async function rebuildTrajectoryCache() {
   const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
   clearConsumptionRangeCache();
   clearConversationViewCache();
-  await fetchTelemetry({ force: true });
-  return res;
-}
-
-async function triggerCloudSync() {
-  const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
-  clearConsumptionRangeCache();
-  clearConversationViewCache();
-  await fetchTelemetry({ force: true });
-  return res;
-}
-
-async function triggerBridgeHostRelaunch() {
-  try {
-    return await callSidecarApi('/api/bridge/relaunch', { method: 'POST', body: {} });
-  } catch {
-    // 兼容热更新后常驻父进程 main.mjs 尚未重注册新路由的场景，平滑回退至既有 POST /api/settings 通道转发至最新 Worker
-    return callSidecarApi('/api/settings', {
-      method: 'POST',
-      body: { __bridgeAction: 'relaunch' },
-    });
-  }
-}
-
-async function triggerPluginUpdate() {
-  const res = await callSidecarApi('/api/plugin-update', { method: 'POST', body: {} });
-  if (res?.ok && res?.restarting) {
-    await new Promise((r) => setTimeout(r, 1100));
-    if (
-      !isWindowOverlayMode() &&
-      typeof window !== 'undefined' &&
-      typeof window.location?.reload === 'function'
-    ) {
-      window.location.reload();
-      return res;
-    }
-  }
   await fetchTelemetry({ force: true });
   return res;
 }
@@ -7004,7 +7125,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, resetTelemetryForEndpointSwitch, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, isEquivalentTelemetry, resetTelemetryForEndpointSwitch, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -12808,7 +12929,7 @@ const MetricMatrixWidget = defineComponent({
 
     function update({ data } = {}) {
       patchAttr(matrixEl, 'aria-label', t('module.metrics'));
-      const metricKeys = normalizeClientOverviewMetrics(data?.settings?.overviewMetrics);
+      const metricKeys = normalizeOverviewMetrics(data?.settings?.overviewMetrics);
       const colCount = Math.max(1, Math.min(4, metricKeys.length));
       patchAttr(matrixEl, 'data-cols', String(colCount));
       patchStyleVar(matrixEl, '--matrix-cols', String(colCount));
@@ -15069,9 +15190,6 @@ const { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeader
 
 const STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
 const DEFAULT_STEP_COLUMN_KEYS = DEFAULT_STEP_TABLE_COLUMNS;
-const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
-const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
-const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
 
 function resolveStepTokenParts(st) {
   const inTok = Math.max(0, Number(st?.inputTokens || 0));
@@ -15096,7 +15214,7 @@ function formatPartWithOptionalCost(tokCount, costVal) {
 }
 
 function formatCustomTokenComboHeader(rawFormat) {
-  const segs = parseClientStepTokenComboSegments(rawFormat);
+  const segs = parseStepTokenComboSegments(rawFormat);
   return segs.map((seg) => t(`steps.tokSeg.${seg}.th`)).join(' / ');
 }
 
@@ -15358,14 +15476,14 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
         fmt: formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
       }),
     sigPart: (st, ctx) =>
-      `${normalizeClientStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
+      `${normalizeStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
     createCell: () => {
       const valEl = h('span');
       const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st, ctx) => {
-      const segs = parseClientStepTokenComboSegments(ctx?.stepTokenComboFormat);
+      const segs = parseStepTokenComboSegments(ctx?.stepTokenComboFormat);
       const parts = resolveStepTokenParts(st);
       const rendered = segs.map((seg) => resolveSegmentDisplay(seg, parts, st));
       patchText(
@@ -15470,7 +15588,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
 });
 
 function getStepColumnOptions(
-  stepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT
+  stepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT
 ) {
   const ctx = { stepTokenComboFormat };
   return STEP_COLUMN_KEYS.map((key) => ({
@@ -15976,12 +16094,12 @@ const CapsuleBarWidget = defineComponent({
 
     function update({ data } = {}) {
       const settings = data?.settings || {};
-      const mountMode = normalizeClientWindowMountMode(
+      const mountMode = normalizeWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
       const showMulti = settings.showTopbarMultiSession !== false;
-      const slotKeys = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
+      const slotKeys = normalizeTopbarCapsuleSlots(settings.topbarCapsuleSlots);
 
       const isComposer = mountMode === 'composer';
       const isSidebar = mountMode === 'sidebar';
@@ -16417,7 +16535,7 @@ const StepTableWidget = defineComponent({
 
     function syncTableHeaderColumns(colKeys, headerCtx = {}) {
       const locale = getEffectiveLocale();
-      const fmtKey = normalizeClientStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
+      const fmtKey = normalizeStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
       const ctx = { stepTokenComboFormat: fmtKey };
       patchKeyedList(stepsTheadRow, colKeys, {
         keyFn: (colKey) => colKey,
@@ -17496,7 +17614,7 @@ const StepTableWidget = defineComponent({
       }
 
       const colOrderSig = colKeys.join(',');
-      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
+      const normTokenFmt = normalizeStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
         showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,
@@ -18895,8 +19013,6 @@ const BridgeStatusNotice = defineComponent({
     let dismissed = false;
     let copied = false;
     let copiedTimer = null;
-    let relaunchState = 'idle'; // 'idle' | 'relaunching' | 'failed'
-    let relaunchResetTimer = null;
     let destroyed = false;
 
     const headIconEl = createSvgIcon('warning', { size: 13, className: 'settings-bridge-icon' });
@@ -18920,64 +19036,6 @@ const BridgeStatusNotice = defineComponent({
           [createSvgIcon('close', { size: 11 })]
         )
       : null;
-
-    const relaunchBtnIconEl = createSvgIcon('refresh', { size: 11 });
-    const relaunchBtnTextEl = h('span', {
-      className: 'settings-bridge-relaunch-text',
-      text: t('settings.bridge.relaunchBtn'),
-    });
-    const relaunchBtnEl = h(
-      'button',
-      {
-        type: 'button',
-        className: 'settings-bridge-relaunch-btn',
-        onClick: async () => {
-          if (relaunchState === 'relaunching' || destroyed) return;
-          relaunchState = 'relaunching';
-          if (relaunchResetTimer) {
-            clearTimeout(relaunchResetTimer);
-            relaunchResetTimer = null;
-          }
-          syncActionButtons();
-          try {
-            const res = await triggerBridgeHostRelaunch();
-            if (destroyed) return;
-            if (!res || res.ok === false) {
-              relaunchState = 'failed';
-              syncActionButtons();
-              relaunchResetTimer = setTimeout(() => {
-                relaunchResetTimer = null;
-                if (destroyed) return;
-                relaunchState = 'idle';
-                syncActionButtons();
-              }, 3500);
-              relaunchResetTimer?.unref?.();
-              return;
-            }
-            // Reset button if host is still open after 9s (e.g. cancelled close prompt)
-            relaunchResetTimer = setTimeout(() => {
-              relaunchResetTimer = null;
-              if (destroyed) return;
-              relaunchState = 'idle';
-              syncActionButtons();
-            }, 9000);
-            relaunchResetTimer?.unref?.();
-          } catch {
-            if (destroyed) return;
-            relaunchState = 'failed';
-            syncActionButtons();
-            relaunchResetTimer = setTimeout(() => {
-              relaunchResetTimer = null;
-              if (destroyed) return;
-              relaunchState = 'idle';
-              syncActionButtons();
-            }, 3500);
-            relaunchResetTimer?.unref?.();
-          }
-        },
-      },
-      [relaunchBtnIconEl, relaunchBtnTextEl]
-    );
 
     const copyBtnIconEl = createSvgIcon('copy', { size: 11 });
     const copyBtnTextEl = h('span', {
@@ -19014,7 +19072,6 @@ const BridgeStatusNotice = defineComponent({
       dismissBtnEl ? [headLeftEl, dismissBtnEl] : [headLeftEl]
     );
     const actionsRowEl = h('div', { className: 'settings-bridge-actions' }, [
-      relaunchBtnEl,
       copyBtnEl,
     ]);
 
@@ -19029,21 +19086,6 @@ const BridgeStatusNotice = defineComponent({
     );
 
     function syncActionButtons() {
-      const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
-      const needsAuth = Boolean(lastPayload.windowBridge?.hasReadOnlyShortcuts);
-      patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
-      patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
-      patchText(
-        relaunchBtnTextEl,
-        relaunchState === 'relaunching'
-          ? t('settings.bridge.relaunchingBtn')
-          : relaunchState === 'failed'
-            ? t('settings.bridge.relaunchFailed')
-            : needsAuth
-              ? t('settings.bridge.relaunchAuthBtn')
-              : t('settings.bridge.relaunchBtn')
-      );
-
       patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
       patchText(
         copyBtnTextEl,
@@ -19136,10 +19178,6 @@ const BridgeStatusNotice = defineComponent({
         clearTimeout(copiedTimer);
         copiedTimer = null;
       }
-      if (relaunchResetTimer) {
-        clearTimeout(relaunchResetTimer);
-        relaunchResetTimer = null;
-      }
     });
 
     return {
@@ -19147,7 +19185,6 @@ const BridgeStatusNotice = defineComponent({
       refs: {
         update,
         refreshLabels: render,
-        relaunchBtnEl,
         copyBtnEl,
         dismissBtnEl,
       },
@@ -19429,7 +19466,7 @@ const SettingsGeneralTab = defineComponent({
       icon: 'refresh',
       options: getUpdateModeOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientUpdateMode(val);
+        const nextMode = normalizePluginUpdateMode(val);
         draftPluginUpdateMode = nextMode;
         autoUpdateSelect.setValue(nextMode);
         if (latestCloudStatus) {
@@ -19455,88 +19492,6 @@ const SettingsGeneralTab = defineComponent({
     const versionVal = h('strong', { className: 'cell-value', text: 'v1.4.4' });
     const versionSub = h('span', { className: 'cell-sub', text: t('settings.gen.checkingBtn') });
 
-    const syncPricingBtnText = h('span', { text: t('settings.gen.syncBtn') });
-    const syncPricingBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'btn-secondary',
-        onClick: async () => {
-          patchAttr(syncPricingBtn, 'disabled', true);
-          patchText(syncPricingBtnText, t('settings.gen.syncingBtn'));
-          showCloudFeedback(t('settings.gen.syncingMsg'), 0);
-          try {
-            const res = await triggerCloudSync();
-            const cs = res?.cloudStatus;
-            if (res?.ok && cs) {
-              showCloudFeedback(t('settings.gen.syncedMsg', { count: cs.modelCount }), 3500);
-            } else {
-              showCloudFeedback(cs?.lastSyncError || t('settings.gen.syncFallbackMsg'), 4500);
-            }
-          } catch (err) {
-            showCloudFeedback(err?.message || t('settings.gen.syncFallbackMsg'), 4500);
-          } finally {
-            patchAttr(syncPricingBtn, 'disabled', false);
-            patchText(syncPricingBtnText, t('settings.gen.syncBtn'));
-          }
-        },
-      },
-      [createSvgIcon('refresh', { size: 12 }), syncPricingBtnText]
-    );
-
-    const updatePluginBtnText = h('span', { text: t('settings.gen.checkUpdateBtn') });
-    const updatePluginBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'btn-secondary',
-        onClick: async () => {
-          patchAttr(updatePluginBtn, 'disabled', true);
-          try {
-            if (!latestCloudStatus?.updateAvailable) {
-              patchText(updatePluginBtnText, t('settings.gen.checkingBtn'));
-              showCloudFeedback(t('settings.gen.checkingMsg'), 0);
-              const syncRes = await triggerCloudSync();
-              const cs = syncRes?.cloudStatus || latestCloudStatus;
-              if (cs) {
-                latestCloudStatus = cs;
-                renderCloudStatus(cs);
-              }
-              if (!syncRes?.ok && cs?.lastSyncError) {
-                showCloudFeedback(
-                  t('settings.gen.checkFailedMsg', { err: cs.lastSyncError }),
-                  5000
-                );
-                return;
-              }
-              if (!cs?.updateAvailable) {
-                const curVer = cs?.currentPluginVersion || '1.4.4';
-                showCloudFeedback(t('settings.gen.upToDateMsg', { ver: curVer }), 4500);
-                return;
-              }
-            }
-            patchText(updatePluginBtnText, t('capsule.updating'));
-            showCloudFeedback(t('settings.gen.downloadingMsg'), 0);
-            const res = await triggerPluginUpdate();
-            if (res?.cloudStatus) {
-              latestCloudStatus = res.cloudStatus;
-            }
-            if (res?.ok) {
-              showCloudFeedback(res.message || t('settings.gen.updatedRestartMsg'), 5000);
-            } else {
-              showCloudFeedback(res?.message || t('settings.gen.updateSkippedMsg'), 5500);
-            }
-          } catch (err) {
-            showCloudFeedback(err?.message || t('settings.gen.updateFailedMsg'), 5000);
-          } finally {
-            patchAttr(updatePluginBtn, 'disabled', false);
-            renderCloudStatus(latestCloudStatus);
-          }
-        },
-      },
-      [createSvgIcon('arrow-down', { size: 12 }), updatePluginBtnText]
-    );
-
     const cloudPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
@@ -19554,7 +19509,6 @@ const SettingsGeneralTab = defineComponent({
         ]),
         h('div', { className: 'matrix-cell' }, [versionCellLabelEl, versionVal, versionSub]),
       ]),
-      h('div', { className: 'cloud-actions-row' }, [syncPricingBtn, updatePluginBtn]),
     ]);
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [appearancePanel, cloudPanel]);
@@ -19566,7 +19520,7 @@ const SettingsGeneralTab = defineComponent({
       draftThemeAccent = normalizeClientThemeAccent(settings.themeAccent);
       draftFontScale = normalizeClientFontScale(settings.fontScale);
       draftModernUi = resolveSettingsModernUi(settings);
-      draftPluginUpdateMode = normalizeClientUpdateMode(
+      draftPluginUpdateMode = normalizePluginUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
       );
@@ -19606,36 +19560,14 @@ const SettingsGeneralTab = defineComponent({
       );
 
       const curVer = cs.currentPluginVersion || '1.4.4';
-      const latVer = cs.latestPluginVersion || curVer;
       const modeTag = cs.installMode === 'git' ? 'Git' : 'ZIP';
       patchText(versionVal, `v${curVer}`);
-      if (cs.updateAvailable && draftPluginUpdateMode !== 'off') {
-        patchText(versionSub, t('settings.gen.canUpgradeSub', { ver: latVer, mode: modeTag }));
-        patchClasses(versionSub, { 'accent-ok': true });
-        patchText(updatePluginBtnText, t('settings.gen.upgradeToBtn', { ver: latVer }));
-        patchClasses(updatePluginBtn, { 'btn-primary': true, 'btn-secondary': false });
-      } else if (draftPluginUpdateMode === 'off') {
+      if (draftPluginUpdateMode === 'off') {
         patchText(versionSub, t('settings.gen.updateOffSub', { mode: modeTag }));
         patchClasses(versionSub, { 'accent-ok': false });
-        patchText(
-          updatePluginBtnText,
-          cs.updateAvailable
-            ? t('settings.gen.manualUpgradeBtn', { ver: latVer })
-            : t('settings.gen.checkUpdateBtn')
-        );
-        patchClasses(updatePluginBtn, { 'btn-primary': false, 'btn-secondary': true });
       } else {
         patchText(versionSub, t('settings.gen.latestSub', { mode: modeTag }));
         patchClasses(versionSub, { 'accent-ok': false });
-        patchText(updatePluginBtnText, t('settings.gen.checkUpdateBtn'));
-        patchClasses(updatePluginBtn, { 'btn-primary': false, 'btn-secondary': true });
-      }
-
-      if (
-        !cloudTimer &&
-        (cs.lastUpdateError || (cs.lastUpdateResult?.ok === false && cs.lastUpdateResult?.message))
-      ) {
-        showCloudFeedback(cs.lastUpdateError || cs.lastUpdateResult.message, 5500);
       }
     }
 
@@ -19651,9 +19583,6 @@ const SettingsGeneralTab = defineComponent({
       patchText(updateModeLabelEl, t('settings.gen.updateMode'));
       patchText(pricingCellLabelEl, t('settings.gen.pricingLabel'));
       patchText(versionCellLabelEl, t('settings.gen.versionLabel'));
-      if (!syncPricingBtn.hasAttribute('disabled')) {
-        patchText(syncPricingBtnText, t('settings.gen.syncBtn'));
-      }
       languageSwitch.setProps({
         modelValue: draftLanguage,
         options: getLanguageOptions(),
@@ -19697,8 +19626,6 @@ const SettingsGeneralTab = defineComponent({
         fontScaleSwitch,
         modernUiSwitch,
         autoUpdateSelect,
-        syncPricingBtn,
-        updatePluginBtn,
         renderSettings,
         renderCloudStatus,
         refreshLabels,
@@ -19775,20 +19702,20 @@ const SettingsStructureTab = defineComponent({
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
     let draftPopoverWidthMode = 'auto';
-    let draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
+    let draftPopoverWidth = DEFAULT_POPOVER_WIDTH;
     let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
-    let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
-    let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
-    let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
-    let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+    let draftTopbarSlots = [...DEFAULT_TOPBAR_SLOTS];
+    let draftHoverModules = [...DEFAULT_HOVER_MODULES];
+    let draftOverviewModules = [...DEFAULT_OVERVIEW_MODULES];
+    let draftOverviewMetrics = [...DEFAULT_OVERVIEW_METRICS];
     let draftShowQuotaPace = true;
     let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
     let draftShowStepSpeedColor = false;
-    let draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-    let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-    let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
+    let draftStepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+    let rawStepTokenComboText = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+    let draftStepColumns = [...DEFAULT_STEP_TABLE_COLUMNS];
     let latestSettings = null;
     let latestWindowBridge = null;
     let latestHostPlatform = 'win32';
@@ -19935,7 +19862,7 @@ const SettingsStructureTab = defineComponent({
       icon: 'dock',
       options: getMountModeOptions(),
       onUpdateModelValue: (val) => {
-        const nextMode = normalizeClientWindowMountMode(val);
+        const nextMode = normalizeWindowMountMode(val);
         draftWindowMountMode = nextMode;
         syncMountSectionMeta();
         props.onLayoutChange?.();
@@ -19948,12 +19875,12 @@ const SettingsStructureTab = defineComponent({
 
     const popoverWidthStepper = CustomNumberInput({
       modelValue: draftPopoverWidth,
-      min: MIN_CLIENT_POPOVER_WIDTH,
-      max: MAX_CLIENT_POPOVER_WIDTH,
+      min: MIN_POPOVER_WIDTH,
+      max: MAX_POPOVER_WIDTH,
       step: 10,
       ariaLabel: t('settings.str.popoverWidthLabel'),
       onUpdateModelValue: (val) => {
-        const nextWidth = normalizeClientPopoverWidth(val);
+        const nextWidth = normalizePopoverWidth(val);
         draftPopoverWidth = nextWidth;
         syncMountSectionMeta();
         props.onLayoutChange?.();
@@ -19975,7 +19902,7 @@ const SettingsStructureTab = defineComponent({
       modelValue: draftPopoverWidthMode,
       options: getPopoverWidthModeOptions(),
       onUpdateModelValue: (val) => {
-        draftPopoverWidthMode = normalizeClientPopoverWidthMode(val);
+        draftPopoverWidthMode = normalizePopoverWidthMode(val);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -20018,11 +19945,11 @@ const SettingsStructureTab = defineComponent({
       maxItems: 5,
       addBtnTextFn: (count, max) => t('settings.str.addCapsuleSlot', { count, max }),
       onPreview: (previewItems) => {
-        draftTopbarSlots = normalizeClientTopbarSlots(previewItems);
+        draftTopbarSlots = normalizeTopbarCapsuleSlots(previewItems);
         refreshMountPreview();
       },
       onChange: (nextItems) => {
-        draftTopbarSlots = normalizeClientTopbarSlots(nextItems);
+        draftTopbarSlots = normalizeTopbarCapsuleSlots(nextItems);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -20041,11 +19968,11 @@ const SettingsStructureTab = defineComponent({
       onReset: () => {
         draftWindowMountMode = 'dual';
         draftPopoverWidthMode = 'auto';
-        draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
-        popoverWidthStepper.setProps({ modelValue: DEFAULT_CLIENT_POPOVER_WIDTH });
+        draftPopoverWidth = DEFAULT_POPOVER_WIDTH;
+        popoverWidthStepper.setProps({ modelValue: DEFAULT_POPOVER_WIDTH });
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
-        draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
+        draftTopbarSlots = [...DEFAULT_TOPBAR_SLOTS];
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
@@ -20054,10 +19981,10 @@ const SettingsStructureTab = defineComponent({
             windowMountMode: 'dual',
             enableWindowOverlay: true,
             popoverWidthMode: 'auto',
-            popoverWidth: DEFAULT_CLIENT_POPOVER_WIDTH,
+            popoverWidth: DEFAULT_POPOVER_WIDTH,
             enableCliStatusLine: true,
             showTopbarMultiSession: true,
-            topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
+            topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
           },
           'settings.resetDone'
         );
@@ -20134,10 +20061,10 @@ const SettingsStructureTab = defineComponent({
       const isDefault =
         draftWindowMountMode === 'dual' &&
         draftPopoverWidthMode === 'auto' &&
-        draftPopoverWidth === DEFAULT_CLIENT_POPOVER_WIDTH &&
+        draftPopoverWidth === DEFAULT_POPOVER_WIDTH &&
         draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
-        isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
+        isSameList(draftTopbarSlots, DEFAULT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
       refreshMountPreview();
     }
@@ -20177,11 +20104,11 @@ const SettingsStructureTab = defineComponent({
       emptyHintText: t('settings.str.hoverEmptyHint'),
       addBtnTextFn: (count, max) => t('settings.str.addHoverModule', { count, max }),
       onPreview: (previewItems) => {
-        draftHoverModules = normalizeClientHoverModules(previewItems);
+        draftHoverModules = normalizeHoverModules(previewItems);
         refreshHoverPreview();
       },
       onChange: (nextItems) => {
-        draftHoverModules = normalizeClientHoverModules(nextItems);
+        draftHoverModules = normalizeHoverModules(nextItems);
         syncHoverSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(hoverSection, {
@@ -20196,12 +20123,12 @@ const SettingsStructureTab = defineComponent({
       title: t('settings.str.hoverSection'),
       badgeText: t('settings.str.hoverBadgeCount', { count: draftHoverModules.length }),
       onReset: () => {
-        draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
+        draftHoverModules = [...DEFAULT_HOVER_MODULES];
         syncHoverSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           hoverSection,
-          { hoverModules: [...DEFAULT_CLIENT_HOVER_MODULES] },
+          { hoverModules: [...DEFAULT_HOVER_MODULES] },
           'settings.resetDone'
         );
       },
@@ -20237,7 +20164,7 @@ const SettingsStructureTab = defineComponent({
           : t('settings.str.hoverBadgeCount', { count: draftHoverModules.length })
       );
       hoverSection.refs.setResetDisabled(
-        isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES)
+        isSameList(draftHoverModules, DEFAULT_HOVER_MODULES)
       );
       refreshHoverPreview();
     }
@@ -20297,12 +20224,12 @@ const SettingsStructureTab = defineComponent({
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewModule', { count, max }),
       onPreview: (previewItems) => {
-        draftOverviewModules = normalizeClientOverviewModules(previewItems);
+        draftOverviewModules = normalizeOverviewModules(previewItems);
         patchAttr(overviewMetricsHintEl, 'hidden', draftOverviewModules.includes('metrics'));
         refreshOverviewPreview();
       },
       onChange: (nextItems) => {
-        draftOverviewModules = normalizeClientOverviewModules(nextItems);
+        draftOverviewModules = normalizeOverviewModules(nextItems);
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(overviewSection, {
@@ -20318,11 +20245,11 @@ const SettingsStructureTab = defineComponent({
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewMetric', { count, max }),
       onPreview: (previewItems) => {
-        draftOverviewMetrics = normalizeClientOverviewMetrics(previewItems);
+        draftOverviewMetrics = normalizeOverviewMetrics(previewItems);
         refreshOverviewPreview();
       },
       onChange: (nextItems) => {
-        draftOverviewMetrics = normalizeClientOverviewMetrics(nextItems);
+        draftOverviewMetrics = normalizeOverviewMetrics(nextItems);
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(overviewSection, {
@@ -20340,16 +20267,16 @@ const SettingsStructureTab = defineComponent({
         metCount: draftOverviewMetrics.length,
       }),
       onReset: () => {
-        draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
-        draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+        draftOverviewModules = [...DEFAULT_OVERVIEW_MODULES];
+        draftOverviewMetrics = [...DEFAULT_OVERVIEW_METRICS];
         draftShowQuotaPace = true;
         syncOverviewSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           overviewSection,
           {
-            overviewModules: [...DEFAULT_CLIENT_OVERVIEW_MODULES],
-            overviewMetrics: [...DEFAULT_CLIENT_OVERVIEW_METRICS],
+            overviewModules: [...DEFAULT_OVERVIEW_MODULES],
+            overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
             showQuotaPace: true,
           },
           'settings.resetDone'
@@ -20406,8 +20333,8 @@ const SettingsStructureTab = defineComponent({
         })
       );
       const isDefault =
-        isSameList(draftOverviewModules, DEFAULT_CLIENT_OVERVIEW_MODULES) &&
-        isSameList(draftOverviewMetrics, DEFAULT_CLIENT_OVERVIEW_METRICS) &&
+        isSameList(draftOverviewModules, DEFAULT_OVERVIEW_MODULES) &&
+        isSameList(draftOverviewMetrics, DEFAULT_OVERVIEW_METRICS) &&
         draftShowQuotaPace === true;
       overviewSection.refs.setResetDisabled(isDefault);
       refreshOverviewPreview();
@@ -20488,7 +20415,7 @@ const SettingsStructureTab = defineComponent({
 
     function commitStepTokenComboInput() {
       const rawTrimmed = String(stepTokenComboInput.value || '').trim();
-      const normFmt = normalizeClientStepTokenComboFormat(rawTrimmed);
+      const normFmt = normalizeStepTokenComboFormat(rawTrimmed);
       rawStepTokenComboText = normFmt;
       draftStepTokenComboFormat = normFmt;
       stepTokenComboInput.value = normFmt;
@@ -20499,9 +20426,9 @@ const SettingsStructureTab = defineComponent({
         if (comboIdx >= 0) {
           const nextCols = [...draftStepColumns];
           nextCols[comboIdx] = 'tokens_custom';
-          draftStepColumns = normalizeClientStepColumns(nextCols);
+          draftStepColumns = normalizeStepTableColumns(nextCols);
         } else {
-          draftStepColumns = normalizeClientStepColumns([...draftStepColumns, 'tokens_custom']);
+          draftStepColumns = normalizeStepTableColumns([...draftStepColumns, 'tokens_custom']);
         }
       }
       syncStepsSectionMeta();
@@ -20521,7 +20448,7 @@ const SettingsStructureTab = defineComponent({
       'aria-label': t('settings.str.stepTokenComboLabel'),
       onInput: () => {
         rawStepTokenComboText = stepTokenComboInput.value;
-        draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(rawStepTokenComboText);
+        draftStepTokenComboFormat = normalizeStepTokenComboFormat(rawStepTokenComboText);
         stepColumnsList.refs.setProps({
           items: draftStepColumns,
           options: getStepColumnOptions(draftStepTokenComboFormat),
@@ -20547,11 +20474,11 @@ const SettingsStructureTab = defineComponent({
       maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
-        draftStepColumns = normalizeClientStepColumns(previewItems);
+        draftStepColumns = normalizeStepTableColumns(previewItems);
         refreshStepsPreview();
       },
       onChange: (nextItems) => {
-        draftStepColumns = normalizeClientStepColumns(nextItems);
+        draftStepColumns = normalizeStepTableColumns(nextItems);
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(stepsSection, {
@@ -20569,10 +20496,10 @@ const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
         draftShowStepSpeedColor = false;
-        draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        stepTokenComboInput.value = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
-        draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
+        draftStepTokenComboFormat = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        rawStepTokenComboText = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        stepTokenComboInput.value = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+        draftStepColumns = [...DEFAULT_STEP_TABLE_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
@@ -20581,8 +20508,8 @@ const SettingsStructureTab = defineComponent({
             showStepTurnRail: false,
             showStepAgentBadge: true,
             showStepSpeedColor: false,
-            stepTokenComboFormat: DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
-            stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
+            stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+            stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
           },
           'settings.resetDone'
         );
@@ -20620,7 +20547,7 @@ const SettingsStructureTab = defineComponent({
         document?.activeElement === stepTokenComboInput &&
         String(rawStepTokenComboText || '').trim() &&
         !draftStepColumns.includes('tokens_custom')
-          ? normalizeClientStepColumns(
+          ? normalizeStepTableColumns(
               draftStepColumns.some((k) => k === 'tokens_combo' || k === 'tokens_io_cache')
                 ? draftStepColumns.map((k) =>
                     k === 'tokens_combo' || k === 'tokens_io_cache' ? 'tokens_custom' : k
@@ -20672,8 +20599,8 @@ const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
         draftShowStepSpeedColor === false &&
-        draftStepTokenComboFormat === DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT &&
-        isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
+        draftStepTokenComboFormat === DEFAULT_STEP_TOKEN_COMBO_FORMAT &&
+        isSameList(draftStepColumns, DEFAULT_STEP_TABLE_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
     }
@@ -20741,27 +20668,27 @@ const SettingsStructureTab = defineComponent({
       latestSettings = settings;
       if (windowBridge !== undefined) latestWindowBridge = windowBridge;
       if (hostPlatform) latestHostPlatform = hostPlatform;
-      draftWindowMountMode = normalizeClientWindowMountMode(
+      draftWindowMountMode = normalizeWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
-      draftPopoverWidthMode = normalizeClientPopoverWidthMode(settings.popoverWidthMode);
-      draftPopoverWidth = normalizeClientPopoverWidth(settings.popoverWidth);
+      draftPopoverWidthMode = normalizePopoverWidthMode(settings.popoverWidthMode);
+      draftPopoverWidth = normalizePopoverWidth(settings.popoverWidth);
       draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
-      draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
-      draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
-      draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
-      draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
+      draftTopbarSlots = normalizeTopbarCapsuleSlots(settings.topbarCapsuleSlots);
+      draftHoverModules = normalizeHoverModules(settings.hoverModules);
+      draftOverviewModules = normalizeOverviewModules(settings.overviewModules);
+      draftOverviewMetrics = normalizeOverviewMetrics(settings.overviewMetrics);
       draftShowQuotaPace = settings.showQuotaPace !== false;
       draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftShowStepSpeedColor = settings.showStepSpeedColor === true;
-      draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(
+      draftStepTokenComboFormat = normalizeStepTokenComboFormat(
         settings.stepTokenComboFormat
       );
       rawStepTokenComboText = draftStepTokenComboFormat;
-      draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
+      draftStepColumns = normalizeStepTableColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
       syncHoverSectionMeta();
@@ -21005,7 +20932,7 @@ const SettingsOtherTab = defineComponent({
       icon: 'table',
       options: getStepModelDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientModelDisplayMode(val);
+        const nextMode = normalizeModelDisplayMode(val);
         draftModelDisplayMode = nextMode;
         stepModelSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
@@ -21027,7 +20954,7 @@ const SettingsOtherTab = defineComponent({
       icon: 'layers',
       options: getOrchestratorIdDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextMode = normalizeClientOrchestratorIdMode(val);
+        const nextMode = normalizeOrchestratorIdMode(val);
         draftOrchestratorIdMode = nextMode;
         orchestratorIdSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
@@ -21402,11 +21329,11 @@ const SettingsOtherTab = defineComponent({
       contextWindowModels = models;
       if (windowBridge !== undefined) latestWindowBridge = windowBridge;
       if (hostPlatform) latestHostPlatform = hostPlatform;
-      draftModelDisplayMode = normalizeClientModelDisplayMode(
+      draftModelDisplayMode = normalizeModelDisplayMode(
         settings.modelDisplayMode,
         settings.showUpstreamModel
       );
-      draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
+      draftOrchestratorIdMode = normalizeOrchestratorIdMode(settings.orchestratorIdMode);
       if (!acceptingContextRisk) {
         draftContextRiskAccepted = Boolean(settings.contextWindowRiskAccepted);
       }
@@ -21509,44 +21436,6 @@ const TopSessionHeader = defineComponent({
       },
     });
 
-    const updateBtnIcon = createSvgIcon('arrow-down', { size: 11 });
-    const updateBtnText = h('span', { text: t('header.hasUpdate') });
-    let isHeaderUpdating = false;
-    const updateBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'update-badge-btn',
-        hidden: true,
-        'aria-label': t('header.ariaUpdate'),
-        onClick: async () => {
-          if (isHeaderUpdating) return;
-          isHeaderUpdating = true;
-          patchText(updateBtnText, t('header.upgrading'));
-          patchAttr(updateBtn, 'disabled', true);
-          try {
-            const res = await triggerPluginUpdate();
-            if (!res?.ok) {
-              uiStore.setState({ activeView: 'settings' });
-            }
-          } catch {
-            uiStore.setState({ activeView: 'settings' });
-          } finally {
-            isHeaderUpdating = false;
-            patchAttr(updateBtn, 'disabled', false);
-            const cs = telemetryStore.getState().telemetry?.cloudStatus;
-            patchText(
-              updateBtnText,
-              cs?.latestPluginVersion
-                ? t('header.upgradeToVer', { ver: cs.latestPluginVersion })
-                : t('header.hasUpdate')
-            );
-          }
-        },
-      },
-      [updateBtnIcon, updateBtnText]
-    );
-
     const sshBadge = h('span', {
       className: 'endpoint-ssh-badge',
       hidden: true,
@@ -21570,7 +21459,7 @@ const TopSessionHeader = defineComponent({
 
     const headerRowEl = h('div', { className: 'session-header' }, [
       h('div', { className: 'session-left' }, [convSelect.el]),
-      h('div', { className: 'session-right' }, [sshBadge, updateBtn, statusTag, refreshBtn]),
+      h('div', { className: 'session-right' }, [sshBadge, statusTag, refreshBtn]),
     ]);
 
     const headerEl = h('header', { className: 'top-session-stack' }, [headerRowEl]);
@@ -21636,7 +21525,6 @@ const TopSessionHeader = defineComponent({
       const telemetry = telSt.telemetry;
       if (!uiSt.monitorVisible) return;
 
-      patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
       patchAttr(refreshBtn, 'aria-label', t('header.ariaRefresh'));
 
       const ep = telemetry?.endpoint;
@@ -21712,22 +21600,6 @@ const TopSessionHeader = defineComponent({
 
       const hasSubagents = Boolean(actConv?.hasSubagents || (actConv?.subagentCount || 0) > 0);
       const aggregated = actConv?.aggregated;
-
-      const cloudStatus = telemetry?.cloudStatus;
-      const updateMode = normalizeClientUpdateMode(
-        telemetry?.settings?.pluginUpdateMode,
-        telemetry?.settings?.autoUpdatePlugin
-      );
-      const showUpdate = Boolean(cloudStatus?.updateAvailable) && updateMode !== 'off';
-      patchAttr(updateBtn, 'hidden', !showUpdate);
-      if (showUpdate && !isHeaderUpdating) {
-        patchText(
-          updateBtnText,
-          cloudStatus?.latestPluginVersion
-            ? t('header.upgradeToVer', { ver: cloudStatus.latestPluginVersion })
-            : t('header.hasUpdate')
-        );
-      }
 
       const isSyncing = telSt.syncState === 'syncing';
       const isSynced = telSt.syncState === 'synced';
@@ -21859,7 +21731,7 @@ const LiveOverviewView = defineComponent({
       containerEl: overviewInner,
       mode: 'overview',
       isVisibleFn: () => getVisibleMonitorView() === 'overview',
-      initialModuleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+      initialModuleKeys: DEFAULT_OVERVIEW_MODULES,
     });
 
     const viewScrollbar = CustomScrollbar({
@@ -21894,7 +21766,7 @@ const LiveOverviewView = defineComponent({
 
     function renderData(data) {
       if (!data) return;
-      const moduleKeys = normalizeClientOverviewModules(data.settings?.overviewModules);
+      const moduleKeys = normalizeOverviewModules(data.settings?.overviewModules);
       const minuteTick = Math.floor(Date.now() / 30000);
       widgetHost.update({
         moduleKeys,
@@ -21962,7 +21834,7 @@ const LiveOverviewView = defineComponent({
           // Refresh initial skeleton labels even before telemetry arrives
           if (!latestData) {
             widgetHost.update({
-              moduleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+              moduleKeys: DEFAULT_OVERVIEW_MODULES,
               data: null,
             });
           }
@@ -21972,7 +21844,7 @@ const LiveOverviewView = defineComponent({
           renderData(latestData);
         } else {
           widgetHost.update({
-            moduleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
+            moduleKeys: DEFAULT_OVERVIEW_MODULES,
             data: null,
           });
         }
@@ -23920,7 +23792,7 @@ const StepsDetailView = defineComponent({
         modelValue: selectedFitMetric,
         options: getFitMetricSwitchOptions(),
       });
-      const colKeys = normalizeClientStepColumns(latestSlice?.stepTableColumns);
+      const colKeys = normalizeStepTableColumns(latestSlice?.stepTableColumns);
       syncTableHeaderColumns(colKeys);
       if (!latestSlice) {
         subTabSwitch.setProps({
@@ -24187,7 +24059,7 @@ const StepsDetailView = defineComponent({
         allowNewRowFade && slice.experimentalModernUi && !showModels
       );
       if (!showModels) {
-        const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
+        const colKeys = normalizeStepTableColumns(slice.stepTableColumns);
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
           effectiveScopes,
           hasSubagents,
@@ -24747,7 +24619,7 @@ const StepsDetailView = defineComponent({
         showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
-        stepTokenComboFormat: normalizeClientStepTokenComboFormat(
+        stepTokenComboFormat: normalizeStepTokenComboFormat(
           st.telemetry?.settings?.stepTokenComboFormat
         ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
@@ -25094,7 +24966,7 @@ const App = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       const mountMode = settings
-        ? normalizeClientWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
+        ? normalizeWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
         : 'sidebar';
       const hasCtxOverrides = Boolean(
         settings?.modelContextWindows && Object.keys(settings.modelContextWindows).length > 0
@@ -26027,7 +25899,7 @@ function resolveActiveDockTarget(options = undefined) {
     readInjectedWindowBridge()?.mountMode;
   const mountMode =
     options?.mountMode ||
-    normalizeClientWindowMountMode(rawMode, settings?.enableWindowOverlay);
+    normalizeWindowMountMode(rawMode, settings?.enableWindowOverlay);
   if (isIdeExtensionChatFrame()) {
     if (mountMode !== 'composer') return null;
     return findHostComposerAutoTarget(
@@ -26384,34 +26256,10 @@ function mountWindowOverlay() {
       hidden: true,
       'aria-label': t('capsule.ariaUpdateTitle'),
       title: t('capsule.ariaUpdateTitle'),
-      onClick: async (e) => {
+      onClick: (e) => {
         e.stopPropagation();
-        if (isTopbarUpdating) return;
-        isTopbarUpdating = true;
-        patchClasses(topbarUpdateBtn, { 'is-updating': true });
-        patchSvgIcon(topbarUpdateIcon, 'refresh');
-        patchText(topbarUpdateLabel, t('capsule.updating'));
-        patchAttr(topbarUpdateBtn, 'disabled', true);
-        try {
-          const res = await triggerPluginUpdate();
-          if (!res?.ok) {
-            uiStore.setState({ activeView: 'settings' });
-            setPopoverOpen(true);
-          }
-        } catch {
-          uiStore.setState({ activeView: 'settings' });
-          setPopoverOpen(true);
-        } finally {
-          isTopbarUpdating = false;
-          patchClasses(topbarUpdateBtn, { 'is-updating': false });
-          patchSvgIcon(topbarUpdateIcon, 'arrow-down');
-          patchAttr(topbarUpdateBtn, 'disabled', false);
-          const cs = telemetryStore.getState().telemetry?.cloudStatus;
-          patchText(
-            topbarUpdateLabel,
-            cs?.latestPluginVersion ? `v${cs.latestPluginVersion}` : t('capsule.newVersion')
-          );
-        }
+        uiStore.setState({ activeView: 'settings' });
+        setPopoverOpen(true);
       },
       onMouseenter: (e) => {
         recordPointerCoords(e);
@@ -26559,7 +26407,7 @@ function mountWindowOverlay() {
     containerEl: hoverWidgetsContainer,
     mode: 'hover',
     isVisibleFn: () => Boolean(tooltipOpen && !disposed),
-    initialModuleKeys: DEFAULT_CLIENT_HOVER_MODULES,
+    initialModuleKeys: DEFAULT_HOVER_MODULES,
   });
 
   const hoverTipEl = h(
@@ -27096,11 +26944,11 @@ function mountWindowOverlay() {
 
       if (popoverOpen) {
         const maxPopCardW = Math.max(280, vw - minLeft - 12);
-        const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
+        const popWidthMode = normalizePopoverWidthMode(curSettings?.popoverWidthMode);
         let desiredPopW = Math.min(Math.round(POPOVER_BASE_WIDTH * panelScale), maxPopCardW);
         if (popWidthMode === 'custom') {
           desiredPopW = Math.min(
-            normalizeClientPopoverWidth(curSettings?.popoverWidth),
+            normalizePopoverWidth(curSettings?.popoverWidth),
             maxPopCardW
           );
         } else if (typeof popoverEl.querySelectorAll === 'function') {
@@ -27231,12 +27079,12 @@ function mountWindowOverlay() {
     const avail = measureAvailableTitlebarWidth(dockTarget);
     const curTel = telemetryStore.getState().telemetry;
     const showMulti = curTel?.settings?.showTopbarMultiSession !== false;
-    const curUpdateMode = normalizeClientUpdateMode(
+    const curUpdateMode = normalizePluginUpdateMode(
       curTel?.settings?.pluginUpdateMode,
       curTel?.settings?.autoUpdatePlugin
     );
     const hasUpdate = Boolean(curTel?.cloudStatus?.updateAvailable) && curUpdateMode !== 'off';
-    const slotCount = normalizeClientTopbarSlots(curTel?.settings?.topbarCapsuleSlots).length;
+    const slotCount = normalizeTopbarCapsuleSlots(curTel?.settings?.topbarCapsuleSlots).length;
     const nextMode = computeCapsuleLayoutMode(avail, layoutMode, {
       showMulti,
       hasUpdate,
@@ -27444,8 +27292,8 @@ function mountWindowOverlay() {
 
   function canOpenHoverTooltip() {
     const curTel = telemetryStore.getState().telemetry;
-    const hoverMods = normalizeClientHoverModules(curTel?.settings?.hoverModules);
-    const curUpdateMode = normalizeClientUpdateMode(
+    const hoverMods = normalizeHoverModules(curTel?.settings?.hoverModules);
+    const curUpdateMode = normalizePluginUpdateMode(
       curTel?.settings?.pluginUpdateMode,
       curTel?.settings?.autoUpdatePlugin
     );
@@ -27545,7 +27393,7 @@ function mountWindowOverlay() {
   function renderHoverWidgets() {
     const { telemetry, minuteTick } = telemetryStore.getState();
     hoverWidgetHost.update({
-      moduleKeys: normalizeClientHoverModules(telemetry?.settings?.hoverModules),
+      moduleKeys: normalizeHoverModules(telemetry?.settings?.hoverModules),
       data: telemetry,
       minuteTick: Number(minuteTick || Math.floor(Date.now() / 30000)),
     });
@@ -27569,7 +27417,7 @@ function mountWindowOverlay() {
       setMultiOpen(false);
     }
 
-    const slotKeys = normalizeClientTopbarSlots(telemetry?.settings?.topbarCapsuleSlots);
+    const slotKeys = normalizeTopbarCapsuleSlots(telemetry?.settings?.topbarCapsuleSlots);
     const layoutInputsChanged =
       showMulti !== lastShowMulti || slotKeys.length !== lastSlotCount;
     if (layoutInputsChanged) {
@@ -27633,7 +27481,7 @@ function mountWindowOverlay() {
     patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
     applyCapsuleSlots(slotKeys, slotCtx);
 
-    const updateMode = normalizeClientUpdateMode(
+    const updateMode = normalizePluginUpdateMode(
       telemetry.settings?.pluginUpdateMode,
       telemetry.settings?.autoUpdatePlugin
     );
@@ -27672,7 +27520,7 @@ function mountWindowOverlay() {
     }
 
     // --- 同步动态悬停组件宿主（0 项且无更新提示时自动关闭悬停窗，点击完整浮窗不受影响） ---
-    const hoverModuleKeys = normalizeClientHoverModules(telemetry.settings?.hoverModules);
+    const hoverModuleKeys = normalizeHoverModules(telemetry.settings?.hoverModules);
     patchAttr(hoverWidgetsContainer, 'hidden', hoverModuleKeys.length === 0);
     if (hoverModuleKeys.length === 0 && !showUpdatePrompt && tooltipOpen) {
       setTooltipOpen(false);
@@ -27683,7 +27531,7 @@ function mountWindowOverlay() {
     }
   }
 
-  let lastAppliedMountMode = normalizeClientWindowMountMode(
+  let lastAppliedMountMode = normalizeWindowMountMode(
     telemetryStore.getState().telemetry?.settings?.windowMountMode,
     telemetryStore.getState().telemetry?.settings?.enableWindowOverlay
   );
@@ -27696,7 +27544,7 @@ function mountWindowOverlay() {
       selectedConversationId: st.selectedConversationId,
     }),
     (slice) => {
-      const nextMountMode = normalizeClientWindowMountMode(
+      const nextMountMode = normalizeWindowMountMode(
         slice.telemetry?.settings?.windowMountMode,
         slice.telemetry?.settings?.enableWindowOverlay
       );
@@ -28017,7 +27865,7 @@ function mountWindowOverlay() {
     [WINDOW_OVERLAY_METHODS.getMountMode]: () => lastAppliedMountMode,
     [WINDOW_OVERLAY_METHODS.applyMountMode](nextMode) {
       if (disposed) return false;
-      const normalized = normalizeClientWindowMountMode(nextMode, nextMode !== 'sidebar');
+      const normalized = normalizeWindowMountMode(nextMode, nextMode !== 'sidebar');
       const bridgeConfig = readInjectedWindowBridge();
       if (bridgeConfig) bridgeConfig.mountMode = normalized;
       const curTel = telemetryStore.getState().telemetry;

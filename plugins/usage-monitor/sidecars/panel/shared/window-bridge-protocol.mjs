@@ -4,7 +4,6 @@ export const WINDOW_BRIDGE_ENDPOINT_KEY = 'endpointId';
 export const WINDOW_BRIDGE_ENDPOINT_HEADER = 'X-Usage-Monitor-Endpoint';
 export const LOCAL_ENDPOINT_ID = 'local';
 export const WINDOW_OVERLAY_KEY = '__AGUsageMonitorOverlay';
-export const CONTEXT_WINDOWS_GLOBAL_KEY = '__AGUsageMonitorContextWindows';
 
 export const WINDOW_OVERLAY_METHODS = Object.freeze({
   ensureAlive: 'ensureAlive',

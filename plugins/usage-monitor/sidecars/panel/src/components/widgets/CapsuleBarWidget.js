@@ -4,17 +4,25 @@
  * real-UI structure preview (`SettingsStructureTab.js`), ensuring 100% DOM/CSS parity.
  */
 
-import { isModernUiActiveForElement } from '../../core/appearance.js';
+import {
+  isModernUiActiveForElement } from '../../core/appearance.js';
 import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
+import { h,
+  patchAttr,
+  patchClasses,
+  patchStyleVar,
+  patchText } from '../../core/domPatch.js';
 import { t } from '../../i18n/index.js';
-import { createSvgIcon, SVG_NS } from '../../icons/SvgIcon.js';
+import { createSvgIcon,
+  SVG_NS } from '../../icons/SvgIcon.js';
 import { resolveCapsuleMetricPresentation } from '../../registries/metricRegistry.js';
 import {
-  normalizeClientTopbarSlots,
-  normalizeClientWindowMountMode,
   resolveScopedConversation,
 } from '../../store/telemetryStore.js';
+import {
+  normalizeTopbarCapsuleSlots,
+  normalizeWindowMountMode,
+} from "../../../shared/settings-normalization.mjs";
 import { buildFallbackRunningConversations } from './LiveActivityWidget.js';
 
 export const RING_RADIUS = 5.2;
@@ -503,12 +511,12 @@ export const CapsuleBarWidget = defineComponent({
 
     function update({ data } = {}) {
       const settings = data?.settings || {};
-      const mountMode = normalizeClientWindowMountMode(
+      const mountMode = normalizeWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
       const showMulti = settings.showTopbarMultiSession !== false;
-      const slotKeys = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
+      const slotKeys = normalizeTopbarCapsuleSlots(settings.topbarCapsuleSlots);
 
       const isComposer = mountMode === 'composer';
       const isSidebar = mountMode === 'sidebar';

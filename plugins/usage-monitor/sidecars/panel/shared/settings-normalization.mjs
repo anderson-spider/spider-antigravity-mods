@@ -471,3 +471,205 @@ export function normalizeExperimentalModernUi(val) {
   }
   return Boolean(val);
 }
+
+export function isContextWindowModelId(value) {
+  return typeof value === 'string' && /^MODEL_[A-Z0-9_]{1,120}$/.test(value) &&
+    value !== 'MODEL_UNSPECIFIED' && value !== 'MODEL_UNKNOWN';
+}
+
+export function isContextWindowSettingId(value) {
+  return isContextWindowModelId(value) || (typeof value === 'string' && /^model:[a-z0-9][a-z0-9._-]{0,119}$/.test(value));
+}
+
+export function isContextWindowOption(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 80 &&
+    value.trim() === value && value.toLowerCase() !== 'default' && !/[\x00-\x1f\x7f]/.test(value);
+}
+
+function isSettingsPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+function sanitizePositiveSettingNumber(val, fallback) {
+  const num = Number(val);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+export function normalizeModelContextWindows(value) {
+  return Object.fromEntries(
+    Object.entries(isSettingsPlainObject(value) ? value : {}).filter(
+      ([id, option]) => isContextWindowSettingId(id) && isContextWindowOption(option)
+    )
+  );
+}
+
+export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
+  language: 'auto',
+  themeAccent: 'host',
+  fontScale: 'md',
+  modernUi: true,
+  experimentalModernUi: true,
+  weeklyTokenBudget: 150000000,
+  weeklyCostBudget: 100,
+  weeklyLimitMode: 'official',
+  modelDisplayMode: 'short',
+  showUpstreamModel: false,
+  orchestratorIdMode: 'compact',
+  pluginUpdateMode: 'off',
+  autoUpdatePlugin: false,
+  windowMountMode: 'sidebar',
+  enableWindowOverlay: false,
+  popoverWidthMode: 'auto',
+  popoverWidth: DEFAULT_POPOVER_WIDTH,
+  enableCliStatusLine: true,
+  standalonePort: 0,
+  showTopbarMultiSession: true,
+  topbarCapsuleSlots: DEFAULT_TOPBAR_SLOTS,
+  hoverModules: DEFAULT_HOVER_MODULES,
+  overviewModules: DEFAULT_OVERVIEW_MODULES,
+  overviewMetrics: DEFAULT_OVERVIEW_METRICS,
+  showQuotaPace: true,
+  showStepTurnRail: false,
+  showStepAgentBadge: true,
+  showStepSpeedColor: false,
+  stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
+  contextWindowRiskAccepted: false,
+  modelContextWindows: Object.freeze({}),
+});
+
+/**
+ * 创建一份深拷贝的全新默认偏好设置对象。
+ */
+export function createDefaultSettingsObject() {
+  return {
+    ...DEFAULT_SETTINGS_SCHEMA,
+    topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
+    hoverModules: [...DEFAULT_HOVER_MODULES],
+    overviewModules: [...DEFAULT_OVERVIEW_MODULES],
+    overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
+    stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
+    modelContextWindows: {},
+  };
+}
+
+/**
+ * 将原始持久化对象或增量合并结果完整归一化为合法偏好对象。
+ *
+ * @param {unknown} rawInput
+ */
+export function normalizeFullSettings(rawInput) {
+  const safeRaw = isSettingsPlainObject(rawInput) ? rawInput : {};
+  const pluginUpdateMode = normalizePluginUpdateMode(
+    safeRaw.pluginUpdateMode,
+    safeRaw.autoUpdatePlugin
+  );
+  const windowMountMode = normalizeWindowMountMode(
+    safeRaw.windowMountMode,
+    safeRaw.enableWindowOverlay
+  );
+  const modelDisplayMode = normalizeModelDisplayMode(
+    safeRaw.modelDisplayMode,
+    safeRaw.showUpstreamModel
+  );
+  const modernUi =
+    safeRaw.modernUi !== undefined ? normalizeModernUi(safeRaw.modernUi) : true;
+  return {
+    language: normalizeLanguageSetting(safeRaw.language),
+    themeAccent: normalizeThemeAccent(safeRaw.themeAccent),
+    fontScale: normalizeFontScale(safeRaw.fontScale),
+    modernUi,
+    experimentalModernUi: modernUi,
+    weeklyTokenBudget: sanitizePositiveSettingNumber(
+      safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit,
+      DEFAULT_SETTINGS_SCHEMA.weeklyTokenBudget
+    ),
+    weeklyCostBudget: sanitizePositiveSettingNumber(
+      safeRaw.weeklyCostBudget,
+      DEFAULT_SETTINGS_SCHEMA.weeklyCostBudget
+    ),
+    weeklyLimitMode: normalizeWeeklyLimitMode(safeRaw.weeklyLimitMode),
+    modelDisplayMode,
+    showUpstreamModel: modelDisplayMode !== 'short',
+    orchestratorIdMode: normalizeOrchestratorIdMode(safeRaw.orchestratorIdMode),
+    pluginUpdateMode,
+    autoUpdatePlugin: pluginUpdateMode === 'auto',
+    windowMountMode,
+    enableWindowOverlay: windowMountMode !== 'sidebar',
+    popoverWidthMode: normalizePopoverWidthMode(safeRaw.popoverWidthMode),
+    popoverWidth: normalizePopoverWidth(safeRaw.popoverWidth),
+    enableCliStatusLine: safeRaw.enableCliStatusLine !== false,
+    standalonePort: normalizeStandalonePort(safeRaw.standalonePort),
+    showTopbarMultiSession: safeRaw.showTopbarMultiSession !== false,
+    topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
+    hoverModules: normalizeHoverModules(safeRaw.hoverModules),
+    overviewModules: normalizeOverviewModules(safeRaw.overviewModules),
+    overviewMetrics: normalizeOverviewMetrics(safeRaw.overviewMetrics),
+    showQuotaPace: safeRaw.showQuotaPace !== false,
+    showStepTurnRail: safeRaw.showStepTurnRail === true,
+    showStepAgentBadge: safeRaw.showStepAgentBadge !== false,
+    showStepSpeedColor: safeRaw.showStepSpeedColor === true,
+    stepTokenComboFormat: normalizeStepTokenComboFormat(safeRaw.stepTokenComboFormat),
+    stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
+    contextWindowRiskAccepted: safeRaw.contextWindowRiskAccepted === true,
+    modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
+  };
+}
+
+/**
+ * Merge a partial settings patch into `current`, preserving legacy-field precedence
+ * and `current.modelContextWindows`, then return the normalized full settings object.
+ */
+export function mergeSettingsPatch(current, patch) {
+  const safeCurrent = isSettingsPlainObject(current) ? current : {};
+  const payload = isSettingsPlainObject(patch) ? patch : {};
+  const nextPluginUpdateMode =
+    payload.pluginUpdateMode !== undefined
+      ? normalizePluginUpdateMode(payload.pluginUpdateMode)
+      : typeof payload.autoUpdatePlugin === 'boolean'
+        ? payload.autoUpdatePlugin
+          ? 'auto'
+          : 'manual'
+        : normalizePluginUpdateMode(safeCurrent.pluginUpdateMode, safeCurrent.autoUpdatePlugin);
+  const nextWindowMountMode =
+    payload.windowMountMode !== undefined
+      ? normalizeWindowMountMode(payload.windowMountMode)
+      : typeof payload.enableWindowOverlay === 'boolean'
+        ? payload.enableWindowOverlay
+          ? safeCurrent.windowMountMode === 'composer'
+            ? 'composer'
+            : 'dual'
+          : 'sidebar'
+        : normalizeWindowMountMode(safeCurrent.windowMountMode, safeCurrent.enableWindowOverlay);
+  const nextModelDisplayMode =
+    payload.modelDisplayMode !== undefined
+      ? normalizeModelDisplayMode(payload.modelDisplayMode)
+      : typeof payload.showUpstreamModel === 'boolean'
+        ? payload.showUpstreamModel
+          ? 'upstream'
+          : 'short'
+        : normalizeModelDisplayMode(safeCurrent.modelDisplayMode, safeCurrent.showUpstreamModel);
+  const nextModernUi =
+    payload.modernUi !== undefined
+      ? normalizeModernUi(payload.modernUi)
+      : payload.experimentalModernUi !== undefined
+        ? normalizeModernUi(payload.experimentalModernUi)
+        : normalizeModernUi(safeCurrent.modernUi);
+  return normalizeFullSettings({
+    ...safeCurrent,
+    ...payload,
+    modernUi: nextModernUi,
+    modelContextWindows: safeCurrent.modelContextWindows,
+    weeklyTokenBudget: sanitizePositiveSettingNumber(
+      payload.weeklyTokenBudget ?? payload.weeklyTokenLimit,
+      safeCurrent.weeklyTokenBudget
+    ),
+    weeklyCostBudget: sanitizePositiveSettingNumber(
+      payload.weeklyCostBudget,
+      safeCurrent.weeklyCostBudget
+    ),
+    modelDisplayMode: nextModelDisplayMode,
+    pluginUpdateMode: nextPluginUpdateMode,
+    windowMountMode: nextWindowMountMode,
+  });
+}

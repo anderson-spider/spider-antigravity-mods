@@ -432,33 +432,6 @@ function reconcileIncomingTelemetrySettings(payload, reqSettingsRev) {
   return merged ? { ...payload, settings: merged } : payload;
 }
 
-export const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
-export const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
-export const CLIENT_OVERVIEW_MODULE_KEYS = OVERVIEW_MODULE_KEYS;
-export const DEFAULT_CLIENT_OVERVIEW_MODULES = DEFAULT_OVERVIEW_MODULES;
-export const DEFAULT_CLIENT_HOVER_MODULES = DEFAULT_HOVER_MODULES;
-export const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
-export const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
-export const CLIENT_STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
-export const DEFAULT_CLIENT_STEP_COLUMNS = DEFAULT_STEP_TABLE_COLUMNS;
-export const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
-export const MIN_CLIENT_POPOVER_WIDTH = MIN_POPOVER_WIDTH;
-export const MAX_CLIENT_POPOVER_WIDTH = MAX_POPOVER_WIDTH;
-export const DEFAULT_CLIENT_POPOVER_WIDTH = DEFAULT_POPOVER_WIDTH;
-
-export const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
-export const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
-export const normalizeClientPopoverWidthMode = normalizePopoverWidthMode;
-export const normalizeClientPopoverWidth = normalizePopoverWidth;
-export const normalizeClientModelDisplayMode = normalizeModelDisplayMode;
-export const normalizeClientTopbarSlots = normalizeTopbarCapsuleSlots;
-export const normalizeClientHoverModules = normalizeHoverModules;
-export const normalizeClientOverviewModules = normalizeOverviewModules;
-export const normalizeClientOverviewMetrics = normalizeOverviewMetrics;
-export const normalizeClientStepColumns = normalizeStepTableColumns;
-export const normalizeClientUpdateMode = normalizePluginUpdateMode;
-export const normalizeClientOrchestratorIdMode = normalizeOrchestratorIdMode;
-export const normalizeClientWindowMountMode = normalizeWindowMountMode;
 
 export function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
@@ -531,8 +504,8 @@ export function isEquivalentTelemetry(prev, next) {
   if ((pSet?.pluginUpdateMode ?? '') !== (nSet?.pluginUpdateMode ?? '')) return false;
   if (pSet?.autoUpdatePlugin !== nSet?.autoUpdatePlugin) return false;
   if (
-    normalizeClientWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
-    normalizeClientWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
+    normalizeWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
+    normalizeWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
   ) {
     return false;
   }
@@ -1678,27 +1651,27 @@ export async function saveSettingsPatch(patch) {
     safePatch.showStepSpeedColor = Boolean(safePatch.showStepSpeedColor);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
-    safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
+    safePatch.topbarCapsuleSlots = normalizeTopbarCapsuleSlots(safePatch.topbarCapsuleSlots);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'hoverModules')) {
-    safePatch.hoverModules = normalizeClientHoverModules(safePatch.hoverModules);
+    safePatch.hoverModules = normalizeHoverModules(safePatch.hoverModules);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewModules')) {
-    safePatch.overviewModules = normalizeClientOverviewModules(safePatch.overviewModules);
+    safePatch.overviewModules = normalizeOverviewModules(safePatch.overviewModules);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewMetrics')) {
-    safePatch.overviewMetrics = normalizeClientOverviewMetrics(safePatch.overviewMetrics);
+    safePatch.overviewMetrics = normalizeOverviewMetrics(safePatch.overviewMetrics);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
-    safePatch.stepTableColumns = normalizeClientStepColumns(safePatch.stepTableColumns);
+    safePatch.stepTableColumns = normalizeStepTableColumns(safePatch.stepTableColumns);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTokenComboFormat')) {
-    safePatch.stepTokenComboFormat = normalizeClientStepTokenComboFormat(
+    safePatch.stepTokenComboFormat = normalizeStepTokenComboFormat(
       safePatch.stepTokenComboFormat
     );
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'modelDisplayMode')) {
-    const normDisp = normalizeClientModelDisplayMode(
+    const normDisp = normalizeModelDisplayMode(
       safePatch.modelDisplayMode,
       safePatch.showUpstreamModel
     );
@@ -1709,16 +1682,16 @@ export async function saveSettingsPatch(patch) {
     safePatch.modelDisplayMode = safePatch.showUpstreamModel ? 'upstream' : 'short';
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidthMode')) {
-    safePatch.popoverWidthMode = normalizeClientPopoverWidthMode(safePatch.popoverWidthMode);
+    safePatch.popoverWidthMode = normalizePopoverWidthMode(safePatch.popoverWidthMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
-    safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
+    safePatch.popoverWidth = normalizePopoverWidth(safePatch.popoverWidth);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'contextWindowRiskAccepted')) {
     safePatch.contextWindowRiskAccepted = Boolean(safePatch.contextWindowRiskAccepted);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
-    safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
+    safePatch.orchestratorIdMode = normalizeOrchestratorIdMode(safePatch.orchestratorIdMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'standalonePort')) {
     const numPort = Number(safePatch.standalonePort);
@@ -1726,7 +1699,7 @@ export async function saveSettingsPatch(patch) {
       Number.isInteger(numPort) && numPort >= 1024 && numPort <= 65535 ? numPort : 0;
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'windowMountMode')) {
-    const normMount = normalizeClientWindowMountMode(
+    const normMount = normalizeWindowMountMode(
       safePatch.windowMountMode,
       safePatch.enableWindowOverlay
     );
@@ -1901,43 +1874,6 @@ export async function rebuildTrajectoryCache() {
   const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
   clearConsumptionRangeCache();
   clearConversationViewCache();
-  await fetchTelemetry({ force: true });
-  return res;
-}
-
-export async function triggerCloudSync() {
-  const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
-  clearConsumptionRangeCache();
-  clearConversationViewCache();
-  await fetchTelemetry({ force: true });
-  return res;
-}
-
-export async function triggerBridgeHostRelaunch() {
-  try {
-    return await callSidecarApi('/api/bridge/relaunch', { method: 'POST', body: {} });
-  } catch {
-    // 兼容热更新后常驻父进程 main.mjs 尚未重注册新路由的场景，平滑回退至既有 POST /api/settings 通道转发至最新 Worker
-    return callSidecarApi('/api/settings', {
-      method: 'POST',
-      body: { __bridgeAction: 'relaunch' },
-    });
-  }
-}
-
-export async function triggerPluginUpdate() {
-  const res = await callSidecarApi('/api/plugin-update', { method: 'POST', body: {} });
-  if (res?.ok && res?.restarting) {
-    await new Promise((r) => setTimeout(r, 1100));
-    if (
-      !isWindowOverlayMode() &&
-      typeof window !== 'undefined' &&
-      typeof window.location?.reload === 'function'
-    ) {
-      window.location.reload();
-      return res;
-    }
-  }
   await fetchTelemetry({ force: true });
   return res;
 }
