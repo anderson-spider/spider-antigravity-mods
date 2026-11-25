@@ -14,8 +14,9 @@ Usage & Speed Monitor tracks token throughput, latency, context allocation, and 
 - **Multi-Pool Quotas:** Monitors 5-hour and weekly quotas, reset countdowns, and per-cycle token/cost totals across `Gemini`, `Gemini 4 Argon`, `Gemini 4 Carbon`, and `Claude & GPT` pools.
 - **Call & Trend Breakdown:** Inspects **By Step** and **By Model** records with configurable columns, custom token combo formats, turn rails, and aggregated usage views (`Today`, `1d`, `7d`, `14d`, `30d`, `All`, or custom date ranges).
 - **Local Client Modes:**
-  - **Antigravity Desktop:** Auxiliary sidebar pane (`sidecars/panel/sidecar.json`).
-  - **Antigravity CLI (`agy`):** Single-line ANSI `statusLine` integration (toggle with `/statusline` or under **Settings > Structure**).
+  - **Antigravity Desktop (Left Sidebar — Full Page):** Global MCP App (`mcp_config.json` -> `ui://usage-monitor/dashboard.html`) accessible from **Plugins > Usage Monitor** in the left sidebar.
+  - **Antigravity Desktop (Right Side Pane):** Auxiliary sidebar pane (`sidecars/panel/sidecar.json`) with automatic active-conversation tracking.
+  - **Antigravity CLI (`agy`):** Single-line ANSI `statusLine` integration (toggle with `/statusline` or under **Settings > Structure**), plus plain-text summary via `usage_monitor_dashboard`.
   - **Standalone Local Web UI:** Optional HTTP server (`sidecars/panel/standalone.mjs`) bound to `127.0.0.1:8787` by default.
 - **Bilingual Support (`en-US` / `pt-BR`):** Supports English and Brazilian Portuguese across the panel UI and CLI `statusLine`, with automatic system-locale detection (`Follow System`, defaulting to `en-US`).
 
@@ -59,7 +60,7 @@ git clone https://github.com/anderson-spider/spider-antigravity-mods.git
 ln -s "$(pwd)/spider-antigravity-mods/plugins/usage-monitor" ~/.gemini/config/plugins/usage-monitor
 ```
 
-Rebuild `app.js` and `styles.css` after editing files under `sidecars/panel/src/`, then run tests, syntax checks, and manifest validation:
+Rebuild `app.js`, `styles.css`, and `mcp/dist/dashboard.html` after editing files under `sidecars/panel/src/` or `mcp/`, then run tests, syntax checks, and manifest validation:
 
 ```bash
 pnpm --filter usage-monitor build

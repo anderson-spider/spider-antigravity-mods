@@ -1140,7 +1140,11 @@ async function requestTelemetry(params, force) {
 
     if (payload?.uiBundleVersion) {
       if (activeBundleVersion && activeBundleVersion !== payload.uiBundleVersion) {
+        const isMcpAppFrame =
+          typeof document !== 'undefined' &&
+          document.documentElement?.getAttribute?.('data-mcp-app') === 'true';
         if (
+          !isMcpAppFrame &&
           !isWindowOverlayMode() &&
           typeof window !== 'undefined' &&
           typeof window.location?.reload === 'function'

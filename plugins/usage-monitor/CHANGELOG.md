@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-11-25
+
+- Add a full-page **Left Sidebar** view (`Plugins > Usage Monitor`) via a zero-runtime-dependency MCP App (`mcp_config.json`, `mcp/server.mjs`, `mcp/main.mjs`, and self-contained `ui://usage-monitor/dashboard.html`) declaring the `com.google.antigravity/ui` `global` entrypoint.
+- Keep the existing Auxiliary Side Pane Sidecar (`sidecars/panel/sidecar.json`) intact for automatic active-conversation tracking (`window.sidecar.conversationId`) and CLI `statusLine` sync, sharing the same backend dispatcher and `settings.json` / trajectory cache directory with zero duplicate entries in the right-hand side pane.
+- Bridge Antigravity MCP App host theme tokens (`--color-background-*`, `--color-text-*`, `--color-border-*`, live light/dark switching), add full-page centered layout rules for `data-mcp-app="true"`, and guard `window.location.reload()` inside isolated MCP App iframes.
+
 ## 1.1.1 - 2026-11-25
 
 - Prune vestigial cloud-sync, auto-updater, and CDP host-injection seams (`context-windows.mjs`, `pricing-catalog.mjs`, `telemetryStore.js`, and settings/header UI).

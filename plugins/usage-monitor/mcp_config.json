@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "usage-monitor": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/mcp/main.mjs"
+      ],
+      "env": {
+        "USAGE_MONITOR_PLUGIN_DATA": "${PLUGIN_DATA}"
+      }
+    }
+  }
+}

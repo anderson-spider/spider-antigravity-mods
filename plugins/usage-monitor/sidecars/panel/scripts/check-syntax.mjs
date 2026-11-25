@@ -4,11 +4,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PANEL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const PLUGIN_DIR = resolve(PANEL_DIR, '..', '..');
 
 const files = [
   join(PANEL_DIR, 'main.mjs'),
@@ -18,8 +19,8 @@ const files = [
   join(PANEL_DIR, 'app.js'),
 ];
 
-for (const dir of ['backend', 'shared', 'scripts', 'test']) {
-  const absDir = join(PANEL_DIR, dir);
+function collectJsFiles(absDir) {
+  if (!existsSync(absDir)) return;
   const entries = readdirSync(absDir, { withFileTypes: true }).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
@@ -29,6 +30,13 @@ for (const dir of ['backend', 'shared', 'scripts', 'test']) {
     }
   }
 }
+
+for (const dir of ['backend', 'shared', 'scripts', 'test']) {
+  collectJsFiles(join(PANEL_DIR, dir));
+}
+
+collectJsFiles(join(PLUGIN_DIR, 'mcp'));
+collectJsFiles(join(PLUGIN_DIR, 'mcp', 'test'));
 
 for (const file of files) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
