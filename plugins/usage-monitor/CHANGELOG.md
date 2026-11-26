@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 - 2026-11-25
+
+- Discover persistent/SSH Language Server daemon files (`ls_*.json`) in addition to desktop `hub_*.json` files in `ls-discovery.mjs`, fixing unavailable 5-hour and weekly quota limits in the left-sidebar MCP App on remote SSH hosts.
+- Route loopback HTTPS probes and local `callLsRpc` calls through `postLoopbackHttpsJson` (`rejectUnauthorized: false` restricted to strict loopback addresses) so HTTPS-only Language Servers connect reliably.
+- Fix a Mandarin title leak (`每周限额 (Gemini)`) in `QuotaPoolsWidget` when official quotas are unavailable or in custom local weekly mode by using localized `quota.weeklyPool` / `quota.weeklyCustomLocal` labels.
+- Fix `usage_monitor_dashboard` plain-text summary pool naming (`poolLabel`/`poolKey`) and include weekly quota percentages.
+
 ## 1.2.0 - 2026-11-25
 
 - Add a full-page **Left Sidebar** view (`Plugins > Usage Monitor`) via a zero-runtime-dependency MCP App (`mcp_config.json`, `mcp/server.mjs`, `mcp/main.mjs`, and self-contained `ui://usage-monitor/dashboard.html`) declaring the `com.google.antigravity/ui` `global` entrypoint.

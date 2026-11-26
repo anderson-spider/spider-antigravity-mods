@@ -95,3 +95,138 @@ export function isLocalHostRequest(req) {
   }
   return true;
 }
+
+const LOOPBACK_HTTPS_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+let loopbackHttpsModulePromise = null;
+let customLoopbackHttpsRequester = null;
+
+export function setLoopbackHttpsRequester(requester) {
+  customLoopbackHttpsRequester = typeof requester === 'function' ? requester : null;
+}
+
+export function isStrictLoopbackUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ''));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+async function getLoopbackHttpsRequestFn() {
+  if (customLoopbackHttpsRequester) return customLoopbackHttpsRequester;
+  if (typeof globalThis !== 'undefined' && typeof globalThis.__agLoopbackHttpsRequest === 'function') {
+    return globalThis.__agLoopbackHttpsRequest;
+  }
+  if (!loopbackHttpsModulePromise) {
+    loopbackHttpsModulePromise = import('node:https')
+      .then((mod) => (mod.default || mod)?.request || null)
+      .catch(() => null);
+  }
+  return loopbackHttpsModulePromise;
+}
+
+/**
+ * Sends a JSON POST request to a strict loopback HTTPS endpoint (`127.0.0.1`/`localhost`/`::1`),
+ * allowing the host's self-signed localhost TLS certificate.
+ */
+export async function postLoopbackHttpsJson(urlStr, csrfToken, bodyText, timeoutMs) {
+  const parsed = new URL(urlStr);
+  if (!isStrictLoopbackUrl(urlStr) || parsed.protocol !== 'https:') {
+    throw new Error('Refusing non-loopback HTTPS request');
+  }
+  const requestFn = await getLoopbackHttpsRequestFn();
+  if (typeof requestFn !== 'function') {
+    return fetch(urlStr, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'x-codeium-csrf-token': csrfToken } : {}),
+      },
+      body: bodyText,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let wallTimer = null;
+    const clearWallTimer = () => {
+      if (wallTimer) {
+        clearTimeout(wallTimer);
+        wallTimer = null;
+      }
+    };
+    const finishErr = (err) => {
+      if (settled) return;
+      settled = true;
+      clearWallTimer();
+      reject(err);
+    };
+    const bodyBuf = Buffer.from(bodyText, 'utf8');
+    const req = requestFn(
+      {
+        hostname: parsed.hostname.replace(/^\[|\]$/g, ''),
+        port: Number(parsed.port || 443),
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'POST',
+        rejectUnauthorized: false,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': bodyBuf.length,
+          ...(csrfToken ? { 'x-codeium-csrf-token': csrfToken } : {}),
+        },
+      },
+      (res) => {
+        const chunks = [];
+        let totalBytes = 0;
+        res.on('data', (chunk) => {
+          if (settled) return;
+          totalBytes += chunk.length;
+          if (totalBytes > LOOPBACK_HTTPS_MAX_RESPONSE_BYTES) {
+            const sizeErr = new Error('Loopback LS response exceeded size limit');
+            finishErr(sizeErr);
+            req.destroy(sizeErr);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('aborted', () => {
+          finishErr(new Error('Loopback LS HTTPS response aborted'));
+        });
+        res.on('end', () => {
+          if (settled) return;
+          settled = true;
+          clearWallTimer();
+          const status = Number(res.statusCode || 0);
+          const rawText = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: async () => JSON.parse(rawText || '{}'),
+            text: async () => rawText,
+          });
+        });
+        res.on('error', finishErr);
+      }
+    );
+
+    wallTimer = setTimeout(() => {
+      const timeoutErr = new Error(`Loopback LS HTTPS timeout (${timeoutMs}ms)`);
+      finishErr(timeoutErr);
+      req.destroy(timeoutErr);
+    }, timeoutMs);
+    wallTimer?.unref?.();
+
+    req.setTimeout(timeoutMs, () => {
+      const timeoutErr = new Error(`Loopback LS HTTPS timeout (${timeoutMs}ms)`);
+      finishErr(timeoutErr);
+      req.destroy(timeoutErr);
+    });
+    req.on('error', finishErr);
+    req.write(bodyBuf);
+    req.end();
+  });
+}

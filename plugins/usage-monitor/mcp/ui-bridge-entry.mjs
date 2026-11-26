@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/ext-apps';
 
 const MAX_IN_FLIGHT = 4;
-const MCP_APP_VERSION = '1.2.0';
+const MCP_APP_VERSION = '1.2.1';
 
 if (typeof document !== 'undefined' && document.documentElement) {
   document.documentElement.setAttribute('data-mcp-app', 'true');

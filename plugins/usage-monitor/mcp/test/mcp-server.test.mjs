@@ -233,6 +233,21 @@ describe('Usage Monitor MCP App server', () => {
     assert.match(formatDashboardSummary({}), /No active session telemetry/i);
   });
 
+  it('formats poolLabel, 5h, weekly-only, and unavailable pools accurately', () => {
+    const summary = formatDashboardSummary({
+      quotas: {
+        pools: [
+          { poolKey: 'Gemini', poolLabel: 'Gemini', remainingPct: 93.1, weeklyRemainingPct: 83.9 },
+          { poolKey: 'Argon', poolLabel: 'Gemini 4 Argon', remainingPct: null, weeklyRemainingPct: 42 },
+          { poolKey: 'Claude & GPT', poolLabel: 'Claude & GPT', remainingPct: null, weeklyRemainingPct: null },
+        ],
+      },
+    });
+    assert.match(summary, /Gemini: 93% left \(5h\) · 84% left \(weekly\)/);
+    assert.match(summary, /Gemini 4 Argon: 42% left \(weekly\)/);
+    assert.match(summary, /Claude & GPT: unavailable/);
+  });
+
   it('ships a portable mcp_config.json and a self-contained dashboard.html under 10 MiB', () => {
     const mcpConfigPath = join(PLUGIN_DIR, 'mcp_config.json');
     const mcpConfig = JSON.parse(readFileSync(mcpConfigPath, 'utf8'));

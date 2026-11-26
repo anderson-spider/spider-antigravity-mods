@@ -880,3 +880,99 @@ test('showQuotaPace defaults to true, persists via settings action, and resets c
   assert.equal(resetRes.ok, true);
   assert.equal(resetRes.updated.showQuotaPace, true);
 });
+
+test('QuotaPoolsWidget keeps weekly row titles localized when official quotas are unavailable or custom local', async () => {
+  const { createMockDom } = await import('./mock-dom.mjs');
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { document: mockDoc } = createMockDom();
+  globalThis.document = mockDoc;
+  globalThis.window = {
+    innerWidth: 1280,
+    innerHeight: 800,
+    devicePixelRatio: 1,
+    document: mockDoc,
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({ getPropertyValue: () => '' }),
+  };
+
+  const { i18nStore, setI18nLanguage } = await import('../src/i18n/index.js');
+  const prevLang = i18nStore.getState().language;
+  setI18nLanguage('pt-BR');
+
+  try {
+    const { QuotaPoolsWidget } = await import('../src/components/widgets/QuotaPoolsWidget.js');
+    const widget = QuotaPoolsWidget({ compactHover: false });
+
+    // Official mode, but LS unavailable: weekly.isOfficial is false and title is legacy Mandarin
+    widget.refs.update({
+      data: {
+        account: { tierName: 'Google AI', planName: 'Pro' },
+        settings: { showQuotaPace: true },
+        quotas: {
+          activePool: { poolKey: 'Gemini', family: 'Gemini' },
+          pools: [
+            { poolKey: 'Gemini', poolLabel: 'Gemini', family: 'Gemini', usedPct: null, remainingPct: null },
+            { poolKey: 'Claude & GPT', poolLabel: 'Claude & GPT', family: 'Claude & GPT', usedPct: null, remainingPct: null },
+          ],
+          weekly: {
+            isOfficial: false,
+            isCustomLocal: false,
+            title: '每周限额 (Gemini)',
+            usedPct: null,
+            remainingPct: null,
+            tokens: 12000,
+            costUsd: 0.5,
+            calls: 4,
+          },
+        },
+      },
+      minuteTick: 1,
+    });
+
+    const titles = Array.from(widget.el.querySelectorAll('.quota-win-title'), (el) => el.textContent);
+    assert.deepEqual(titles, [
+      '5h (Gemini)',
+      'Semanal (Gemini)',
+      '5h (Claude & GPT)',
+      'Semanal (Claude & GPT)',
+    ]);
+    assert.doesNotMatch(widget.el.textContent, /每周限额/);
+
+    // Custom local weekly budget mode renders localized custom title (never Mandarin)
+    widget.refs.update({
+      data: {
+        account: { tierName: 'Google AI', planName: 'Pro' },
+        settings: { showQuotaPace: true },
+        quotas: {
+          activePool: { poolKey: 'Gemini', family: 'Gemini' },
+          pools: [
+            { poolKey: 'Gemini', poolLabel: 'Gemini', family: 'Gemini', usedPct: null, remainingPct: null },
+          ],
+          weekly: {
+            isOfficial: false,
+            isCustomLocal: true,
+            title: '每周限额 (自定义本机)',
+            usedPct: 40,
+            remainingPct: 60,
+            tokens: 400000,
+            costUsd: 2.0,
+            calls: 12,
+          },
+        },
+      },
+      minuteTick: 2,
+    });
+
+    const customTitles = Array.from(widget.el.querySelectorAll('.quota-win-title'), (el) => el.textContent);
+    assert.equal(customTitles[1], 'Semanal (Local)');
+    assert.doesNotMatch(widget.el.textContent, /每周限额/);
+
+    widget.destroy();
+  } finally {
+    setI18nLanguage(prevLang);
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
