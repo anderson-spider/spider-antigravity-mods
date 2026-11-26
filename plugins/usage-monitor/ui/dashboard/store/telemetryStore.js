@@ -1,0 +1,2017 @@
+/**
+ * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
+ * and granular slice updates.
+ */
+
+import { createReactiveStore } from '../core/reactive.js';
+import { abortSidecarApiKey, callSidecarApi } from '../core/httpClient.js';
+import {
+  formatAgentBadgeText,
+  formatAgentLabel,
+  formatConversationMeta,
+  formatLiveActivityDetail,
+  formatLiveActivityLabel,
+  getAgentBadgeClass,
+} from '../core/formatters.js';
+import { normalizeI18nLanguage, t } from '../i18n/index.js';
+import {
+  normalizeClientFontScale,
+  normalizeClientModernUi,
+  normalizeClientThemeAccent,
+  resolveSettingsModernUi,
+} from '../core/appearance.js';
+import {
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  DEFAULT_TOPBAR_SLOTS,
+  OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  STEP_TABLE_COLUMN_KEYS,
+  TOPBAR_SLOT_KEYS,
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  parseStepTokenComboSegments,
+} from '../../../shared/settings-normalization.mjs';
+import { LOCAL_ENDPOINT_ID } from '../../../shared/api-protocol.mjs';
+
+export function extractHostRouteCascadeId() {
+  return '';
+}
+
+const initialConversationId =
+  (typeof window !== 'undefined' && (window.mcpBridge?.conversationId || window.sidecar?.conversationId)) || '';
+
+export const telemetryStore = createReactiveStore({
+  selectedConversationId: initialConversationId,
+  hostRouteConversationId: '',
+  selectedTimeRange: 'today',
+  customStartMs: Date.now() - 24 * 3600 * 1000,
+  customEndMs: Date.now(),
+  syncState: 'idle', // 'idle' | 'syncing' | 'synced' | 'error'
+  minuteTick: 0,
+  telemetry: null,
+});
+
+let pollTimer = null;
+let feedbackTimer = null;
+let deferredConvSyncTimer = null;
+let latestRequestSeq = 0;
+let latestConsumptionReqSeq = 0;
+let latestConversationSwitchSeq = 0;
+let endpointSwitchEpoch = 0;
+let activeForceCount = 0;
+let consecutivePollFailures = 0;
+let inFlightTelemetryPoll = null;
+let inFlightPresetsPrefetch = null;
+let lastPrefetchedUsageRevision = 0;
+let consumptionCacheScopeSig = '';
+const MAX_CONSUMPTION_RANGE_CACHE = 12;
+const MAX_CONVERSATION_VIEW_CACHE = 12;
+const CONSUMPTION_PRESET_KEYS = ['cycle', 'today', '24h', '7d', '14d', '30d', 'all'];
+const consumptionRangeCache = new Map();
+const conversationViewCache = new Map();
+let lastReceivedSteps = null;
+let loopActive = false;
+let loopIntervalMs = 2000;
+let loopTickFn = null;
+let settingsRevision = 0;
+let settingsWriteChain = Promise.resolve();
+const pendingSettingsMutations = new Map();
+const recentCommittedSettings = new Map();
+
+const TELEMETRY_RECOMPUTE_SETTING_KEYS = new Set([
+  'weeklyLimitMode',
+  'weeklyTokenBudget',
+  'weeklyCostBudget',
+]);
+
+function makeConsumptionRangeCacheKey(range, customStartMs = 0, customEndMs = 0) {
+  const key = String(range || 'all');
+  if (key === 'custom') {
+    return `custom:${Number(customStartMs || 0)}:${Number(customEndMs || 0)}`;
+  }
+  return key;
+}
+
+export function clearConsumptionRangeCache() {
+  consumptionRangeCache.clear();
+  lastPrefetchedUsageRevision = 0;
+  inFlightPresetsPrefetch = null;
+}
+
+export function clearConversationViewCache() {
+  conversationViewCache.clear();
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+}
+
+function buildConsumptionScopeSig(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const ep = payload.endpoint || {};
+  const acct = payload.account || {};
+  const set = payload.settings || {};
+  const cloud = payload.cloudStatus || {};
+  return `${String(ep.id || LOCAL_ENDPOINT_ID)}|${String(acct.status || '')}|${String(acct.email || acct.name || '').toLowerCase()}|${String(set.weeklyLimitMode || '')}|${String(cloud.catalogVersion || '')}`;
+}
+
+function syncConsumptionCacheScope(payload) {
+  const nextSig = buildConsumptionScopeSig(payload);
+  if (!nextSig) return;
+  if (consumptionCacheScopeSig && consumptionCacheScopeSig !== nextSig) {
+    clearConsumptionRangeCache();
+    clearConversationViewCache();
+  }
+  consumptionCacheScopeSig = nextSig;
+}
+
+function recordConversationViewToCache(payload) {
+  const active = payload?.activeConversation;
+  const cidLower = String(active?.cascadeId || '').trim().toLowerCase();
+  if (!cidLower || !Array.isArray(active?.recentSteps)) return;
+  const entry = {
+    cascadeId: active.cascadeId,
+    activeConversation: active,
+    activePool: payload.quotas?.activePool || null,
+    weekly: payload.quotas?.weekly || null,
+    sessionConsumption: payload.consumption?.session || null,
+    sessionPresets:
+      payload.consumption?.sessionPresets ||
+      (payload.consumption?.presets
+        ? Object.fromEntries(
+            Object.entries(payload.consumption.presets).map(([k, v]) => [k, v?.session || null])
+          )
+        : null),
+    stepRevision: String(payload.stepRevision || ''),
+    cachedAtMs: Date.now(),
+  };
+  conversationViewCache.delete(cidLower);
+  conversationViewCache.set(cidLower, entry);
+  while (conversationViewCache.size > MAX_CONVERSATION_VIEW_CACHE) {
+    conversationViewCache.delete(conversationViewCache.keys().next().value);
+  }
+}
+
+function resolveCachedConversationRootId(telemetry, effectiveConvId) {
+  const target = String(effectiveConvId || '').trim();
+  const convs = Array.isArray(telemetry?.conversations) ? telemetry.conversations : [];
+  if (!target) {
+    return String(convs[0]?.cascadeId || '').trim().toLowerCase();
+  }
+  const lower = target.toLowerCase();
+  if (conversationViewCache.has(lower)) return lower;
+  const matchedRoot = convs.find(
+    (c) =>
+      String(c?.cascadeId || '').toLowerCase() === lower ||
+      (Array.isArray(c?.memberCascadeIds) &&
+        c.memberCascadeIds.some((m) => String(m || '').toLowerCase() === lower))
+  );
+  return String(matchedRoot?.cascadeId || lower).trim().toLowerCase();
+}
+
+function applyConversationSliceToTelemetry(baseTelemetry, slice) {
+  if (!baseTelemetry || !slice?.activeConversation) return baseTelemetry;
+  const activeCidLower = String(slice.activeConversation.cascadeId || '').toLowerCase();
+  const prevQuotas = baseTelemetry.quotas || {};
+  const nextQuotas =
+    slice.activePool || slice.weekly
+      ? {
+          ...prevQuotas,
+          ...(slice.activePool ? { activePool: slice.activePool } : {}),
+          ...(slice.weekly ? { weekly: slice.weekly } : {}),
+        }
+      : prevQuotas;
+
+  const prevCons = baseTelemetry.consumption || {};
+  let nextPresets = prevCons.presets;
+  if (slice.sessionPresets && prevCons.presets && typeof prevCons.presets === 'object') {
+    nextPresets = { ...prevCons.presets };
+    for (const [k, sBucket] of Object.entries(slice.sessionPresets)) {
+      if (sBucket && nextPresets[k]) {
+        nextPresets[k] = { ...nextPresets[k], session: sBucket };
+      }
+    }
+  }
+  const nextCons =
+    slice.sessionConsumption || nextPresets !== prevCons.presets
+      ? {
+          ...prevCons,
+          ...(slice.sessionConsumption ? { session: slice.sessionConsumption } : {}),
+          ...(nextPresets !== prevCons.presets ? { presets: nextPresets } : {}),
+        }
+      : prevCons;
+
+  const prevRunning = Array.isArray(baseTelemetry.runningConversations)
+    ? baseTelemetry.runningConversations
+    : null;
+  let nextRunning = prevRunning;
+  if (prevRunning && prevRunning.length > 0 && activeCidLower) {
+    let anyChanged = false;
+    const mapped = prevRunning.map((item) => {
+      const shouldSelect = String(item?.cascadeId || '').toLowerCase() === activeCidLower;
+      if (Boolean(item?.isCurrentSelected) === shouldSelect) return item;
+      anyChanged = true;
+      return { ...item, isCurrentSelected: shouldSelect };
+    });
+    if (anyChanged) nextRunning = mapped;
+  }
+
+  return {
+    ...baseTelemetry,
+    ...(slice.stepRevision ? { stepRevision: slice.stepRevision } : {}),
+    activeConversation: slice.activeConversation,
+    quotas: nextQuotas,
+    consumption: nextCons,
+    ...(nextRunning ? { runningConversations: nextRunning } : {}),
+  };
+}
+
+function putConsumptionRangeCacheEntry(cacheKey, entry) {
+  if (!cacheKey || !entry) return;
+  consumptionRangeCache.delete(cacheKey);
+  consumptionRangeCache.set(cacheKey, entry);
+  while (consumptionRangeCache.size > MAX_CONSUMPTION_RANGE_CACHE) {
+    consumptionRangeCache.delete(consumptionRangeCache.keys().next().value);
+  }
+}
+
+function recordConsumptionSliceToCache(
+  cons,
+  modelBreakdown,
+  { customStartMs = 0, customEndMs = 0, usageRevision = 0 } = {}
+) {
+  const rangeKey = String(cons?.selectedRange?.key || '');
+  if (!rangeKey) return;
+  const cacheKey = makeConsumptionRangeCacheKey(
+    rangeKey,
+    rangeKey === 'custom' ? customStartMs || cons.selectedRange?.startMs || 0 : 0,
+    rangeKey === 'custom' ? customEndMs || cons.selectedRange?.endMs || 0 : 0
+  );
+  putConsumptionRangeCacheEntry(cacheKey, {
+    revision: Number(cons.revision ?? usageRevision ?? 0),
+    selectedRange: cons.selectedRange,
+    session: cons.session,
+    account: cons.account,
+    trendSeries: Array.isArray(cons.trendSeries) ? cons.trendSeries : [],
+    sourcesBreakdown: Array.isArray(cons.sourcesBreakdown) ? cons.sourcesBreakdown : [],
+    modelBreakdown: Array.isArray(modelBreakdown) ? modelBreakdown : [],
+  });
+}
+
+function applyCachedConsumptionSlice(baseTelemetry, cachedEntry, targetRevision = 0) {
+  if (!baseTelemetry || !cachedEntry) return baseTelemetry;
+  const prevCons = baseTelemetry.consumption || {};
+  return {
+    ...baseTelemetry,
+    consumption: {
+      ...prevCons,
+      ...(targetRevision > 0 ? { revision: targetRevision } : {}),
+      selectedRange: cachedEntry.selectedRange,
+      session: cachedEntry.session ?? prevCons.session,
+      account: cachedEntry.account ?? prevCons.account,
+      trendSeries: cachedEntry.trendSeries,
+      sourcesBreakdown: cachedEntry.sourcesBreakdown,
+    },
+    modelBreakdown: cachedEntry.modelBreakdown,
+  };
+}
+
+function hasAllPresetRangesCached(expectedRevision) {
+  for (const key of CONSUMPTION_PRESET_KEYS) {
+    const entry = consumptionRangeCache.get(key);
+    if (!entry) return false;
+    if (expectedRevision > 0 && entry.revision !== expectedRevision) return false;
+  }
+  return true;
+}
+
+function enqueueSettingsWrite(task) {
+  const run = settingsWriteChain.then(task, task);
+  settingsWriteChain = run.catch(() => {});
+  return run;
+}
+
+function extractReturnedSettings(res) {
+  if (!res || typeof res !== 'object') return null;
+  if (res.settings && typeof res.settings === 'object' && !Array.isArray(res.settings)) {
+    return res.settings;
+  }
+  if (
+    typeof res.language === 'string' ||
+    typeof res.themeAccent === 'string' ||
+    typeof res.modelDisplayMode === 'string'
+  ) {
+    return res;
+  }
+  return null;
+}
+
+function reconcileIncomingTelemetrySettings(payload, reqSettingsRev) {
+  if (!payload?.settings || typeof payload.settings !== 'object') {
+    return payload;
+  }
+  for (const [k, entry] of [...recentCommittedSettings.entries()]) {
+    if (reqSettingsRev >= entry.rev) {
+      recentCommittedSettings.delete(k);
+    }
+  }
+  if (pendingSettingsMutations.size === 0 && recentCommittedSettings.size === 0) {
+    return payload;
+  }
+  let merged = null;
+  for (const [k, entry] of recentCommittedSettings.entries()) {
+    if (reqSettingsRev < entry.rev) {
+      merged ??= { ...payload.settings };
+      merged[k] = entry.value;
+    }
+  }
+  for (const [k, entry] of pendingSettingsMutations.entries()) {
+    merged ??= { ...payload.settings };
+    merged[k] = entry.value;
+  }
+  return merged ? { ...payload, settings: merged } : payload;
+}
+
+
+function isEquivalentSessionHealth(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (
+    a.status !== b.status ||
+    a.evaluatedSteps !== b.evaluatedSteps ||
+    a.cacheHitPct !== b.cacheHitPct
+  ) {
+    return false;
+  }
+  const aa = a.cacheMissAttribution;
+  const ba = b.cacheMissAttribution;
+  if (aa !== ba) {
+    if (!aa || !ba) return false;
+    if (
+      aa.total !== ba.total ||
+      aa.eligibleTransitions !== ba.eligibleTransitions ||
+      aa.planModeSwitch !== ba.planModeSwitch ||
+      aa.modelSwitch !== ba.modelSwitch ||
+      aa.errorRetry !== ba.errorRetry ||
+      aa.idleOrWaitGap !== ba.idleOrWaitGap ||
+      aa.activeSlowGap !== ba.activeSlowGap ||
+      aa.asyncWakeupFast !== ba.asyncWakeupFast ||
+      aa.prefixOrReplicaMiss !== ba.prefixOrReplicaMiss ||
+      aa.compactionResets !== ba.compactionResets ||
+      aa.contextDilutionTurns !== ba.contextDilutionTurns ||
+      aa.sustainedCollapse?.runs !== ba.sustainedCollapse?.runs ||
+      aa.sustainedCollapse?.turns !== ba.sustainedCollapse?.turns ||
+      aa.sustainedCollapse?.maxStreak !== ba.sustainedCollapse?.maxStreak ||
+      aa.sustainedCollapse?.activeStreak !== ba.sustainedCollapse?.activeStreak
+    ) {
+      return false;
+    }
+  }
+  const at = a.timing;
+  const bt = b.timing;
+  if (at !== bt) {
+    if (!at || !bt) return false;
+    if (
+      at.llmTimeSec !== bt.llmTimeSec ||
+      at.toolExecTimeSec !== bt.toolExecTimeSec ||
+      at.activeTimeSec !== bt.activeTimeSec ||
+      at.llmSharePct !== bt.llmSharePct ||
+      at.toolSharePct !== bt.toolSharePct ||
+      at.totalOutputTokens !== bt.totalOutputTokens ||
+      at.effectiveTps !== bt.effectiveTps ||
+      at.activeGapsTotal !== bt.activeGapsTotal ||
+      at.gapsOver60s !== bt.gapsOver60s ||
+      at.over60sGapPct !== bt.over60sGapPct ||
+      at.hasToolTimingTelemetry !== bt.hasToolTimingTelemetry
+    ) {
+      return false;
+    }
+  }
+  const ah = a.hygiene;
+  const bh = b.hygiene;
+  if (ah !== bh) {
+    if (!ah || !bh) return false;
+    if (
+      ah.over150kTurns !== bh.over150kTurns ||
+      ah.over150kRatioPct !== bh.over150kRatioPct ||
+      ah.mediaTurns !== bh.mediaTurns ||
+      ah.multimodalHighCtxTurns !== bh.multimodalHighCtxTurns ||
+      ah.multimodalOver180kTurns !== bh.multimodalOver180kTurns ||
+      ah.toolTurns !== bh.toolTurns ||
+      ah.totalToolCalls !== bh.totalToolCalls ||
+      ah.singleToolTurns !== bh.singleToolTurns ||
+      ah.singleToolTurnPct !== bh.singleToolTurnPct ||
+      ah.avgToolsPerToolTurn !== bh.avgToolsPerToolTurn ||
+      ah.hasToolBatchTelemetry !== bh.hasToolBatchTelemetry
+    ) {
+      return false;
+    }
+  }
+  const af = Array.isArray(a.findings) ? a.findings : [];
+  const bf = Array.isArray(b.findings) ? b.findings : [];
+  if (af.length !== bf.length) return false;
+  for (let i = 0; i < af.length; i += 1) {
+    if (af[i]?.code !== bf[i]?.code || af[i]?.severity !== bf[i]?.severity) return false;
+    const ap = af[i]?.params || {};
+    const bp = bf[i]?.params || {};
+    const aKeys = Object.keys(ap);
+    const bKeys = Object.keys(bp);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const k of aKeys) {
+      if (ap[k] !== bp[k]) return false;
+    }
+  }
+  return true;
+}
+
+export function isEquivalentTelemetry(prev, next) {
+  if (!prev || !next) return false;
+  if (prev === next) return true;
+
+  const sameArr = (a, b) => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
+  // 1. 比对系统设置项（外观语言/主题/字号、模型显示策略、更新策略、挂载与结构布局配置）
+  const pAct = prev.activeConversation;
+  const nAct = next.activeConversation;
+  const pSet = prev.settings;
+  const nSet = next.settings;
+
+  if ((pSet?.language ?? 'auto') !== (nSet?.language ?? 'auto')) return false;
+  if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
+  if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (resolveSettingsModernUi(pSet) !== resolveSettingsModernUi(nSet)) return false;
+  if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
+  if (
+    (prev.endpoint?.id || LOCAL_ENDPOINT_ID) !== (next.endpoint?.id || LOCAL_ENDPOINT_ID) ||
+    Boolean(prev.endpoint?.isRemote) !== Boolean(next.endpoint?.isRemote) ||
+    (prev.endpoint?.label || '') !== (next.endpoint?.label || '')
+  ) {
+    return false;
+  }
+  if (
+    normalizeModelDisplayMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normalizeModelDisplayMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+  ) {
+    return false;
+  }
+  if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
+  if (
+    String(pSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim() !==
+    String(nSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim()
+  ) {
+    return false;
+  }
+  if (
+    normalizeOrchestratorIdMode(pSet?.orchestratorIdMode) !==
+    normalizeOrchestratorIdMode(nSet?.orchestratorIdMode)
+  ) {
+    return false;
+  }
+  if (pSet?.weeklyLimitMode !== nSet?.weeklyLimitMode) return false;
+  if (pSet?.weeklyTokenBudget !== nSet?.weeklyTokenBudget) return false;
+  if (pSet?.weeklyCostBudget !== nSet?.weeklyCostBudget) return false;
+  if ((pSet?.enableCliStatusLine !== false) !== (nSet?.enableCliStatusLine !== false)) {
+    return false;
+  }
+  if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
+    return false;
+  }
+  if ((pSet?.showQuotaPace !== false) !== (nSet?.showQuotaPace !== false)) {
+    return false;
+  }
+  if (Boolean(pSet?.showStepTurnRail) !== Boolean(nSet?.showStepTurnRail)) {
+    return false;
+  }
+  if ((pSet?.showStepAgentBadge !== false) !== (nSet?.showStepAgentBadge !== false)) {
+    return false;
+  }
+  if (Boolean(pSet?.showStepSpeedColor) !== Boolean(nSet?.showStepSpeedColor)) {
+    return false;
+  }
+  if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
+  if (!sameArr(pSet?.overviewModules, nSet?.overviewModules)) return false;
+  if (!sameArr(pSet?.overviewMetrics, nSet?.overviewMetrics)) return false;
+  if (!sameArr(pSet?.stepTableColumns, nSet?.stepTableColumns)) return false;
+
+  // 2. Compare catalog/version status
+  const pCloud = prev.cloudStatus;
+  const nCloud = next.cloudStatus;
+  if (
+    pCloud?.currentPluginVersion !== nCloud?.currentPluginVersion ||
+    pCloud?.latestPluginVersion !== nCloud?.latestPluginVersion ||
+    pCloud?.updateAvailable !== nCloud?.updateAvailable ||
+    pCloud?.installMode !== nCloud?.installMode ||
+    pCloud?.catalogVersion !== nCloud?.catalogVersion ||
+    pCloud?.source !== nCloud?.source ||
+    pCloud?.lastSyncedAtMs !== nCloud?.lastSyncedAtMs ||
+    pCloud?.modelCount !== nCloud?.modelCount ||
+    pCloud?.isSyncing !== nCloud?.isSyncing ||
+    pCloud?.isUpdating !== nCloud?.isUpdating ||
+    pCloud?.lastSyncError !== nCloud?.lastSyncError ||
+    pCloud?.lastUpdateError !== nCloud?.lastUpdateError ||
+    pCloud?.lastUpdateResult?.updatedAtMs !== nCloud?.lastUpdateResult?.updatedAtMs
+  ) {
+    return false;
+  }
+
+  // 3. 比对活跃会话的实时测速指标
+  if (pAct?.cascadeId !== nAct?.cascadeId) return false;
+  if (pAct?.stepCount !== nAct?.stepCount) return false;
+  if (pAct?.subagentCount !== nAct?.subagentCount) return false;
+  if ((pAct?.swarmCount || 0) !== (nAct?.swarmCount || 0)) return false;
+  if ((pAct?.swarmTitle || '') !== (nAct?.swarmTitle || '')) return false;
+  if (pAct?.totalStepsAllAgents !== nAct?.totalStepsAllAgents) return false;
+  if (pAct?.isRunning !== nAct?.isRunning) return false;
+  if (
+    pAct?.inputTokens !== nAct?.inputTokens ||
+    pAct?.cacheReadTokens !== nAct?.cacheReadTokens ||
+    pAct?.outputTokens !== nAct?.outputTokens ||
+    pAct?.totalTokens !== nAct?.totalTokens
+  ) {
+    return false;
+  }
+  if (
+    pAct?.liveActivity?.signature !== nAct?.liveActivity?.signature ||
+    pAct?.liveActivity?.startedAtMs !== nAct?.liveActivity?.startedAtMs
+  ) {
+    return false;
+  }
+  if (pAct?.aggregated?.isRunning !== nAct?.aggregated?.isRunning) return false;
+  if (
+    pAct?.aggregated?.inputTokens !== nAct?.aggregated?.inputTokens ||
+    pAct?.aggregated?.cacheReadTokens !== nAct?.aggregated?.cacheReadTokens ||
+    pAct?.aggregated?.outputTokens !== nAct?.aggregated?.outputTokens ||
+    pAct?.aggregated?.totalTokens !== nAct?.aggregated?.totalTokens
+  ) {
+    return false;
+  }
+  if (
+    pAct?.aggregated?.liveActivity?.signature !== nAct?.aggregated?.liveActivity?.signature ||
+    pAct?.aggregated?.liveActivity?.startedAtMs !== nAct?.aggregated?.liveActivity?.startedAtMs
+  ) {
+    return false;
+  }
+  if (pAct?.aggregated?.liveActivity?.agentId !== nAct?.aggregated?.liveActivity?.agentId) return false;
+  if (pAct?.aggregated?.activeAgentId !== nAct?.aggregated?.activeAgentId) return false;
+  if (pAct?.aggregated?.activeAgentBadge !== nAct?.aggregated?.activeAgentBadge) return false;
+  if (pAct?.aggregated?.latestTokPerSec !== nAct?.aggregated?.latestTokPerSec) return false;
+  if (pAct?.aggregated?.latestTtftSec !== nAct?.aggregated?.latestTtftSec) return false;
+  if (pAct?.aggregated?.avgTokPerSec !== nAct?.aggregated?.avgTokPerSec) return false;
+  if (pAct?.aggregated?.latestStepCostUsd !== nAct?.aggregated?.latestStepCostUsd) return false;
+  if (pAct?.aggregated?.sessionCostUsd !== nAct?.aggregated?.sessionCostUsd) return false;
+  if (pAct?.aggregated?.sessionUnpricedCalls !== nAct?.aggregated?.sessionUnpricedCalls) return false;
+  if (pAct?.aggregated?.sessionCacheHitPct !== nAct?.aggregated?.sessionCacheHitPct) return false;
+  if (pAct?.aggregated?.activeModelShort !== nAct?.aggregated?.activeModelShort) return false;
+  if (pAct?.aggregated?.activeModelUpstream !== nAct?.aggregated?.activeModelUpstream) return false;
+  if (pAct?.aggregated?.latestCacheHitPct !== nAct?.aggregated?.latestCacheHitPct) return false;
+  if (pAct?.aggregated?.latestSpeedReason !== nAct?.aggregated?.latestSpeedReason) return false;
+  if (pAct?.latestTokPerSec !== nAct?.latestTokPerSec) return false;
+  if (pAct?.latestTtftSec !== nAct?.latestTtftSec) return false;
+  if (pAct?.avgTokPerSec !== nAct?.avgTokPerSec) return false;
+  if (pAct?.latestCacheHitPct !== nAct?.latestCacheHitPct) return false;
+  if (pAct?.sessionCacheHitPct !== nAct?.sessionCacheHitPct) return false;
+  if (pAct?.latestSpeedReason !== nAct?.latestSpeedReason) return false;
+  if (pAct?.ttftSummary?.avgSec !== nAct?.ttftSummary?.avgSec) return false;
+  if (pAct?.speedSummary?.sampleCount !== nAct?.speedSummary?.sampleCount) return false;
+  if (
+    pAct?.activeModelShort !== nAct?.activeModelShort ||
+    pAct?.activeModelLabel !== nAct?.activeModelLabel ||
+    pAct?.activeModelUpstream !== nAct?.activeModelUpstream
+  ) {
+    return false;
+  }
+  if (
+    pAct?.latestStepCostUsd !== nAct?.latestStepCostUsd ||
+    pAct?.sessionCostUsd !== nAct?.sessionCostUsd ||
+    pAct?.sessionUnpricedCalls !== nAct?.sessionUnpricedCalls
+  ) {
+    return false;
+  }
+
+  if (!isEquivalentSessionHealth(pAct?.sessionHealth, nAct?.sessionHealth)) return false;
+  if (!isEquivalentSessionHealth(pAct?.aggregated?.sessionHealth, nAct?.aggregated?.sessionHealth)) {
+    return false;
+  }
+
+  const pAgents = pAct?.agents || [];
+  const nAgents = nAct?.agents || [];
+  if (pAgents.length !== nAgents.length) return false;
+  for (let i = 0; i < pAgents.length; i++) {
+    const pa = pAgents[i];
+    const na = nAgents[i];
+    if (
+      pa?.agentId !== na?.agentId ||
+      pa?.agentKind !== na?.agentKind ||
+      pa?.agentOrdinal !== na?.agentOrdinal ||
+      (pa?.swarmState || '') !== (na?.swarmState || '') ||
+      pa?.role !== na?.role ||
+      pa?.stepCount !== na?.stepCount ||
+      pa?.isRunning !== na?.isRunning ||
+      pa?.liveActivity?.signature !== na?.liveActivity?.signature ||
+      pa?.latestTokPerSec !== na?.latestTokPerSec ||
+      pa?.latestTtftSec !== na?.latestTtftSec ||
+      pa?.avgTokPerSec !== na?.avgTokPerSec ||
+      pa?.latestCacheHitPct !== na?.latestCacheHitPct ||
+      pa?.sessionCacheHitPct !== na?.sessionCacheHitPct ||
+      pa?.latestSpeedReason !== na?.latestSpeedReason ||
+      pa?.latestStepCostUsd !== na?.latestStepCostUsd ||
+      pa?.sessionCostUsd !== na?.sessionCostUsd ||
+      pa?.sessionUnpricedCalls !== na?.sessionUnpricedCalls ||
+      pa?.activeModelShort !== na?.activeModelShort ||
+      pa?.activeModelUpstream !== na?.activeModelUpstream ||
+      pa?.context?.totalTokens !== na?.context?.totalTokens ||
+      pa?.context?.compactionLimitTokens !== na?.context?.compactionLimitTokens ||
+      pa?.context?.limitTokens !== na?.context?.limitTokens ||
+      pa?.context?.messagesTokens !== na?.context?.messagesTokens ||
+      pa?.context?.toolResultsTokens !== na?.context?.toolResultsTokens ||
+      pa?.context?.assistantTokens !== na?.context?.assistantTokens ||
+      pa?.context?.userInputTokens !== na?.context?.userInputTokens ||
+      pa?.context?.subagentTokens !== na?.context?.subagentTokens ||
+      pa?.context?.checkpointTokens !== na?.context?.checkpointTokens ||
+      pa?.context?.systemToolsTokens !== na?.context?.systemToolsTokens ||
+      pa?.context?.mcpToolsTokens !== na?.context?.mcpToolsTokens ||
+      pa?.context?.skillsTokens !== na?.context?.skillsTokens ||
+      pa?.context?.systemPromptTokens !== na?.context?.systemPromptTokens ||
+      pa?.context?.userRulesTokens !== na?.context?.userRulesTokens ||
+      !isEquivalentSessionHealth(pa?.sessionHealth, na?.sessionHealth)
+    ) {
+      return false;
+    }
+    // 主代理步骤由根会话统一比对，避免明细视图组装后的引用造成重复比对。
+    const paSteps = pa?.isMain && pAct?.recentSteps ? [] : pa?.recentSteps || [];
+    const naSteps = na?.isMain && nAct?.recentSteps ? [] : na?.recentSteps || [];
+    if (paSteps.length !== naSteps.length) return false;
+    for (let j = 0; paSteps !== naSteps && j < paSteps.length; j++) {
+      const bs = paSteps[j];
+      const as = naSteps[j];
+      if (
+        bs?.stepIndex !== as?.stepIndex ||
+        bs?.createdAtMs !== as?.createdAtMs ||
+        bs?.totalDurationSec !== as?.totalDurationSec ||
+        bs?.streamDurationSec !== as?.streamDurationSec ||
+        bs?.modelKey !== as?.modelKey ||
+        bs?.modelShort !== as?.modelShort ||
+        bs?.modelLabel !== as?.modelLabel ||
+        bs?.modelUpstream !== as?.modelUpstream ||
+        bs?.responseModel !== as?.responseModel ||
+        bs?.modelSource !== as?.modelSource ||
+        bs?.costUsd !== as?.costUsd ||
+        bs?.tokPerSec !== as?.tokPerSec ||
+        bs?.ttftSec !== as?.ttftSec ||
+        bs?.outputTokens !== as?.outputTokens ||
+        bs?.thinkingTokens !== as?.thinkingTokens ||
+        bs?.responseTokens !== as?.responseTokens ||
+        bs?.inputTokens !== as?.inputTokens ||
+        bs?.cacheReadTokens !== as?.cacheReadTokens ||
+        bs?.contextTokens !== as?.contextTokens ||
+        bs?.cacheHitPct !== as?.cacheHitPct ||
+        bs?.cacheMissReason !== as?.cacheMissReason ||
+        bs?.gapSec !== as?.gapSec ||
+        Boolean(bs?.isOver60sGap) !== Boolean(as?.isOver60sGap) ||
+        bs?.toolCallCount !== as?.toolCallCount ||
+        bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.anomalySig !== as?.anomalySig ||
+        bs?.turnIndex !== as?.turnIndex ||
+        bs?.rootTurnIndex !== as?.rootTurnIndex ||
+        bs?.isTurnStart !== as?.isTurnStart ||
+        bs?.isRootTurnStart !== as?.isRootTurnStart ||
+        bs?.isLatestTurn !== as?.isLatestTurn ||
+        bs?.isRootLatestTurn !== as?.isRootLatestTurn ||
+        bs?.turnPrompt !== as?.turnPrompt ||
+        bs?.rootTurnPrompt !== as?.rootTurnPrompt
+      ) {
+        return false;
+      }
+    }
+  }
+
+  // 4. 比对 10 通道上下文窗口构成及近期步骤明细
+  const pCtx = pAct?.context;
+  const nCtx = nAct?.context;
+  if (pCtx?.totalTokens !== nCtx?.totalTokens) return false;
+  if (pCtx?.compactionLimitTokens !== nCtx?.compactionLimitTokens) return false;
+  if (pCtx?.limitTokens !== nCtx?.limitTokens) return false;
+  if (pCtx?.messagesTokens !== nCtx?.messagesTokens) return false;
+  if (pCtx?.assistantTokens !== nCtx?.assistantTokens) return false;
+  if (pCtx?.toolResultsTokens !== nCtx?.toolResultsTokens) return false;
+  if (pCtx?.userInputTokens !== nCtx?.userInputTokens) return false;
+  if (pCtx?.subagentTokens !== nCtx?.subagentTokens) return false;
+  if (pCtx?.checkpointTokens !== nCtx?.checkpointTokens) return false;
+  if (pCtx?.systemToolsTokens !== nCtx?.systemToolsTokens) return false;
+  if (pCtx?.mcpToolsTokens !== nCtx?.mcpToolsTokens) return false;
+  if (pCtx?.skillsTokens !== nCtx?.skillsTokens) return false;
+  if (pCtx?.systemPromptTokens !== nCtx?.systemPromptTokens) return false;
+  if (pCtx?.userRulesTokens !== nCtx?.userRulesTokens) return false;
+  if ((pAct?.recentSteps?.length || 0) !== (nAct?.recentSteps?.length || 0)) return false;
+  for (let i = 0; pAct?.recentSteps !== nAct?.recentSteps && i < (pAct?.recentSteps?.length || 0); i++) {
+    const before = pAct.recentSteps[i], after = nAct.recentSteps[i];
+    if (
+      before.stepIndex !== after.stepIndex ||
+      before.createdAtMs !== after.createdAtMs ||
+      before.totalDurationSec !== after.totalDurationSec ||
+      before.streamDurationSec !== after.streamDurationSec ||
+      before.modelKey !== after.modelKey ||
+      before.modelShort !== after.modelShort ||
+      before.modelLabel !== after.modelLabel ||
+      before.modelUpstream !== after.modelUpstream ||
+      before.responseModel !== after.responseModel ||
+      before.modelSource !== after.modelSource ||
+      before.costUsd !== after.costUsd ||
+      before.tokPerSec !== after.tokPerSec ||
+      before.ttftSec !== after.ttftSec ||
+      before.outputTokens !== after.outputTokens ||
+      before.thinkingTokens !== after.thinkingTokens ||
+      before.responseTokens !== after.responseTokens ||
+      before.inputTokens !== after.inputTokens ||
+      before.cacheReadTokens !== after.cacheReadTokens ||
+      before.contextTokens !== after.contextTokens ||
+      before.cacheHitPct !== after.cacheHitPct ||
+      before.cacheMissReason !== after.cacheMissReason ||
+      before.gapSec !== after.gapSec ||
+      Boolean(before.isOver60sGap) !== Boolean(after.isOver60sGap) ||
+      before.toolCallCount !== after.toolCallCount ||
+      before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.anomalySig !== after.anomalySig ||
+      before.turnIndex !== after.turnIndex ||
+      before.rootTurnIndex !== after.rootTurnIndex ||
+      before.isTurnStart !== after.isTurnStart ||
+      before.isRootTurnStart !== after.isRootTurnStart ||
+      before.isLatestTurn !== after.isLatestTurn ||
+      before.isRootLatestTurn !== after.isRootLatestTurn ||
+      before.turnPrompt !== after.turnPrompt ||
+      before.rootTurnPrompt !== after.rootTurnPrompt
+    ) {
+      return false;
+    }
+  }
+
+  // 5. 比对消费统计所选时间区间、当前会话累计消费与账号全局累计消费
+  const pRange = prev.consumption?.selectedRange;
+  const nRange = next.consumption?.selectedRange;
+  if (pRange?.key !== nRange?.key) return false;
+  if (nRange?.key === 'custom') {
+    if (pRange?.startMs !== nRange?.startMs || pRange?.endMs !== nRange?.endMs) return false;
+  }
+
+  const pCons = prev.consumption?.session;
+  const nCons = next.consumption?.session;
+  if (pCons?.totalTokens !== nCons?.totalTokens) return false;
+  if (pCons?.costUsd !== nCons?.costUsd) return false;
+  if (pCons?.unpricedCalls !== nCons?.unpricedCalls) return false;
+
+  const pAcct = prev.consumption?.account;
+  const nAcct = next.consumption?.account;
+  if (pAcct?.totalTokens !== nAcct?.totalTokens) return false;
+  if (pAcct?.inputTokens !== nAcct?.inputTokens) return false;
+  if (pAcct?.cacheReadTokens !== nAcct?.cacheReadTokens) return false;
+  if (pAcct?.outputTokens !== nAcct?.outputTokens) return false;
+  if (pAcct?.calls !== nAcct?.calls) return false;
+  if (pAcct?.costUsd !== nAcct?.costUsd) return false;
+  if (pAcct?.savedCostUsd !== nAcct?.savedCostUsd) return false;
+  if (pAcct?.cacheHitPct !== nAcct?.cacheHitPct) return false;
+  if (pAcct?.unpricedCalls !== nAcct?.unpricedCalls) return false;
+
+  // 6. 比对历史趋势时间分桶序列与年度分月序列
+  const areModelSlicesEqual = (pList, nList) => {
+    const a = pList || [];
+    const b = nList || [];
+    if (a.length !== b.length) return false;
+    for (let k = 0; k < a.length; k++) {
+      if (
+        a[k]?.label !== b[k]?.label ||
+        a[k]?.shortName !== b[k]?.shortName ||
+        a[k]?.upstreamName !== b[k]?.upstreamName ||
+        a[k]?.costUsd !== b[k]?.costUsd ||
+        a[k]?.unpricedCalls !== b[k]?.unpricedCalls ||
+        a[k]?.totalTokens !== b[k]?.totalTokens ||
+        a[k]?.calls !== b[k]?.calls ||
+        Number(a[k]?.anomalyCount || 0) !== Number(b[k]?.anomalyCount || 0) ||
+        Number(a[k]?.anomalySteps || 0) !== Number(b[k]?.anomalySteps || 0)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const pTrend = prev.consumption?.trendSeries || [];
+  const nTrend = next.consumption?.trendSeries || [];
+  if (pTrend.length !== nTrend.length) return false;
+  for (let i = 0; i < pTrend.length; i++) {
+    if (
+      pTrend[i]?.tokens !== nTrend[i]?.tokens ||
+      pTrend[i]?.calls !== nTrend[i]?.calls ||
+      pTrend[i]?.label !== nTrend[i]?.label ||
+      pTrend[i]?.fullLabel !== nTrend[i]?.fullLabel ||
+      !areModelSlicesEqual(pTrend[i]?.models, nTrend[i]?.models)
+    ) {
+      return false;
+    }
+  }
+  if (prev.consumption?.monthlyYear !== next.consumption?.monthlyYear) return false;
+
+  const pMonthly = prev.consumption?.monthlySeries || [];
+  const nMonthly = next.consumption?.monthlySeries || [];
+  if (pMonthly.length !== nMonthly.length) return false;
+  for (let i = 0; i < pMonthly.length; i++) {
+    if (
+      pMonthly[i]?.totalTokens !== nMonthly[i]?.totalTokens ||
+      pMonthly[i]?.costUsd !== nMonthly[i]?.costUsd ||
+      pMonthly[i]?.calls !== nMonthly[i]?.calls ||
+      !areModelSlicesEqual(pMonthly[i]?.models, nMonthly[i]?.models)
+    ) {
+      return false;
+    }
+  }
+
+  // 7. 比对按模型汇总明细与数据来源汇总明细
+  if (!areModelSlicesEqual(pAct?.modelBreakdown, nAct?.modelBreakdown)) {
+    return false;
+  }
+  if (!areModelSlicesEqual(prev.modelBreakdown, next.modelBreakdown)) {
+    return false;
+  }
+
+  const pSources = prev.consumption?.sourcesBreakdown || [];
+  const nSources = next.consumption?.sourcesBreakdown || [];
+  if (pSources.length !== nSources.length) return false;
+  for (let i = 0; i < pSources.length; i++) {
+    if (
+      pSources[i]?.name !== nSources[i]?.name ||
+      pSources[i]?.costUsd !== nSources[i]?.costUsd ||
+      pSources[i]?.unpricedCalls !== nSources[i]?.unpricedCalls ||
+      pSources[i]?.totalTokens !== nSources[i]?.totalTokens ||
+      pSources[i]?.calls !== nSources[i]?.calls ||
+      !areModelSlicesEqual(pSources[i]?.models, nSources[i]?.models)
+    ) {
+      return false;
+    }
+  }
+
+  // 8. 比对账号订阅档位与动态多配额池
+  if (
+    prev.account?.email !== next.account?.email ||
+    prev.account?.name !== next.account?.name ||
+    prev.account?.status !== next.account?.status ||
+    prev.account?.tierName !== next.account?.tierName ||
+    prev.account?.planName !== next.account?.planName ||
+    prev.account?.aiCredits !== next.account?.aiCredits
+  ) {
+    return false;
+  }
+
+  if (
+    prev.quotas?.meta?.refreshFailed !== next.quotas?.meta?.refreshFailed ||
+    prev.quotas?.meta?.isStale !== next.quotas?.meta?.isStale
+  ) {
+    return false;
+  }
+
+  const pQuot = prev.quotas?.activePool;
+  const nQuot = next.quotas?.activePool;
+  if (pQuot?.family !== nQuot?.family) return false;
+  if (pQuot?.usedPct !== nQuot?.usedPct) return false;
+  if (pQuot?.remainingPct !== nQuot?.remainingPct) return false;
+  if (pQuot?.weeklyUsedPct !== nQuot?.weeklyUsedPct) return false;
+  if (pQuot?.weeklyRemainingPct !== nQuot?.weeklyRemainingPct) return false;
+  if (prev.quotas?.weekly?.usedPct !== next.quotas?.weekly?.usedPct) return false;
+  if (prev.quotas?.weekly?.remainingPct !== next.quotas?.weekly?.remainingPct) return false;
+  if (prev.quotas?.weekly?.tokens !== next.quotas?.weekly?.tokens) return false;
+  if (prev.quotas?.weekly?.costUsd !== next.quotas?.weekly?.costUsd) return false;
+  if (prev.quotas?.weekly?.calls !== next.quotas?.weekly?.calls) return false;
+  if (prev.quotas?.weekly?.unpricedCalls !== next.quotas?.weekly?.unpricedCalls) return false;
+  if (prev.quotas?.weekly?.resetTime !== next.quotas?.weekly?.resetTime) return false;
+
+  const pPools = prev.quotas?.pools || [];
+  const nPools = next.quotas?.pools || [];
+  if (pPools.length !== nPools.length) return false;
+  for (let i = 0; i < pPools.length; i++) {
+    if (
+      pPools[i]?.poolKey !== nPools[i]?.poolKey ||
+      pPools[i]?.poolLabel !== nPools[i]?.poolLabel ||
+      pPools[i]?.usedPct !== nPools[i]?.usedPct ||
+      pPools[i]?.remainingPct !== nPools[i]?.remainingPct ||
+      pPools[i]?.resetTime !== nPools[i]?.resetTime ||
+      pPools[i]?.weeklyUsedPct !== nPools[i]?.weeklyUsedPct ||
+      pPools[i]?.weeklyRemainingPct !== nPools[i]?.weeklyRemainingPct ||
+      pPools[i]?.weeklyResetTime !== nPools[i]?.weeklyResetTime ||
+      pPools[i]?.cycle5h?.tokens !== nPools[i]?.cycle5h?.tokens ||
+      pPools[i]?.cycle5h?.costUsd !== nPools[i]?.cycle5h?.costUsd ||
+      pPools[i]?.cycle5h?.calls !== nPools[i]?.cycle5h?.calls ||
+      pPools[i]?.cycleWeekly?.tokens !== nPools[i]?.cycleWeekly?.tokens ||
+      pPools[i]?.cycleWeekly?.costUsd !== nPools[i]?.cycleWeekly?.costUsd ||
+      pPools[i]?.cycleWeekly?.calls !== nPools[i]?.cycleWeekly?.calls
+    ) {
+      return false;
+    }
+  }
+
+  const pConvs = prev.conversations || [];
+  const nConvs = next.conversations || [];
+  if (pConvs.length !== nConvs.length) return false;
+  for (let i = 0; i < pConvs.length; i++) {
+    if (
+      pConvs[i]?.cascadeId !== nConvs[i]?.cascadeId ||
+      pConvs[i]?.title !== nConvs[i]?.title ||
+      pConvs[i]?.status !== nConvs[i]?.status ||
+      pConvs[i]?.stepCount !== nConvs[i]?.stepCount ||
+      pConvs[i]?.subagentCount !== nConvs[i]?.subagentCount ||
+      (pConvs[i]?.swarmCount || 0) !== (nConvs[i]?.swarmCount || 0) ||
+      (pConvs[i]?.swarmTitle || '') !== (nConvs[i]?.swarmTitle || '') ||
+      pConvs[i]?.totalStepCount !== nConvs[i]?.totalStepCount
+    ) {
+      return false;
+    }
+  }
+
+  const pRunning = prev.runningConversations || [];
+  const nRunning = next.runningConversations || [];
+  if (pRunning.length !== nRunning.length) return false;
+  for (let i = 0; i < pRunning.length; i++) {
+    const pr = pRunning[i];
+    const nr = nRunning[i];
+    if (
+      pr?.cascadeId !== nr?.cascadeId ||
+      pr?.title !== nr?.title ||
+      pr?.isCurrentSelected !== nr?.isCurrentSelected ||
+      pr?.isMainRunning !== nr?.isMainRunning ||
+      pr?.subagentCount !== nr?.subagentCount ||
+      (pr?.swarmCount || 0) !== (nr?.swarmCount || 0) ||
+      pr?.runningSubagentCount !== nr?.runningSubagentCount ||
+      (pr?.runningSwarmCount || 0) !== (nr?.runningSwarmCount || 0) ||
+      pr?.mainActivity?.signature !== nr?.mainActivity?.signature ||
+      pr?.mainActivity?.startedAtMs !== nr?.mainActivity?.startedAtMs
+    ) {
+      return false;
+    }
+    const pSubs = pr?.subagents || [];
+    const nSubs = nr?.subagents || [];
+    if (pSubs.length !== nSubs.length) return false;
+    for (let j = 0; j < pSubs.length; j++) {
+      if (
+        pSubs[j]?.cascadeId !== nSubs[j]?.cascadeId ||
+        pSubs[j]?.agentKind !== nSubs[j]?.agentKind ||
+        (pSubs[j]?.swarmState || '') !== (nSubs[j]?.swarmState || '') ||
+        pSubs[j]?.role !== nSubs[j]?.role ||
+        pSubs[j]?.isRunning !== nSubs[j]?.isRunning ||
+        pSubs[j]?.stepCount !== nSubs[j]?.stepCount ||
+        pSubs[j]?.liveActivity?.signature !== nSubs[j]?.liveActivity?.signature ||
+        pSubs[j]?.liveActivity?.startedAtMs !== nSubs[j]?.liveActivity?.startedAtMs
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+export function resetTelemetryForEndpointSwitch() {
+  endpointSwitchEpoch += 1;
+  latestRequestSeq += 1;
+  latestConsumptionReqSeq += 1;
+  latestConversationSwitchSeq += 1;
+  lastReceivedSteps = null;
+  inFlightTelemetryPoll = null;
+  consecutivePollFailures = 0;
+  consumptionCacheScopeSig = '';
+  abortSidecarApiKey('telemetry-poll');
+  abortSidecarApiKey('telemetry-force');
+  abortSidecarApiKey('consumption-range');
+  abortSidecarApiKey('consumption-presets');
+  abortSidecarApiKey('conversation-switch');
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+  }
+  telemetryStore.setState({
+    selectedConversationId: '',
+    telemetry: null,
+    syncState: 'idle',
+  });
+}
+
+export async function fetchTelemetry({ force = false } = {}) {
+  if (!force && activeForceCount > 0) {
+    return telemetryStore.getState().telemetry;
+  }
+
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  if (force) params.set('force', '1');
+  params.set('stepDetails', 'display');
+
+  if (force) {
+    inFlightTelemetryPoll = null;
+    return requestTelemetry(params, true);
+  }
+  const query = params.toString();
+  const existing = inFlightTelemetryPoll;
+  if (existing?.query === query && existing.endpointId === LOCAL_ENDPOINT_ID) {
+    return existing.promise;
+  }
+  const poll = { query, endpointId: LOCAL_ENDPOINT_ID, promise: null };
+  poll.promise = requestTelemetry(params, false).finally(() => {
+    if (inFlightTelemetryPoll === poll) inFlightTelemetryPoll = null;
+  });
+  inFlightTelemetryPoll = poll;
+  return poll.promise;
+}
+
+function readDisplaySteps(payload) {
+  const active = payload?.activeConversation;
+  if (!payload?.stepRevision || !Array.isArray(active?.recentSteps)) return null;
+  return {
+    revision: payload.stepRevision,
+    recentSteps: active.recentSteps,
+    agentSteps: active.agents.map((agent) => agent.recentSteps === active.recentSteps
+      ? undefined
+      : agent.recentSteps),
+  };
+}
+
+async function requestTelemetry(params, force) {
+  const reqSeq = ++latestRequestSeq;
+  const reqSettingsRev = settingsRevision;
+  const reqRange = String(params.get('range') || '');
+  const reqStartMs = Number(params.get('startMs') || 0);
+  const reqEndMs = Number(params.get('endMs') || 0);
+  const startMs = Date.now();
+
+  if (force) {
+    activeForceCount += 1;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    telemetryStore.setState({ syncState: 'syncing' });
+  }
+
+  try {
+    const previousSteps = lastReceivedSteps || readDisplaySteps(telemetryStore.getState().telemetry);
+    params.set('stepRevision', previousSteps?.revision || '');
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: force ? 'telemetry-force' : 'telemetry-poll',
+    });
+
+    const active = payload?.activeConversation;
+    if (payload?.stepsUnchanged) {
+      if (!active || !previousSteps || payload.stepRevision !== previousSteps.revision) {
+        throw new Error('Telemetry step revision mismatch');
+      }
+      active.recentSteps = previousSteps.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = previousSteps.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
+    if (reqSeq !== latestRequestSeq) {
+      return payload;
+    }
+    lastReceivedSteps = readDisplaySteps(payload);
+    consecutivePollFailures = 0;
+
+    let resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    recordConversationViewToCache(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: reqStartMs,
+        customEndMs: reqEndMs,
+      });
+    }
+
+    const latestSt = telemetryStore.getState();
+    const incomingRev = Number(resolvedPayload?.consumption?.revision || 0);
+    const matchesCurrentRange =
+      !reqRange ||
+      (reqRange === latestSt.selectedTimeRange &&
+        (reqRange !== 'custom' ||
+          (reqStartMs === Number(latestSt.customStartMs || 0) &&
+            reqEndMs === Number(latestSt.customEndMs || 0))));
+
+    // 常规 2 秒轮询在途期间若用户已通过前端缓存瞬切到其他时间段，保留用户当前选中的范围不回跳，
+    // 若后端 usageRevision 已推进则静默补发一次轻量范围校准。
+    let needsSilentRangeRevalidate = false;
+    if (!force && !matchesCurrentRange && resolvedPayload?.consumption) {
+      const activeKey = makeConsumptionRangeCacheKey(
+        latestSt.selectedTimeRange,
+        latestSt.customStartMs,
+        latestSt.customEndMs
+      );
+      const cachedActive = consumptionRangeCache.get(activeKey);
+      if (cachedActive) {
+        resolvedPayload = applyCachedConsumptionSlice(resolvedPayload, cachedActive, incomingRev);
+        if (incomingRev > 0 && cachedActive.revision !== incomingRev) {
+          needsSilentRangeRevalidate = true;
+        }
+      } else if (
+        latestSt.telemetry?.consumption?.selectedRange?.key === latestSt.selectedTimeRange
+      ) {
+        resolvedPayload = {
+          ...resolvedPayload,
+          consumption: {
+            ...resolvedPayload.consumption,
+            selectedRange: latestSt.telemetry.consumption.selectedRange,
+            session: latestSt.telemetry.consumption.session,
+            account: latestSt.telemetry.consumption.account,
+            trendSeries: latestSt.telemetry.consumption.trendSeries,
+            sourcesBreakdown: latestSt.telemetry.consumption.sourcesBreakdown,
+          },
+          modelBreakdown: latestSt.telemetry.modelBreakdown,
+        };
+      }
+    }
+
+    if (force) {
+      const elapsed = Date.now() - startMs;
+      if (elapsed < 220) {
+        await new Promise((r) => setTimeout(r, 220 - elapsed));
+      }
+      if (reqSeq !== latestRequestSeq) {
+        return resolvedPayload;
+      }
+      const finalForcePayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+      if (feedbackTimer) clearTimeout(feedbackTimer);
+      telemetryStore.setState({
+        telemetry: finalForcePayload,
+        minuteTick: Math.floor(Date.now() / 30000),
+        syncState: 'synced',
+      });
+      feedbackTimer = setTimeout(() => {
+        feedbackTimer = null;
+        telemetryStore.setState({ syncState: 'idle' });
+      }, 1100);
+      return finalForcePayload;
+    } else {
+      const isSame = isEquivalentTelemetry(latestSt.telemetry, resolvedPayload);
+      const nextTelemetry = isSame ? latestSt.telemetry : resolvedPayload;
+      telemetryStore.setState({
+        telemetry: nextTelemetry,
+        minuteTick: Math.floor(Date.now() / 30000),
+        syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
+      });
+      if (needsSilentRangeRevalidate) {
+        void fetchConsumptionRangeSlice({
+          range: latestSt.selectedTimeRange,
+          customStartMs: latestSt.customStartMs,
+          customEndMs: latestSt.customEndMs,
+        });
+      }
+      return resolvedPayload;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError' || reqSeq !== latestRequestSeq) return null;
+    consecutivePollFailures += 1;
+    if (force || consecutivePollFailures >= 2 || !telemetryStore.getState().telemetry) {
+      telemetryStore.setState({ syncState: 'error' });
+    }
+    return null;
+  } finally {
+    if (force) {
+      activeForceCount = Math.max(0, activeForceCount - 1);
+      if (activeForceCount === 0 && loopActive && loopTickFn && !pollTimer) {
+        pollTimer = setTimeout(loopTickFn, loopIntervalMs);
+      }
+    }
+  }
+}
+
+async function fetchConsumptionRangeSlice({
+  range,
+  customStartMs = 0,
+  customEndMs = 0,
+} = {}) {
+  const reqEpoch = endpointSwitchEpoch;
+  const reqSeq = ++latestConsumptionReqSeq;
+  const targetRange = String(range || 'today');
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('range', targetRange);
+  if (targetRange === 'custom') {
+    if (customStartMs > 0) params.set('startMs', String(customStartMs));
+    if (customEndMs > 0) params.set('endMs', String(customEndMs));
+  }
+  params.set('scope', 'consumption');
+
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'consumption-range',
+    });
+    if (!payload || typeof payload !== 'object' || reqEpoch !== endpointSwitchEpoch) return null;
+
+    if (payload.scope === 'consumption' && payload.consumption) {
+      const usageRev = Number(payload.usageRevision ?? payload.consumption.revision ?? 0);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+        usageRevision: usageRev,
+      });
+      if (reqSeq !== latestConsumptionReqSeq) return payload;
+
+      const latestSt = telemetryStore.getState();
+      const stillMatches =
+        latestSt.selectedTimeRange === targetRange &&
+        (targetRange !== 'custom' ||
+          (Number(latestSt.customStartMs || 0) === Number(customStartMs || 0) &&
+            Number(latestSt.customEndMs || 0) === Number(customEndMs || 0)));
+      if (!stillMatches) return payload;
+
+      const prevTelemetry = latestSt.telemetry;
+      if (prevTelemetry) {
+        const nextTelemetry = {
+          ...prevTelemetry,
+          consumption: {
+            ...(prevTelemetry.consumption || {}),
+            ...payload.consumption,
+            ...(usageRev > 0 ? { revision: usageRev } : {}),
+          },
+          modelBreakdown: Array.isArray(payload.modelBreakdown)
+            ? payload.modelBreakdown
+            : prevTelemetry.modelBreakdown,
+        };
+        if (!isEquivalentTelemetry(prevTelemetry, nextTelemetry)) {
+          telemetryStore.setState({ telemetry: nextTelemetry });
+        }
+      }
+      return payload;
+    }
+
+    // 冷启动阶段后端尚无基础快照时会回退返回完整 telemetry，直接平滑复用现有状态合并
+    if (payload.consumption) {
+      syncConsumptionCacheScope(payload);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+      });
+      if (reqSeq === latestConsumptionReqSeq) {
+        const latestSt = telemetryStore.getState();
+        if (!isEquivalentTelemetry(latestSt.telemetry, payload)) {
+          telemetryStore.setState({ telemetry: payload });
+        }
+      }
+    }
+    return payload;
+  } catch (err) {
+    if (err?.name === 'AbortError') return null;
+    return null;
+  }
+}
+
+/**
+ * 快速切换当前查看的会话：
+ * - 命中前端 `conversationViewCache` 时，0ms 原子切换当前会话快照，并静默走轻量 `scope=conversation` 校准；
+ * - 未命中缓存时直接走零 LS RPC、零全盘扫描的 `scope=conversation` 通道；
+ * - 若后端提示该会话需要补读最新运行态或懒迁移字段（`needsBackgroundSync`），展示后再在后台静默补齐。
+ */
+export async function selectConversation(
+  nextConvId,
+  { hostRouteConversationId = undefined } = {}
+) {
+  const switchSeq = ++latestConversationSwitchSeq;
+  latestRequestSeq += 1;
+  inFlightTelemetryPoll = null;
+  abortSidecarApiKey('telemetry-poll');
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+
+  const targetSelectedId = String(nextConvId || '').trim();
+  const prevSt = telemetryStore.getState();
+  const nextHostRouteId =
+    hostRouteConversationId !== undefined
+      ? String(hostRouteConversationId || '').trim()
+      : prevSt.hostRouteConversationId;
+  const effectiveConvId = targetSelectedId || nextHostRouteId || '';
+  const statePatch = {
+    selectedConversationId: targetSelectedId,
+    ...(hostRouteConversationId !== undefined ? { hostRouteConversationId: nextHostRouteId } : {}),
+  };
+
+  const prevTelemetry = prevSt.telemetry;
+  const lookupRootId = resolveCachedConversationRootId(prevTelemetry, effectiveConvId);
+  const cachedEntry = lookupRootId ? conversationViewCache.get(lookupRootId) : null;
+  const cachedSteps =
+    cachedEntry && cachedEntry.stepRevision
+      ? readDisplaySteps({
+          stepRevision: cachedEntry.stepRevision,
+          activeConversation: cachedEntry.activeConversation,
+        })
+      : null;
+
+  if (cachedEntry && prevTelemetry) {
+    const optimisticTelemetry = applyConversationSliceToTelemetry(prevTelemetry, cachedEntry);
+    if (cachedSteps) {
+      lastReceivedSteps = cachedSteps;
+    }
+    telemetryStore.setState({
+      ...statePatch,
+      telemetry: optimisticTelemetry,
+    });
+  } else {
+    telemetryStore.setState(statePatch);
+  }
+
+  const current = telemetryStore.getState();
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  params.set('stepDetails', 'display');
+  params.set('stepRevision', cachedSteps?.revision || '');
+  params.set('scope', 'conversation');
+
+  const reqEpoch = endpointSwitchEpoch;
+  const reqSettingsRev = settingsRevision;
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'conversation-switch',
+    });
+    if (!payload || typeof payload !== 'object' || reqEpoch !== endpointSwitchEpoch) return null;
+    if (switchSeq !== latestConversationSwitchSeq) return payload;
+
+    const latestSt = telemetryStore.getState();
+    const latestEffectiveId =
+      String(latestSt.selectedConversationId || latestSt.hostRouteConversationId || '').trim();
+    if (latestEffectiveId !== effectiveConvId) return payload;
+
+    const active = payload.activeConversation;
+    if (payload.stepsUnchanged) {
+      const stepsSource =
+        (cachedSteps && payload.stepRevision === cachedSteps.revision ? cachedSteps : null) ||
+        (lastReceivedSteps && payload.stepRevision === lastReceivedSteps.revision
+          ? lastReceivedSteps
+          : null);
+      if (!active || !stepsSource) {
+        return fetchTelemetry({ force: false });
+      }
+      active.recentSteps = stepsSource.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = stepsSource.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
+
+    if (payload.scope === 'conversation' && active) {
+      lastReceivedSteps = readDisplaySteps(payload) || lastReceivedSteps;
+      recordConversationViewToCache(payload);
+      const baseTelemetry = latestSt.telemetry;
+      if (baseTelemetry) {
+        const mergedTelemetry = applyConversationSliceToTelemetry(baseTelemetry, {
+          activeConversation: active,
+          activePool: payload.quotas?.activePool || null,
+          weekly: payload.quotas?.weekly || null,
+          sessionConsumption: payload.consumption?.session || null,
+          sessionPresets: payload.consumption?.sessionPresets || null,
+          stepRevision: payload.stepRevision || '',
+        });
+        if (!isEquivalentTelemetry(baseTelemetry, mergedTelemetry)) {
+          telemetryStore.setState({
+            telemetry: mergedTelemetry,
+            minuteTick: Math.floor(Date.now() / 30000),
+          });
+        }
+      } else {
+        return fetchTelemetry({ force: false });
+      }
+      if (payload.needsBackgroundSync && loopActive && typeof setTimeout === 'function') {
+        deferredConvSyncTimer = setTimeout(() => {
+          deferredConvSyncTimer = null;
+          if (switchSeq === latestConversationSwitchSeq && loopActive) {
+            void fetchTelemetry({ force: false });
+          }
+        }, 35);
+      }
+      return payload;
+    }
+
+    // 冷启动或全新未入缓存会话回退至完整载荷
+    const resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    lastReceivedSteps = readDisplaySteps(resolvedPayload) || lastReceivedSteps;
+    recordConversationViewToCache(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: Number(current.customStartMs || 0),
+        customEndMs: Number(current.customEndMs || 0),
+      });
+    }
+    if (!isEquivalentTelemetry(latestSt.telemetry, resolvedPayload)) {
+      telemetryStore.setState({
+        telemetry: resolvedPayload,
+        minuteTick: Math.floor(Date.now() / 30000),
+        syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
+      });
+    }
+    return resolvedPayload;
+  } catch (err) {
+    if (err?.name === 'AbortError' || switchSeq !== latestConversationSwitchSeq) return null;
+    return null;
+  }
+}
+
+/**
+ * 切换「用量统计」时间范围：
+ * - 命中前端 rangeCache 时，在单次 setState 内 0ms 原子更新概览/趋势/模型/来源（若 usageRevision 一致则 0 次 HTTP 请求）；
+ * - 若后台数据已更新则先 0ms 展示缓存，再静默发起轻量 `scope=consumption` 校准；
+ * - 未命中缓存（如自定义时段或进页首 20ms 抢点）则直接走 `<5ms` 的 `scope=consumption` 通道。
+ */
+export function selectConsumptionTimeRange(
+  nextRange,
+  { customStartMs = undefined, customEndMs = undefined } = {}
+) {
+  const targetRange = String(nextRange || 'today');
+  const prevSt = telemetryStore.getState();
+  const nextStartMs =
+    targetRange === 'custom'
+      ? Number(customStartMs !== undefined ? customStartMs : prevSt.customStartMs || 0)
+      : prevSt.customStartMs;
+  const nextEndMs =
+    targetRange === 'custom'
+      ? Number(customEndMs !== undefined ? customEndMs : prevSt.customEndMs || 0)
+      : prevSt.customEndMs;
+
+  const statePatch = { selectedTimeRange: targetRange };
+  if (targetRange === 'custom') {
+    statePatch.customStartMs = nextStartMs;
+    statePatch.customEndMs = nextEndMs;
+  }
+
+  const cacheKey = makeConsumptionRangeCacheKey(targetRange, nextStartMs, nextEndMs);
+  const cached = consumptionRangeCache.get(cacheKey);
+  const prevTelemetry = prevSt.telemetry;
+
+  if (cached && prevTelemetry) {
+    const currentRev = Number(prevTelemetry.consumption?.revision || 0);
+    const nextTelemetry = applyCachedConsumptionSlice(
+      prevTelemetry,
+      cached,
+      currentRev > 0 ? currentRev : cached.revision
+    );
+    telemetryStore.setState({ ...statePatch, telemetry: nextTelemetry });
+    if (currentRev > 0 && cached.revision === currentRev) {
+      return Promise.resolve(nextTelemetry);
+    }
+    return fetchConsumptionRangeSlice({
+      range: targetRange,
+      customStartMs: nextStartMs,
+      customEndMs: nextEndMs,
+    });
+  }
+
+  telemetryStore.setState(statePatch);
+  return fetchConsumptionRangeSlice({
+    range: targetRange,
+    customStartMs: nextStartMs,
+    customEndMs: nextEndMs,
+  });
+}
+
+/**
+ * 仅在进入「用量统计」视图时触发一次静默后台预取，拉齐全部 7 个预设区间到前端缓存以实现 0ms 瞬切。
+ */
+export function prefetchConsumptionPresets() {
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  const currentRev = Number(prevTelemetry?.consumption?.revision || 0);
+  if (currentRev > 0 && lastPrefetchedUsageRevision === currentRev && hasAllPresetRangesCached(currentRev)) {
+    return Promise.resolve(true);
+  }
+  if (inFlightPresetsPrefetch) {
+    return inFlightPresetsPrefetch;
+  }
+
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('scope', 'consumption-presets');
+
+  const reqEpoch = endpointSwitchEpoch;
+  const task = callSidecarApi(`/api/telemetry?${params}`, {
+    method: 'GET',
+    abortKey: 'consumption-presets',
+  })
+    .then((payload) => {
+      if (reqEpoch !== endpointSwitchEpoch) return false;
+      if (payload?.scope === 'consumption-presets' && payload.ranges && typeof payload.ranges === 'object') {
+        const rev = Number(payload.usageRevision || currentRev || 0);
+        for (const [rangeKey, entry] of Object.entries(payload.ranges)) {
+          if (!entry || typeof entry !== 'object') continue;
+          recordConsumptionSliceToCache(
+            { ...entry, revision: rev },
+            entry.modelBreakdown,
+            { usageRevision: rev }
+          );
+        }
+        if (rev > 0) {
+          lastPrefetchedUsageRevision = rev;
+        }
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      if (inFlightPresetsPrefetch === task) {
+        inFlightPresetsPrefetch = null;
+      }
+    });
+
+  inFlightPresetsPrefetch = task;
+  return task;
+}
+
+export async function saveSettingsPatch(patch) {
+  const safePatch = patch && typeof patch === 'object' ? { ...patch } : {};
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'language')) {
+    safePatch.language = normalizeI18nLanguage(safePatch.language);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'themeAccent')) {
+    safePatch.themeAccent = normalizeClientThemeAccent(safePatch.themeAccent);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'fontScale')) {
+    safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'modernUi')) {
+    const normModern = normalizeClientModernUi(safePatch.modernUi);
+    safePatch.modernUi = normModern;
+    safePatch.experimentalModernUi = normModern;
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'experimentalModernUi')) {
+    safePatch.experimentalModernUi = normalizeClientModernUi(safePatch.experimentalModernUi);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
+    safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'enableCliStatusLine')) {
+    safePatch.enableCliStatusLine = Boolean(safePatch.enableCliStatusLine);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showTopbarMultiSession')) {
+    safePatch.showTopbarMultiSession = Boolean(safePatch.showTopbarMultiSession);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showQuotaPace')) {
+    safePatch.showQuotaPace = Boolean(safePatch.showQuotaPace);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepTurnRail')) {
+    safePatch.showStepTurnRail = Boolean(safePatch.showStepTurnRail);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepAgentBadge')) {
+    safePatch.showStepAgentBadge = Boolean(safePatch.showStepAgentBadge);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepSpeedColor')) {
+    safePatch.showStepSpeedColor = Boolean(safePatch.showStepSpeedColor);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
+    safePatch.topbarCapsuleSlots = normalizeTopbarCapsuleSlots(safePatch.topbarCapsuleSlots);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewModules')) {
+    safePatch.overviewModules = normalizeOverviewModules(safePatch.overviewModules);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewMetrics')) {
+    safePatch.overviewMetrics = normalizeOverviewMetrics(safePatch.overviewMetrics);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
+    safePatch.stepTableColumns = normalizeStepTableColumns(safePatch.stepTableColumns);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTokenComboFormat')) {
+    safePatch.stepTokenComboFormat = normalizeStepTokenComboFormat(
+      safePatch.stepTokenComboFormat
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'modelDisplayMode')) {
+    const normDisp = normalizeModelDisplayMode(
+      safePatch.modelDisplayMode,
+      safePatch.showUpstreamModel
+    );
+    safePatch.modelDisplayMode = normDisp;
+    safePatch.showUpstreamModel = normDisp !== 'short';
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'showUpstreamModel')) {
+    safePatch.showUpstreamModel = Boolean(safePatch.showUpstreamModel);
+    safePatch.modelDisplayMode = safePatch.showUpstreamModel ? 'upstream' : 'short';
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
+    safePatch.orchestratorIdMode = normalizeOrchestratorIdMode(safePatch.orchestratorIdMode);
+  }
+  const myRev = ++settingsRevision;
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  const patchKeys = Object.keys(safePatch);
+  const prevKeyValues = new Map();
+  for (const key of patchKeys) {
+    prevKeyValues.set(key, prevTelemetry?.settings?.[key]);
+    pendingSettingsMutations.set(key, { rev: myRev, value: safePatch[key] });
+  }
+  let optimisticTelemetry = null;
+  if (prevTelemetry?.settings) {
+    optimisticTelemetry = {
+      ...prevTelemetry,
+      settings: { ...prevTelemetry.settings, ...safePatch },
+    };
+    telemetryStore.setState({ telemetry: optimisticTelemetry });
+  }
+  let res = null;
+  try {
+    res = await enqueueSettingsWrite(() =>
+      callSidecarApi('/api/settings', { method: 'POST', body: safePatch })
+    );
+  } catch (err) {
+    const rollbackKeys = [];
+    for (const key of patchKeys) {
+      const activeEntry = pendingSettingsMutations.get(key);
+      if (activeEntry?.rev === myRev) {
+        pendingSettingsMutations.delete(key);
+        rollbackKeys.push(key);
+      }
+    }
+    if (rollbackKeys.length > 0) {
+      const curTelemetry = telemetryStore.getState().telemetry;
+      if (prevTelemetry && optimisticTelemetry && curTelemetry === optimisticTelemetry) {
+        telemetryStore.setState({ telemetry: prevTelemetry });
+      } else if (curTelemetry?.settings) {
+        const rolledBackSettings = { ...curTelemetry.settings };
+        for (const key of rollbackKeys) {
+          if (recentCommittedSettings.has(key)) {
+            rolledBackSettings[key] = recentCommittedSettings.get(key).value;
+          } else {
+            rolledBackSettings[key] = prevKeyValues.get(key);
+          }
+        }
+        telemetryStore.setState({
+          telemetry: { ...curTelemetry, settings: rolledBackSettings },
+        });
+      }
+    }
+    throw err;
+  }
+
+  const serverSettings = extractReturnedSettings(res);
+  const committedRev = ++settingsRevision;
+  for (const key of patchKeys) {
+    const activeEntry = pendingSettingsMutations.get(key);
+    const committedVal =
+      serverSettings && Object.prototype.hasOwnProperty.call(serverSettings, key)
+        ? serverSettings[key]
+        : safePatch[key];
+    if (activeEntry?.rev === myRev) {
+      pendingSettingsMutations.delete(key);
+      recentCommittedSettings.set(key, { rev: committedRev, value: committedVal });
+    }
+  }
+
+  const curTelemetry = telemetryStore.getState().telemetry;
+  if (curTelemetry?.settings) {
+    const nextSettings = serverSettings
+      ? { ...curTelemetry.settings, ...serverSettings }
+      : { ...curTelemetry.settings };
+    for (const [k, entry] of recentCommittedSettings.entries()) {
+      if (entry.rev > committedRev) {
+        nextSettings[k] = entry.value;
+      }
+    }
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      nextSettings[k] = entry.value;
+    }
+    telemetryStore.setState({
+      telemetry: { ...curTelemetry, settings: nextSettings },
+    });
+  }
+
+  const needsTelemetryRecompute = patchKeys.some((k) => TELEMETRY_RECOMPUTE_SETTING_KEYS.has(k));
+  if (
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyTokenBudget') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyCostBudget')
+  ) {
+    clearConsumptionRangeCache();
+    clearConversationViewCache();
+  }
+  if (needsTelemetryRecompute) {
+    inFlightTelemetryPoll = null;
+    void fetchTelemetry({ force: false });
+  }
+}
+
+export async function resetAllSettings() {
+  const myRev = ++settingsRevision;
+  const res = await enqueueSettingsWrite(() =>
+    callSidecarApi('/api/settings/reset', { method: 'POST', body: {} })
+  );
+  const committedRev = ++settingsRevision;
+  const serverSettings = extractReturnedSettings(res);
+  if (serverSettings) {
+    for (const [key, val] of Object.entries(serverSettings)) {
+      const pending = pendingSettingsMutations.get(key);
+      if (!pending || pending.rev <= myRev) {
+        pendingSettingsMutations.delete(key);
+        recentCommittedSettings.set(key, { rev: committedRev, value: val });
+      }
+    }
+  }
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  if (serverSettings && prevTelemetry) {
+    const mergedSettings = { ...serverSettings };
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      mergedSettings[k] = entry.value;
+    }
+    telemetryStore.setState({
+      telemetry: {
+        ...prevTelemetry,
+        settings: mergedSettings,
+      },
+    });
+  }
+  inFlightTelemetryPoll = null;
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
+  void fetchTelemetry({ force: false });
+  return res;
+}
+
+export async function rebuildTrajectoryCache() {
+  const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
+  await fetchTelemetry({ force: true });
+  return res;
+}
+
+export function startAsyncTelemetryLoop(intervalMs = 2000) {
+  stopAsyncTelemetryLoop();
+  loopActive = true;
+  loopIntervalMs = intervalMs;
+
+  const resolveNextDelay = () => {
+    if (typeof document !== 'undefined' && document.hidden) {
+      return Math.max(loopIntervalMs, 8000);
+    }
+    return loopIntervalMs;
+  };
+
+  const tick = async () => {
+    pollTimer = null;
+    if (!loopActive) return;
+    await fetchTelemetry({ force: false });
+    if (!loopActive || activeForceCount > 0) return;
+    if (!pollTimer) {
+      pollTimer = setTimeout(tick, resolveNextDelay());
+    }
+  };
+  loopTickFn = tick;
+
+  tick();
+  return () => {
+    stopAsyncTelemetryLoop();
+  };
+}
+
+export function stopAsyncTelemetryLoop() {
+  loopActive = false;
+  loopTickFn = null;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+  }
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+}
+
+export {
+  formatAgentBadgeText,
+  formatAgentLabel,
+  formatConversationMeta,
+  formatLiveActivityDetail,
+  formatLiveActivityLabel,
+  getAgentBadgeClass,
+};
+
+/**
+ * 在遥测快照中解析宿主当前路由会话 ID（兼容顶层主会话 ID 与子代理/蜂群工蜂 ID）。
+ *
+ * @param {object|null|undefined} telemetry
+ * @param {string} rawRouteId
+ * @returns {{ rootConv: object|null, childAgent: object|null, isChildRoute: boolean } | null}
+ */
+export function resolveHostRouteMatch(telemetry, rawRouteId) {
+  const routeLower = String(rawRouteId || '').trim().toLowerCase();
+  if (!routeLower || !telemetry) return null;
+  const convs = Array.isArray(telemetry.conversations) ? telemetry.conversations : [];
+  const actConv = telemetry.activeConversation || null;
+
+  const directRoot =
+    convs.find((c) => String(c?.cascadeId || '').toLowerCase() === routeLower) ||
+    (String(actConv?.cascadeId || '').toLowerCase() === routeLower ? actConv : null);
+  if (directRoot) {
+    return { rootConv: directRoot, childAgent: null, isChildRoute: false };
+  }
+
+  const activeChild = (actConv?.agents || []).find(
+    (a) =>
+      !a?.isMain &&
+      (String(a?.cascadeId || '').toLowerCase() === routeLower ||
+        String(a?.agentId || '').toLowerCase() === routeLower)
+  );
+  if (activeChild) {
+    const parentInList = convs.find(
+      (c) => String(c?.cascadeId || '').toLowerCase() === String(actConv?.cascadeId || '').toLowerCase()
+    );
+    return {
+      rootConv: parentInList || actConv,
+      childAgent: activeChild,
+      isChildRoute: true,
+    };
+  }
+
+  const memberParent = convs.find(
+    (c) =>
+      Array.isArray(c?.memberCascadeIds) &&
+      c.memberCascadeIds.some((id) => String(id || '').toLowerCase() === routeLower)
+  );
+  if (memberParent) {
+    return { rootConv: memberParent, childAgent: null, isChildRoute: true };
+  }
+  return null;
+}
+
+/**
+ * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。
+ * 同时在客户端按需组装主代理与全部汇总的 `recentSteps`，避免后端 JSON 载荷重复序列化 2-3 倍步骤列表。
+ *
+ * @param {object|null} telemetry
+ * @param {string} [selectedAgentScope='all']
+ * @param {string} [ctxInspectorAgentId='auto']
+ * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
+ */
+const scopedStepProjectionMemo = new WeakMap();
+
+export function resolveScopedConversation(
+  telemetry,
+  selectedAgentScope = 'all',
+  ctxInspectorAgentId = 'auto',
+  includeSteps = false
+) {
+  const rawActive = telemetry?.activeConversation;
+  const active = rawActive || {};
+  const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
+  const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
+  const subagents = agents.filter((a) => !a.isMain);
+  let mainAgent = agents.find((a) => a.isMain) || active;
+  let aggregated = active.aggregated || active;
+  let resolvedAgents = agents;
+
+  if (includeSteps) {
+    let cached = rawActive && typeof rawActive === 'object' ? scopedStepProjectionMemo.get(rawActive) : null;
+    if (!cached) {
+      let nextMain = mainAgent;
+      let nextAgents = agents;
+      if (!Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+        nextMain = { ...mainAgent, recentSteps: active.recentSteps };
+        if (agents.includes(mainAgent)) {
+          nextAgents = agents.map((ag) => (ag === mainAgent ? nextMain : ag));
+        }
+      }
+      let nextAgg = aggregated;
+      if (hasSubagents && !Array.isArray(aggregated.recentSteps)) {
+        const combined = [];
+        for (const ag of nextAgents) {
+          const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
+          for (const step of steps) combined.push(step);
+        }
+        combined.sort(
+          (a, b) =>
+            (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
+            (b.agentIndex || 0) - (a.agentIndex || 0) ||
+            (b.stepIndex || 0) - (a.stepIndex || 0)
+        );
+        nextAgg = { ...aggregated, recentSteps: combined };
+      }
+      cached = { mainAgent: nextMain, aggregated: nextAgg, agents: nextAgents };
+      if (rawActive && typeof rawActive === 'object') {
+        scopedStepProjectionMemo.set(rawActive, cached);
+      }
+    }
+    mainAgent = cached.mainAgent;
+    aggregated = cached.aggregated;
+    resolvedAgents = cached.agents;
+  }
+
+  if (!hasSubagents) {
+    const singleScoped =
+      includeSteps && !Array.isArray(active.recentSteps) && Array.isArray(mainAgent.recentSteps)
+        ? { ...active, recentSteps: mainAgent.recentSteps }
+        : active;
+    return {
+      hasSubagents: false,
+      effectiveScope: 'main',
+      effectiveCtxScope: 'main',
+      agents: resolvedAgents,
+      subagents: [],
+      mainAgent,
+      aggregated,
+      scopedConv: singleScoped,
+      ctxAgent: mainAgent,
+    };
+  }
+
+  const isValidSub = subagents.some((s) => s.agentId === selectedAgentScope);
+  const effectiveScope =
+    selectedAgentScope === 'main'
+      ? 'main'
+      : isValidSub
+        ? selectedAgentScope
+        : 'all';
+
+  const scopedConv =
+    effectiveScope === 'all'
+      ? aggregated
+      : resolvedAgents.find((a) => a.agentId === effectiveScope) || mainAgent;
+
+  let ctxAgent = scopedConv;
+  let effectiveCtxScope = effectiveScope;
+  if (effectiveScope === 'all') {
+    if (ctxInspectorAgentId && ctxInspectorAgentId !== 'auto') {
+      const matched = resolvedAgents.find((a) => a.agentId === ctxInspectorAgentId);
+      if (matched) {
+        ctxAgent = matched;
+        effectiveCtxScope = matched.agentId;
+      } else {
+        effectiveCtxScope = 'auto';
+      }
+    } else {
+      effectiveCtxScope = 'auto';
+    }
+    if (effectiveCtxScope === 'auto') {
+      ctxAgent =
+        resolvedAgents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.isRunning) ||
+        mainAgent;
+    }
+  }
+
+  return {
+    hasSubagents: true,
+    effectiveScope,
+    effectiveCtxScope,
+    agents: resolvedAgents,
+    subagents,
+    mainAgent,
+    aggregated,
+    scopedConv,
+    ctxAgent,
+  };
+}
+
+/**
+ * 判断宿主系统是否为 macOS (`darwin`)：优先读取后端遥测或双栖桥接注入的 `platform`，首帧缺省时回退 UA/平台标识。
+ *
+ * @param {Record<string, any>|null|undefined} telemetry
+ * @returns {boolean}
+ */
+export function isMacHostPlatform(telemetry) {
+  const p = String(telemetry?.hostPlatform || '')
+    .trim()
+    .toLowerCase();
+  if (p) return p === 'darwin';
+  if (typeof navigator !== 'undefined') {
+    const ua = String(navigator.platform || navigator.userAgent || '');
+    return /\b(?:mac|darwin)\b|macintosh|mac\s*os/i.test(ua);
+  }
+  return false;
+}

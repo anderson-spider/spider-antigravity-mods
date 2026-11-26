@@ -3,11 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node sidecars/panel/scripts/build-bundle.mjs && node mcp/build-mcp-app.mjs",
+    "build": "node mcp/build-mcp-app.mjs",
     "build:mcp": "node mcp/build-mcp-app.mjs",
-    "standalone": "node sidecars/panel/standalone.mjs",
-    "test": "node --test 'sidecars/panel/test/*.test.mjs' 'mcp/test/*.test.mjs'",
-    "typecheck": "node sidecars/panel/scripts/check-syntax.mjs"
+    "test": "node --test 'tests/*.test.mjs'",
+    "typecheck": "node scripts/check-syntax.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/ext-apps": "^2.0.4",

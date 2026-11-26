@@ -1,0 +1,1149 @@
+/*
+ * 实时概览视图与通用面板卡片样式表 (views-overview.css).
+ * 包含：
+ * 1. 通用面板容器与标题头 (.panel, .panel-header, .panel-title, .panel-meta)
+ * 2. 4 格实时测速指标矩阵 (.telemetry-matrix, .matrix-cell, .cell-*)
+ * 3. 10 段上下文窗口进度条与配额填充条 (.progress-track, .progress-seg, .progress-fill)
+ * 4. 上下文双列图例网格与色块 (.ctx-legend-grid, .legend-*, .swatch)
+ * 5. 双栏布局网格与窄屏响应式断点 (.dual-grid)
+ */
+
+/* --- 1. 通用微边框面板卡片 (Architectural Precision Panels) --- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-title > span:not(.agent-badge) {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.panel-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 配额池窗口行头：标题 + 周期用量内联（窄栏自适应截断，零额外纵向行高） */
+.quota-pools-panel {
+  container-type: inline-size;
+}
+
+.quota-win-head {
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-win-meta-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.quota-pace-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.quota-pace-pill.pace-on-pace {
+  color: var(--metric-info);
+  background: color-mix(in oklab, var(--metric-info) 14%, transparent);
+  border-color: color-mix(in oklab, var(--metric-info) 28%, transparent);
+}
+
+.quota-pace-pill.pace-under {
+  color: var(--metric-ok);
+  background: color-mix(in oklab, var(--metric-ok) 14%, transparent);
+  border-color: color-mix(in oklab, var(--metric-ok) 28%, transparent);
+}
+
+.quota-pace-pill.pace-ahead {
+  color: var(--metric-warn);
+  background: color-mix(in oklab, var(--metric-warn) 15%, transparent);
+  border-color: color-mix(in oklab, var(--metric-warn) 32%, transparent);
+}
+
+.quota-pace-pill.pace-high {
+  color: var(--metric-danger);
+  background: color-mix(in oklab, var(--metric-danger) 15%, transparent);
+  border-color: color-mix(in oklab, var(--metric-danger) 32%, transparent);
+}
+
+.quota-win-left {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.quota-win-title {
+  font-size: var(--fs-base-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.quota-win-usage {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.quota-win-meta {
+  font-size: var(--fs-md);
+  flex-shrink: 0;
+}
+
+/* --- 2. 多任务实时运行卡片列表与 4 格测速指标矩阵 (Live Running Tasks List & 4-Cell Telemetry Matrix) --- */
+.overview-modules-host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.live-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.live-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-panel);
+  min-width: 0;
+}
+
+.live-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.live-task-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-task-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.live-task-title:hover {
+  color: var(--accent-primary);
+}
+
+.live-task-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.live-sub-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-instant) var(--ease-fast),
+    color var(--dur-instant) var(--ease-fast),
+    background-color var(--dur-instant) var(--ease-fast);
+}
+
+.live-sub-toggle-chevron {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.live-sub-toggle.is-expanded .live-sub-toggle-chevron {
+  transform: rotate(0deg);
+}
+
+.live-sub-toggle:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.live-sub-toggle.is-expanded {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary-border);
+  background: var(--accent-primary-soft);
+}
+
+.live-task-main-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 18px;
+  line-height: 1.45;
+}
+
+.live-activity-dot {
+  color: var(--accent-primary);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.live-task-card.is-waiting .live-activity-dot {
+  color: var(--metric-warn);
+}
+
+.live-task-card.is-compacting .live-activity-dot {
+  color: var(--ctx-checkpoint);
+}
+
+.live-activity-phase {
+  font-size: var(--fs-base-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.live-activity-progress {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.live-activity-sep {
+  font-size: var(--fs-base-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.live-activity-detail {
+  font-size: var(--fs-base-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-activity-elapsed {
+  font-size: var(--fs-base-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.live-sub-scroll-host {
+  padding-top: 9px;
+  margin-top: 3px;
+  margin-left: 18px;
+  border-top: 1px dashed var(--border-hairline);
+  min-width: 0;
+}
+
+.live-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 8px;
+  min-width: 0;
+  max-height: 196px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.live-sub-list::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.live-sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+  min-width: 0;
+  font-size: var(--fs-base-sm);
+  line-height: 1.45;
+}
+
+.live-sub-row.is-done {
+  opacity: 0.72;
+}
+
+.live-sub-row.is-waiting-sub {
+  opacity: 0.86;
+}
+
+.live-sub-row.is-killed-sub {
+  opacity: 0.56;
+}
+
+.live-sub-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-sub-role {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 148px;
+  flex-shrink: 0;
+}
+
+.live-sub-summary {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-sub-elapsed {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.telemetry-matrix {
+  display: grid;
+  grid-template-columns: repeat(var(--matrix-cols, 4), minmax(0, 1fr));
+  flex-shrink: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--border-hairline);
+  gap: 1px;
+  overflow: hidden;
+}
+
+.matrix-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  background: var(--surface-panel);
+  min-width: 0;
+}
+
+.cell-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.cell-value {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-value.accent-speed,
+.accent-speed {
+  color: var(--metric-speed);
+}
+
+.cell-value.accent-ok,
+.accent-ok,
+.cell-value.tone-good,
+.tone-good {
+  color: var(--metric-ok);
+}
+
+.cell-value.tone-info,
+.tone-info {
+  color: var(--metric-info);
+}
+
+.cell-value.tone-warn,
+.tone-warn {
+  color: var(--metric-warn);
+}
+
+.cell-value.tone-danger,
+.tone-danger {
+  color: var(--metric-danger);
+}
+
+.cell-value.tone-muted,
+.tone-muted {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.cell-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- 3. 10 段上下文进度条与配额池填充条 (Context Segment Meter & Quota Progress Bars) --- */
+.progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-track);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  display: flex;
+}
+
+.progress-seg {
+  height: 100%;
+  width: var(--seg-w, 0%);
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast);
+}
+
+.progress-track.is-reordering .progress-seg {
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast) 0.05s;
+}
+
+/* 块状微圆角风格上下文进度条（保持 6px 紧凑高度 + 色块间 2px 轻间隙 + 每段 2px 边缘圆润处理） */
+.progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
+  align-items: stretch;
+}
+
+.progress-track.ctx-segment-meter .progress-seg {
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  width: 0%;
+  min-width: 0;
+  margin-left: 0;
+  border-radius: 2px;
+  transition:
+    background-color 0.08s ease,
+    width var(--dur-normal) var(--ease-fast),
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter.is-reordering .progress-seg {
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast) 0.05s,
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active {
+  width: var(--seg-w, 0%);
+  min-width: 3px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active.has-sep {
+  margin-left: 2px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active:hover {
+  filter: brightness(1.12);
+}
+
+.progress-seg.seg-assistant {
+  background-color: var(--ctx-assistant);
+}
+.progress-seg.seg-tool-results {
+  background-color: var(--ctx-tool-results);
+}
+.progress-seg.seg-user-input {
+  background-color: var(--ctx-user-input);
+}
+.progress-seg.seg-subagent-msg {
+  background-color: var(--ctx-subagent-msg);
+}
+.progress-seg.seg-checkpoint {
+  background-color: var(--ctx-checkpoint);
+}
+.progress-seg.seg-system-tools {
+  background-color: var(--ctx-system-tools);
+}
+.progress-seg.seg-mcp-tools {
+  background-color: var(--ctx-mcp-tools);
+}
+.progress-seg.seg-skills {
+  background-color: var(--ctx-skills);
+}
+.progress-seg.seg-system-prompt {
+  background-color: var(--ctx-system-prompt);
+}
+.progress-seg.seg-user-rules {
+  background-color: var(--ctx-user-rules);
+}
+.progress-seg.seg-cached {
+  background-color: var(--ctx-cached);
+}
+.progress-seg.seg-input {
+  background-color: var(--ctx-input);
+}
+.progress-seg.seg-thinking {
+  background-color: var(--ctx-thinking);
+}
+.progress-seg.seg-output {
+  background-color: var(--ctx-output);
+}
+
+.progress-fill {
+  height: 100%;
+  width: var(--fill-w, 0%);
+  background: var(--accent-primary);
+  transition: width var(--dur-normal) var(--ease-fast);
+}
+
+.progress-fill.tone-warn {
+  background: var(--metric-warn);
+}
+
+.progress-fill.tone-danger {
+  background: var(--metric-danger);
+}
+
+.progress-track.quota-progress-track {
+  position: relative;
+  overflow: visible;
+}
+
+.progress-track.quota-progress-track > .progress-fill {
+  border-radius: inherit;
+}
+
+.progress-pace-marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: var(--pace-pos, 0%);
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--surface-panel);
+  pointer-events: none;
+  z-index: 2;
+  transition: left var(--dur-normal) var(--ease-fast);
+}
+
+@container (max-width: 380px) {
+  .quota-pools-panel .quota-win-head {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  .quota-pools-panel .quota-win-meta-group {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (forced-colors: active) {
+  .progress-pace-marker {
+    background: CanvasText;
+    border: 1px solid Canvas;
+    box-shadow: none;
+  }
+  .quota-pace-pill {
+    border-color: ButtonText;
+    color: CanvasText;
+    background: Canvas;
+  }
+}
+
+/* --- 4. 上下文双列图例网格 (Context 10-Channel Legend Grid) --- */
+.ctx-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px var(--space-4);
+  padding: 2px 0 0 0;
+  background: transparent;
+  border: none;
+  font-size: var(--fs-base-sm);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.legend-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  display: inline-block;
+}
+
+.swatch.seg-assistant { background: var(--ctx-assistant); }
+.swatch.seg-tool-results { background: var(--ctx-tool-results); }
+.swatch.seg-user-input { background: var(--ctx-user-input); }
+.swatch.seg-subagent-msg { background: var(--ctx-subagent-msg); }
+.swatch.seg-checkpoint { background: var(--ctx-checkpoint); }
+.swatch.seg-system-tools { background: var(--ctx-system-tools); }
+.swatch.seg-mcp-tools { background: var(--ctx-mcp-tools); }
+.swatch.seg-skills { background: var(--ctx-skills); }
+.swatch.seg-system-prompt { background: var(--ctx-system-prompt); }
+.swatch.seg-user-rules { background: var(--ctx-user-rules); }
+
+/* --- 5. 双栏网格与窄视口响应式折叠 (Dual Grid & Responsive Breakpoints) --- */
+.dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+/* --- 6. 上下文窗口内联代理切换器与代理徽章 (Scheme B Context Inspector & Agent Badges) --- */
+.ctx-inspector-bar {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.ctx-pill-group {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ctx-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
+  border: 1px solid var(--border-hairline);
+  outline: none;
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    color var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.ctx-agent-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.ctx-agent-pill.is-active {
+  background: var(--accent-primary-soft);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary-border);
+  font-weight: 600;
+}
+
+.ctx-agent-pill.is-more-toggle {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.ctx-agent-pill.is-more-toggle:hover {
+  border-style: solid;
+  color: var(--text-primary);
+}
+
+.ctx-toggle-chevron {
+  flex-shrink: 0;
+}
+
+.ctx-agent-pill.is-more-toggle.is-expanded .ctx-toggle-chevron {
+  transform: rotate(180deg);
+}
+
+.panel-title .agent-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.25;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.agent-badge.is-clickable {
+  cursor: pointer;
+}
+
+.agent-badge.is-clickable:hover {
+  border-color: var(--border-strong);
+}
+
+.agent-badge.badge-main {
+  color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  border-color: var(--accent-primary-border);
+}
+
+.agent-badge.badge-sub-1 {
+  color: var(--ctx-mcp-tools);
+  background: color-mix(in srgb, var(--ctx-mcp-tools) 13%, transparent);
+  border-color: color-mix(in srgb, var(--ctx-mcp-tools) 35%, var(--border-hairline));
+}
+
+.agent-badge.badge-sub-2 {
+  color: var(--metric-speed);
+  background: var(--metric-speed-soft);
+  border-color: color-mix(in srgb, var(--metric-speed) 35%, var(--border-hairline));
+}
+
+.agent-badge.badge-sub-3 {
+  color: var(--metric-ok);
+  background: var(--metric-ok-soft);
+  border-color: color-mix(in srgb, var(--metric-ok) 35%, var(--border-hairline));
+}
+
+@media (max-width: 390px) {
+  .telemetry-matrix:not([data-cols="1"]):not([data-cols="2"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dual-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- 7. Session Health Diagnostics Widget (.health-panel) --- */
+.health-panel {
+  container-type: inline-size;
+  gap: var(--space-3);
+}
+
+.health-header {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.health-header-meta {
+  gap: 6px;
+}
+
+.health-meta-summary {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.health-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.health-status-pill.is-healthy {
+  color: var(--metric-ok);
+  background: var(--metric-ok-soft);
+  border-color: color-mix(in srgb, var(--metric-ok) 32%, transparent);
+}
+
+.health-status-pill.is-warn {
+  color: var(--metric-warn);
+  background: var(--metric-warn-soft);
+  border-color: color-mix(in srgb, var(--metric-warn) 34%, transparent);
+}
+
+.health-status-pill.is-degraded {
+  color: var(--metric-danger);
+  background: var(--metric-danger-soft);
+  border-color: color-mix(in srgb, var(--metric-danger) 36%, transparent);
+}
+
+.health-empty {
+  font-size: var(--fs-base-sm);
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.health-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.health-collapse-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  border: 1px solid color-mix(in srgb, var(--metric-danger) 38%, var(--border-hairline));
+  background: var(--metric-danger-soft);
+  color: var(--metric-danger);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.health-collapse-banner > svg {
+  flex-shrink: 0;
+}
+
+.health-collapse-text {
+  min-width: 0;
+}
+
+.health-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.health-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.health-section-left {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.health-section-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.health-cache-pct,
+.health-active-total {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.health-section-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.health-reason-chips,
+.health-hygiene-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.health-reason-chip,
+.health-hygiene-badge,
+.health-metric-chip,
+.health-gap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+  line-height: 1.38;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.health-reason-chip.is-danger,
+.health-hygiene-badge.is-danger,
+.health-gap-badge.is-danger {
+  color: var(--metric-danger);
+  background: var(--metric-danger-soft);
+  border-color: color-mix(in srgb, var(--metric-danger) 32%, transparent);
+}
+
+.health-reason-chip.is-warn,
+.health-hygiene-badge.is-warn,
+.health-gap-badge.is-warn {
+  color: var(--metric-warn);
+  background: var(--metric-warn-soft);
+  border-color: color-mix(in srgb, var(--metric-warn) 32%, transparent);
+}
+
+.health-reason-chip.is-info,
+.health-hygiene-badge.is-info {
+  color: var(--metric-info);
+  background: var(--metric-info-soft);
+  border-color: color-mix(in srgb, var(--metric-info) 30%, transparent);
+}
+
+.health-hygiene-badge.is-good {
+  color: var(--metric-ok);
+  background: var(--metric-ok-soft);
+  border-color: color-mix(in srgb, var(--metric-ok) 30%, transparent);
+}
+
+.health-gap-badge.is-muted,
+.health-hygiene-badge.is-muted {
+  color: var(--text-muted);
+}
+
+.health-chip-count {
+  font-weight: 700;
+}
+
+.health-timing-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.health-time-track {
+  height: 6px;
+  border-radius: 3px;
+  gap: 1px;
+}
+
+.health-time-seg {
+  height: 100%;
+  width: var(--seg-w, 0%);
+  transition: width var(--dur-normal) var(--ease-fast);
+}
+
+.health-time-seg.is-llm {
+  background: var(--accent-primary);
+}
+
+.health-time-seg.is-tools {
+  background: var(--ctx-tool-results);
+}
+
+.health-time-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.health-time-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.health-time-legend-item::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.health-time-legend-item.is-llm::before {
+  background: var(--accent-primary);
+}
+
+.health-time-legend-item.is-tools::before {
+  background: var(--ctx-tool-results);
+}
+
+.health-findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.health-finding-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.health-finding-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--metric-info);
+}
+
+.health-finding-item.is-warn .health-finding-dot {
+  background: var(--metric-warn);
+}
+
+.health-finding-item.is-degraded .health-finding-dot {
+  background: var(--metric-danger);
+}
+
+.health-finding-item.is-degraded .health-finding-text {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.health-finding-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+@container (max-width: 380px) {
+  .health-panel .health-timing-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .health-panel .health-time-legend {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}
