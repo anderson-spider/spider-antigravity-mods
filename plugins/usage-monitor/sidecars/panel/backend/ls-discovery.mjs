@@ -11,9 +11,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DAEMON_DIRS, lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
+import { postLoopbackHttpsJson } from './http-helpers.mjs';
 import { isTestRuntime } from './runtime-env.mjs';
 
 const LS_DISC_COOLDOWN_MS = 4000;
+const DAEMON_INFO_FILE_RE = /^(?:hub|ls)_.*\.json$/i;
 
 const lsDiscoveryState = {
   inFlight: null,
@@ -181,7 +183,7 @@ function readHubDaemonCandidates(daemonDirs, preferredPids, isPidAliveFn) {
       continue;
     }
     for (const name of names) {
-      if (!/^hub_.*\.json$/i.test(name)) continue;
+      if (!DAEMON_INFO_FILE_RE.test(name)) continue;
       const fullPath = join(dir, name);
       try {
         const st = statSync(fullPath);
@@ -379,23 +381,30 @@ async function findListeningPortsForPid(pid, platform, execCmdFn, procFs = null)
   }
 }
 
-async function probeLsCandidate(port, csrfToken, fetchFn, protos = ['http', 'https']) {
+async function probeLsCandidate(
+  port,
+  csrfToken,
+  fetchFn,
+  protos = ['http', 'https'],
+  useLoopbackHttps = false
+) {
   for (const proto of protos) {
     try {
       const addr = `127.0.0.1:${port}`;
       const baseUrl = `${proto}://${addr}`;
-      const res = await fetchFn(
-        `${baseUrl}/exa.language_server_pb.LanguageServerService/GetUserStatus`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-codeium-csrf-token': csrfToken,
-          },
-          body: '{}',
-          signal: AbortSignal.timeout(1500),
-        }
-      );
+      const urlStr = `${baseUrl}/exa.language_server_pb.LanguageServerService/GetUserStatus`;
+      const res =
+        proto === 'https' && useLoopbackHttps
+          ? await postLoopbackHttpsJson(urlStr, csrfToken, '{}', 1500)
+          : await fetchFn(urlStr, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-codeium-csrf-token': csrfToken,
+              },
+              body: '{}',
+              signal: AbortSignal.timeout(1500),
+            });
       if (res?.ok) {
         return { addr: proto === 'https' ? `https://${addr}` : addr, baseUrl, csrfToken };
       }
@@ -422,6 +431,7 @@ async function probeLsCandidate(port, csrfToken, fetchFn, protos = ['http', 'htt
  * @returns {Promise<{ addr: string, baseUrl: string, csrfToken: string, pid: number } | null>}
  */
 export async function discoverAntigravityLsEndpoint(options = {}) {
+  const hasCustomFetch = typeof options.fetchFn === 'function';
   const {
     ppid = Number(process?.ppid || 0),
     ancestorPids = [],
@@ -435,19 +445,26 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
 
   if (typeof fetchFn !== 'function') return null;
 
+  const useLoopbackHttps = !hasCustomFetch;
   const preferredPids = new Set(
     [ppid, ...(Array.isArray(ancestorPids) ? ancestorPids : [])]
       .map(Number)
       .filter((n) => Number.isInteger(n) && n > 0)
   );
 
-  // 1. 优先探测 ~/.gemini/<product>/daemon/hub_*.json 守护端点描述文件（零外部进程开销）
+  // 1. 优先探测 ~/.gemini/<product>/daemon/{hub,ls}_*.json 守护端点描述文件（零外部进程开销）
   const daemonCandidates = readHubDaemonCandidates(daemonDirs, preferredPids, isPidAliveFn);
   const probedDaemonKeys = new Set();
   for (const cand of daemonCandidates) {
     for (const target of cand.targets) {
       probedDaemonKeys.add(`${target.port}:${cand.csrfToken}`);
-      const verified = await probeLsCandidate(target.port, cand.csrfToken, fetchFn, target.protos);
+      const verified = await probeLsCandidate(
+        target.port,
+        cand.csrfToken,
+        fetchFn,
+        target.protos,
+        useLoopbackHttps
+      );
       if (verified) {
         return { ...verified, pid: cand.pid };
       }
@@ -491,7 +508,13 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
       : await findListeningPortsForPid(cand.pid, platform, execCmdFn, procFs);
     for (const port of ports) {
       if (probedDaemonKeys.has(`${port}:${cand.csrfToken}`)) continue;
-      const verified = await probeLsCandidate(port, cand.csrfToken, fetchFn);
+      const verified = await probeLsCandidate(
+        port,
+        cand.csrfToken,
+        fetchFn,
+        ['http', 'https'],
+        useLoopbackHttps
+      );
       if (verified) {
         return { ...verified, pid: cand.pid };
       }
@@ -615,7 +638,7 @@ export function getLocalHubPorts({
       continue;
     }
     for (const name of names) {
-      if (!/^hub_.*\.json$/i.test(name)) continue;
+      if (!DAEMON_INFO_FILE_RE.test(name)) continue;
       const fullPath = join(dir, name);
       try {
         const parsed = JSON.parse(readFileSync(fullPath, 'utf8'));

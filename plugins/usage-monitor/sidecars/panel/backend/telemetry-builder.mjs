@@ -1499,6 +1499,7 @@ function buildActivePoolAndWeeklyQuotas({
   const officialFallbackWeekBucket = quotaWeekBucket || weekBucket;
   const weeklyQuota = {
     isOfficial: useOfficialWeekly,
+    isCustomLocal: isCustomWeeklyMode,
     poolFamily: activePoolKey,
     title: isCustomWeeklyMode
       ? '每周限额 (自定义本机)'

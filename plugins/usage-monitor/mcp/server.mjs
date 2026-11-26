@@ -14,7 +14,7 @@ import {
 } from '../sidecars/panel/shared/window-bridge-protocol.mjs';
 
 export const PROTOCOL = '2025-06-18';
-export const SERVER_VERSION = '1.2.0';
+export const SERVER_VERSION = '1.2.1';
 export const DASHBOARD_URI = 'ui://usage-monitor/dashboard.html';
 export const DASHBOARD_MIME = 'text/html;profile=mcp-app';
 
@@ -141,12 +141,27 @@ export function formatDashboardSummary(payload) {
     const poolSummary = pools
       .slice(0, 4)
       .map((pool) => {
-        const label = String(pool?.label || pool?.name || pool?.id || 'Pool');
-        const pct = Number(pool?.remainingPct ?? pool?.remainingFraction * 100);
-        if (Number.isFinite(pct)) {
-          return `${label}: ${Math.round(pct)}% left`;
+        const label = String(
+          pool?.poolLabel || pool?.poolKey || pool?.label || pool?.name || pool?.id || 'Pool'
+        );
+        const pct5hRaw =
+          pool?.remainingPct ??
+          (pool?.remainingFraction != null ? Number(pool.remainingFraction) * 100 : null);
+        const pctWkRaw = pool?.weeklyRemainingPct;
+        const pct5h = pct5hRaw != null && pct5hRaw !== '' ? Number(pct5hRaw) : Number.NaN;
+        const pctWk = pctWkRaw != null && pctWkRaw !== '' ? Number(pctWkRaw) : Number.NaN;
+        const has5h = Number.isFinite(pct5h);
+        const hasWk = Number.isFinite(pctWk);
+        if (has5h && hasWk) {
+          return `${label}: ${Math.round(pct5h)}% left (5h) · ${Math.round(pctWk)}% left (weekly)`;
         }
-        return label;
+        if (has5h) {
+          return `${label}: ${Math.round(pct5h)}% left`;
+        }
+        if (hasWk) {
+          return `${label}: ${Math.round(pctWk)}% left (weekly)`;
+        }
+        return `${label}: unavailable`;
       })
       .join(' | ');
     if (poolSummary) {

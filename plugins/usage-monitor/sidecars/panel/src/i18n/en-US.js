@@ -176,6 +176,7 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   // Quota Pools Widget
   'quota.weeklyShort': 'Weekly',
   'quota.weeklyPool': 'Weekly ({pool})',
+  'quota.weeklyCustomLocal': 'Weekly (Custom Local)',
   'quota.loading': 'Loading...',
   'quota.failed': 'Unavailable (--%)',
   'quota.usedAndLeft': '{reset} · Used {used}% ({rem}% left)',

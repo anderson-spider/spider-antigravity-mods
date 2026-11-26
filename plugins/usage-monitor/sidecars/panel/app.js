@@ -1426,6 +1426,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   // Quota Pools Widget
   'quota.weeklyShort': 'Weekly',
   'quota.weeklyPool': 'Weekly ({pool})',
+  'quota.weeklyCustomLocal': 'Weekly (Custom Local)',
   'quota.loading': 'Loading...',
   'quota.failed': 'Unavailable (--%)',
   'quota.usedAndLeft': '{reset} · Used {used}% ({rem}% left)',
@@ -2145,6 +2146,7 @@ const I18N_MESSAGES_PT_BR = Object.freeze({
   // Quota Pools Widget
   'quota.weeklyShort': 'Semanal',
   'quota.weeklyPool': 'Semanal ({pool})',
+  'quota.weeklyCustomLocal': 'Semanal (Local)',
   'quota.loading': 'Carregando...',
   'quota.failed': 'Indisponível (--%)',
   'quota.usedAndLeft': '{reset} · Usado {used}% ({rem}% rest.)',
@@ -13711,6 +13713,12 @@ function formatQuotaPaceSummary(pace) {
   };
 }
 
+function isCustomLocalWeekly(weekly) {
+  if (!weekly || typeof weekly !== 'object') return false;
+  if (typeof weekly.isCustomLocal === 'boolean') return weekly.isCustomLocal;
+  return weekly.isOfficial === false && (weekly.usedPct != null || weekly.remainingPct != null);
+}
+
 /**
  * 归一化动态配额池列表；在官方配额尚未返回时回退预占 Gemini 与 Claude & GPT 两个标准池槽位。
  *
@@ -13754,7 +13762,7 @@ function buildQuotaPoolItems(
     };
   });
   if (
-    weekly?.isOfficial === false &&
+    isCustomLocalWeekly(weekly) &&
     poolItems.length > 0 &&
     !poolItems.some((item) => item.isActivePool)
   ) {
@@ -13844,7 +13852,7 @@ function createPoolQuotaRow() {
  */
 function formatQuotaSummaryFooter(quotas, account) {
   const weekly = quotas?.weekly || {};
-  const isCustomLocal = weekly.isOfficial === false;
+  const isCustomLocal = isCustomLocalWeekly(weekly);
   const tokStr = formatTokens(weekly.tokens || 0);
   const costStr = formatUsd(weekly.costUsd || 0);
   const leftText = isCustomLocal
@@ -13910,7 +13918,7 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
   const used5hVal = has5h ? Number(poolData.usedPct) : 0;
   const rem5hVal = has5h ? Number(poolData.remainingPct) : 0;
 
-  const useCustomWeekly = Boolean(isActivePool && fallbackWeekly?.isOfficial === false);
+  const useCustomWeekly = Boolean(isActivePool && isCustomLocalWeekly(fallbackWeekly));
   const wkUsedRaw = useCustomWeekly
     ? fallbackWeekly?.usedPct
     : poolData?.weeklyUsedPct ?? (isActivePool ? fallbackWeekly?.usedPct : null);
@@ -13986,10 +13994,9 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
     pillEl: refs.pacePill5h,
   });
 
-  const customTitle =
-    useCustomWeekly && fallbackWeekly?.title
-      ? fallbackWeekly.title
-      : t('quota.weeklyPool', { pool: poolLabel });
+  const customTitle = useCustomWeekly
+    ? t('quota.weeklyCustomLocal')
+    : t('quota.weeklyPool', { pool: poolLabel });
   patchText(refs.titleWk, customTitle);
   const cWk = useCustomWeekly
     ? fallbackWeekly
@@ -14052,7 +14059,7 @@ function quotaPoolRowSig(item, idx) {
   const c5h = item.poolData?.cycle5h;
   const cWk = item.poolData?.cycleWeekly;
   const fw = item.fallbackWeekly;
-  return `${getEffectiveLocale()}:${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.showQuotaPace !== false}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${c5h?.tokens}:${c5h?.costUsd}:${c5h?.calls}:${cWk?.tokens}:${cWk?.costUsd}:${cWk?.calls}:${fw?.isOfficial}:${fw?.usedPct}:${fw?.remainingPct}:${fw?.resetTime}:${fw?.title}:${fw?.tokens}:${fw?.costUsd}:${fw?.calls}`;
+  return `${getEffectiveLocale()}:${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.showQuotaPace !== false}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${c5h?.tokens}:${c5h?.costUsd}:${c5h?.calls}:${cWk?.tokens}:${cWk?.costUsd}:${cWk?.calls}:${fw?.isOfficial}:${fw?.isCustomLocal}:${fw?.usedPct}:${fw?.remainingPct}:${fw?.resetTime}:${fw?.title}:${fw?.tokens}:${fw?.costUsd}:${fw?.calls}`;
 }
 
 const QuotaPoolsWidget = defineComponent({

@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "usage-monitor",
   "displayName": "Usage & Speed Monitor",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local offline monitor for token usage, generation speed (TPS), TTFT, context breakdown, and quota pools across the left sidebar (full-page MCP App), right side pane, and CLI statusLine.",
   "logo": "assets/logo.svg",
   "author": {
