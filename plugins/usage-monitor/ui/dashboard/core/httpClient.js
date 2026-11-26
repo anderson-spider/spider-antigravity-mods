@@ -1,0 +1,103 @@
+/**
+ * @fileoverview Async HTTP/MCP-bridge client with AbortController cancellation
+ * for stale polling requests and concurrent GET deduplication.
+ */
+
+const inFlightGets = new Map();
+const activeControllers = new Map();
+
+export function abortSidecarApiKey(abortKey) {
+  if (!abortKey) return;
+  const prev = activeControllers.get(abortKey);
+  if (prev) {
+    activeControllers.delete(abortKey);
+    prev.abort();
+  }
+}
+
+export async function callSidecarApi(path, { method = 'GET', body, abortKey = '' } = {}) {
+  const upperMethod = method.toUpperCase();
+  const dedupKey = upperMethod === 'GET' && !abortKey ? path : '';
+
+  if (dedupKey && inFlightGets.has(dedupKey)) {
+    return inFlightGets.get(dedupKey);
+  }
+
+  let signal;
+  let requestController = null;
+  if (abortKey && typeof AbortController !== 'undefined') {
+    const prev = activeControllers.get(abortKey);
+    if (prev) {
+      prev.abort();
+    }
+    requestController = new AbortController();
+    activeControllers.set(abortKey, requestController);
+    signal = requestController.signal;
+  }
+
+  const execOnce = async () => {
+    const bridge =
+      typeof window !== 'undefined' ? window.mcpBridge || window.sidecar || null : null;
+    const fetchFn = bridge?.fetch
+      ? bridge.fetch.bind(bridge)
+      : typeof window !== 'undefined' && typeof window.fetch === 'function'
+        ? window.fetch.bind(window)
+        : globalThis.fetch.bind(globalThis);
+    const headers = { 'Content-Type': 'application/json' };
+    const res = await fetchFn(path, {
+      method: upperMethod,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
+    if (signal?.aborted) {
+      const abortErr = new Error('Request aborted');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (signal?.aborted) {
+      const abortErr = new Error('Request aborted');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
+    if (!res.ok) {
+      const httpErr = new Error(data.error || `HTTP ${res.status}`);
+      httpErr.httpStatus = res.status;
+      httpErr.retryable = Boolean(data?.retryable);
+      throw httpErr;
+    }
+    return data;
+  };
+
+  const runRequest = async () => {
+    try {
+      return await execOnce();
+    } catch (fetchErr) {
+      if (signal?.aborted || fetchErr?.name === 'AbortError') {
+        throw fetchErr;
+      }
+      if (upperMethod === 'GET' && !fetchErr?.httpStatus) {
+        await new Promise((r) => setTimeout(r, 180));
+        if (!signal?.aborted) {
+          return execOnce();
+        }
+      }
+      throw fetchErr;
+    }
+  };
+
+  const promise = runRequest().finally(() => {
+    if (dedupKey) {
+      inFlightGets.delete(dedupKey);
+    }
+    if (abortKey && requestController && activeControllers.get(abortKey) === requestController) {
+      activeControllers.delete(abortKey);
+    }
+  });
+
+  if (dedupKey) {
+    inFlightGets.set(dedupKey, promise);
+  }
+  return promise;
+}

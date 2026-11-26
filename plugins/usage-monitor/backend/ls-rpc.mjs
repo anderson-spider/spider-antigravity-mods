@@ -1,0 +1,322 @@
+/**
+ * @fileoverview Antigravity Language Server Connect RPC 客户端与官方配额摘要缓存。
+ *
+ * 负责：
+ * 1. 向本地或 SSH 远端窗口对应的 Language Server 发起带 CSRF 鉴权与超时保护的 Connect RPC 调用 (`callLsRpc`)；
+ * 2. 对远端 SSH 端点采用双层传输：
+ *    - Tier-1：严格限定回环地址 (`127.0.0.1`/`localhost`/`::1`) 的 HTTP/HTTPS 直连（HTTPS 仅对回环允许宿主自签证书）；
+ *    - Tier-2：Tier-1 不可用或鉴权依赖 Electron Partition Cookie / 2.33.0+ 省略 `csrfToken` 时，
+ *      自动熔断并回退至窗口内同源 `window.fetch` / `/connect-websocket`（通过 CDP 按需执行）；
+ * 3. 拉取并按端点隔离缓存 `RetrieveUserQuotaSummary` 官方实时配额摘要与 `GetAvailableModels` 模型目录。
+ */
+
+import { lsRuntimeEndpoint } from './config.mjs';
+import {
+  getEndpointQuotaCache,
+  getRemoteWindowRpcInvoker,
+  markRemoteEndpointPreferTier2,
+  shouldRemoteEndpointPreferTier2,
+} from './endpoint-registry.mjs';
+import {
+  ensureLsEndpointDiscovered,
+  isStrictLoopbackUrl,
+  postLoopbackHttpsJson,
+  setLoopbackHttpsRequester,
+} from './ls-discovery.mjs';
+import { isTestRuntime } from './runtime-env.mjs';
+
+export { setLoopbackHttpsRequester };
+
+const QUOTA_CACHE_TTL_MS = 10_000;
+const QUOTA_RETRY_COOLDOWN_MS = 5_000;
+const REMOTE_ALLOWED_LS_METHODS = new Set([
+  'GetUserStatus',
+  'GetAvailableModels',
+  'GetAllCascadeTrajectories',
+  'GetCascadeTrajectory',
+  'RetrieveUserQuotaSummary',
+]);
+
+let contextModelCatalog = null;
+
+export function getContextModelCatalog(endpoint = null) {
+  const isRemote = Boolean(endpoint && endpoint.isRemote);
+  if (isRemote) {
+    const baseUrl = endpoint.baseUrl || endpoint.origin || '';
+    const csrfToken = endpoint.csrfToken || '';
+    const cached = endpoint.contextModelCatalog;
+    if (
+      !cached ||
+      cached.baseUrl !== baseUrl ||
+      cached.csrfToken !== csrfToken ||
+      Date.now() >= cached.expiresAt
+    ) {
+      endpoint.contextModelCatalog = {
+        baseUrl,
+        csrfToken,
+        expiresAt: Date.now() + 30000,
+        promise: callLsRpc('GetAvailableModels', {}, 2500, endpoint)
+          .then((data) => data?.response?.models)
+          .catch(() => null),
+      };
+    }
+    return endpoint.contextModelCatalog.promise;
+  }
+
+  const { baseUrl, csrfToken } = lsRuntimeEndpoint;
+  if (
+    !contextModelCatalog ||
+    contextModelCatalog.baseUrl !== baseUrl ||
+    contextModelCatalog.csrfToken !== csrfToken ||
+    Date.now() >= contextModelCatalog.expiresAt
+  ) {
+    contextModelCatalog = {
+      baseUrl,
+      csrfToken,
+      expiresAt: Date.now() + 30000,
+      promise: callLsRpc('GetAvailableModels', {}, 1500)
+        .then((data) => data?.response?.models)
+        .catch(() => null),
+    };
+  }
+  return contextModelCatalog.promise;
+}
+
+async function postLsRpcOnce(baseUrl, csrfToken, method, body, timeoutMs) {
+  const urlStr = `${baseUrl}/exa.language_server_pb.LanguageServerService/${method}`;
+  const bodyText = JSON.stringify(body);
+  if (urlStr.startsWith('https://') && isStrictLoopbackUrl(urlStr)) {
+    return postLoopbackHttpsJson(urlStr, csrfToken || '', bodyText, timeoutMs);
+  }
+  return fetch(urlStr, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-codeium-csrf-token': csrfToken || '',
+    },
+    body: bodyText,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+async function callRemoteEndpointLsRpc(endpoint, method, body, timeoutMs) {
+  if (!REMOTE_ALLOWED_LS_METHODS.has(method)) {
+    throw new Error(`RPC method ${method} is not allowed on remote endpoints`);
+  }
+  const baseUrl = String(endpoint.baseUrl || endpoint.origin || '').trim().replace(/\/+$/, '');
+  const csrfToken = String(endpoint.csrfToken || '').trim();
+  const windowInvoker = getRemoteWindowRpcInvoker();
+  const canTryTier1 =
+    Boolean(baseUrl) &&
+    isStrictLoopbackUrl(baseUrl) &&
+    Boolean(csrfToken) &&
+    !shouldRemoteEndpointPreferTier2(endpoint);
+
+  let tier1Err = null;
+  if (canTryTier1) {
+    try {
+      const urlStr = `${baseUrl}/exa.language_server_pb.LanguageServerService/${method}`;
+      const bodyText = JSON.stringify(body || {});
+      const res = urlStr.startsWith('https://')
+        ? await postLoopbackHttpsJson(urlStr, csrfToken, bodyText, timeoutMs)
+        : await postLsRpcOnce(baseUrl, csrfToken, method, body || {}, timeoutMs);
+      if (res?.ok) {
+        return await res.json();
+      }
+      const status = Number(res?.status || 0);
+      const text = await res?.text?.().catch(() => '') || '';
+      tier1Err = new Error(`Remote RPC ${method} failed (${status}): ${text}`);
+      const isTransportAuthOrRouteMiss =
+        status === 0 ||
+        status === 401 ||
+        status === 403 ||
+        (status === 404 && method !== 'GetCascadeTrajectory');
+      if (isTransportAuthOrRouteMiss) {
+        markRemoteEndpointPreferTier2(endpoint);
+      } else {
+        // 业务级 4xx（如单个会话已被删除导致的 GetCascadeTrajectory 404）直接上抛，不误触熔断
+        throw tier1Err;
+      }
+    } catch (err) {
+      if (err === tier1Err) {
+        throw err;
+      }
+      tier1Err = err;
+      markRemoteEndpointPreferTier2(endpoint);
+    }
+  }
+
+  if (typeof windowInvoker === 'function') {
+    return windowInvoker(endpoint, method, body || {}, timeoutMs);
+  }
+
+  if (tier1Err) {
+    throw tier1Err;
+  }
+  throw new Error(`Remote LS transport unavailable for endpoint ${endpoint.id}`);
+}
+
+/**
+ * 调用本地或远端 SSH `LanguageServerService` 的指定 RPC 方法（本地支持按需发现与宿主重启重连）。
+ *
+ * @param {string} method RPC 方法名（如 `'GetUserStatus'`、`'GetCascadeTrajectory'`）
+ * @param {object} [body={}] 请求 JSON 载荷
+ * @param {number} [timeoutMs=5000] 超时时间（毫秒）
+ * @param {object|null} [endpoint=null] 可选远端端点对象；缺省调用本机 LS
+ * @returns {Promise<object>}
+ */
+export async function callLsRpc(method, body = {}, timeoutMs = 5000, endpoint = null) {
+  if (endpoint && endpoint.isRemote) {
+    return callRemoteEndpointLsRpc(endpoint, method, body, timeoutMs);
+  }
+
+  if (!lsRuntimeEndpoint.baseUrl && !isTestRuntime()) {
+    await ensureLsEndpointDiscovered({ force: false });
+  }
+  if (!lsRuntimeEndpoint.baseUrl) {
+    throw new Error('Language Server address (ANTIGRAVITY_LS_ADDRESS) is not configured');
+  }
+
+  const prevAddr = lsRuntimeEndpoint.addr;
+  const prevToken = lsRuntimeEndpoint.csrfToken;
+  let res;
+  try {
+    res = await postLsRpcOnce(
+      lsRuntimeEndpoint.baseUrl,
+      lsRuntimeEndpoint.csrfToken,
+      method,
+      body,
+      timeoutMs
+    );
+  } catch (netErr) {
+    if (!isTestRuntime()) {
+      const refreshed = await ensureLsEndpointDiscovered({ force: true });
+      if (
+        refreshed &&
+        (lsRuntimeEndpoint.addr !== prevAddr || lsRuntimeEndpoint.csrfToken !== prevToken)
+      ) {
+        res = await postLsRpcOnce(
+          lsRuntimeEndpoint.baseUrl,
+          lsRuntimeEndpoint.csrfToken,
+          method,
+          body,
+          timeoutMs
+        );
+      } else {
+        throw netErr;
+      }
+    } else {
+      throw netErr;
+    }
+  }
+
+  if (!res.ok && (res.status === 401 || res.status === 403) && !isTestRuntime()) {
+    const refreshed = await ensureLsEndpointDiscovered({ force: true });
+    if (
+      refreshed &&
+      (lsRuntimeEndpoint.addr !== prevAddr || lsRuntimeEndpoint.csrfToken !== prevToken)
+    ) {
+      res = await postLsRpcOnce(
+        lsRuntimeEndpoint.baseUrl,
+        lsRuntimeEndpoint.csrfToken,
+        method,
+        body,
+        timeoutMs
+      );
+    }
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`RPC ${method} failed (${res.status}): ${text}`);
+  }
+  return res.json();
+}
+
+/**
+ * 获取官方实时配额摘要（`RetrieveUserQuotaSummary`），按端点与账号隔离短期缓存。
+ *
+ * @param {boolean} [forceRefresh=false] 是否强制穿透本地缓存与失败冷却
+ * @param {string} [accountName=''] 发起查询时宿主报告的账号，用于隔离配额缓存
+ * @param {object|null} [endpoint=null] 可选远端端点对象
+ * @returns {Promise<{data: object|null, fetchedAtMs: number, isStale: boolean, refreshFailed: boolean, error: string|null, fromCache: boolean}>}
+ */
+export async function getOfficialQuotaSummary(forceRefresh = false, accountName = '', endpoint = null) {
+  const qCache = getEndpointQuotaCache(endpoint);
+  if (qCache.accountName !== accountName) {
+    Object.assign(qCache, {
+      accountName,
+      accountGeneration: qCache.accountGeneration + 1,
+      ts: 0,
+      lastAttemptTs: 0,
+      data: null,
+      error: null,
+    });
+  }
+  const generation = qCache.accountGeneration;
+  const now = Date.now();
+  if (!forceRefresh && qCache.data && now - qCache.ts < QUOTA_CACHE_TTL_MS) {
+    return {
+      data: qCache.data,
+      fetchedAtMs: qCache.ts,
+      isStale: false,
+      refreshFailed: false,
+      error: null,
+      fromCache: true,
+    };
+  }
+  if (
+    !forceRefresh &&
+    qCache.lastAttemptTs > 0 &&
+    now - qCache.lastAttemptTs < QUOTA_RETRY_COOLDOWN_MS &&
+    qCache.error
+  ) {
+    return {
+      data: qCache.data,
+      fetchedAtMs: qCache.ts || 0,
+      isStale: Boolean(qCache.data),
+      refreshFailed: true,
+      error: qCache.error,
+      fromCache: true,
+    };
+  }
+
+  qCache.lastAttemptTs = now;
+  try {
+    const res = await callLsRpc('RetrieveUserQuotaSummary', { forceRefresh: true }, 6000, endpoint);
+    const { userStatus } = await callLsRpc('GetUserStatus', {}, 2500, endpoint);
+    if ((userStatus?.email || userStatus?.name || '') !== accountName) return {};
+    if (generation !== qCache.accountGeneration) return {};
+    const payload = res?.response !== undefined ? res.response : res;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const normalized =
+        Array.isArray(payload.groups) || Array.isArray(payload.buckets)
+          ? payload
+          : { ...payload, groups: [] };
+      qCache.ts = now;
+      qCache.data = normalized;
+      qCache.error = null;
+      return {
+        data: normalized,
+        fetchedAtMs: now,
+        isStale: false,
+        refreshFailed: false,
+        error: null,
+        fromCache: false,
+      };
+    }
+    qCache.error = 'Quota summary empty';
+  } catch (err) {
+    if (generation !== qCache.accountGeneration) return {};
+    console.error(`RetrieveUserQuotaSummary failed: ${err.message}`);
+    qCache.error = err.message;
+  }
+  return {
+    data: qCache.data,
+    fetchedAtMs: qCache.ts || 0,
+    isStale: Boolean(qCache.data),
+    refreshFailed: true,
+    error: qCache.error || 'Quota RPC unavailable',
+    fromCache: false,
+  };
+}

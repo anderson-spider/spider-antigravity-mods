@@ -1,20 +1,25 @@
 /**
  * @fileoverview Browser-side MCP App bridge for Usage & Speed Monitor.
  *
- * Bundled into `mcp/dist/dashboard.html` and executed synchronously before `app.js`.
- * - Performs the official `@modelcontextprotocol/ext-apps` handshake & live theme sync.
- * - Exposes a `window.sidecar.fetch` shim backed by `app.callServerTool('usage_monitor_api')`
- *   with an Antigravity-safe concurrency limit of 4 in-flight calls and `AbortSignal` support.
+ * Bundled into `mcp/dist/dashboard.html` and executed synchronously before `ui/dashboard/main.js`.
+ * - Performs the official `@modelcontextprotocol/ext-apps` handshake, full HostContext
+ *   sync (theme, CSS variables, host fonts, locale), and surface detection (`aux_pane` vs `global`).
+ * - Captures `ontoolinput` / `ontoolresult` navigation payloads (`{ conversationId, tab }`)
+ *   with deduplication and replay buffering for late subscribers.
+ * - Exposes `window.mcpBridge` (plus `window.sidecar` compatibility alias) backed by
+ *   `app.callServerTool('usage_monitor_api')` with a 4 in-flight concurrency limit and `AbortSignal`.
  */
 
 import {
   App,
   applyDocumentTheme,
+  applyHostFonts,
   applyHostStyleVariables,
 } from '@modelcontextprotocol/ext-apps';
 
 const MAX_IN_FLIGHT = 4;
-const MCP_APP_VERSION = '1.2.1';
+const MCP_APP_VERSION = '2.0.0';
+const VALID_TABS = new Set(['overview', 'consumption', 'steps', 'settings']);
 
 if (typeof document !== 'undefined' && document.documentElement) {
   document.documentElement.setAttribute('data-mcp-app', 'true');
@@ -23,8 +28,51 @@ if (typeof document !== 'undefined' && document.documentElement) {
 
 const app = new App({ name: 'Usage Monitor', version: MCP_APP_VERSION }, {});
 
+let currentHostContext = null;
+let currentHostCapabilities = {};
+let currentSurface = 'global';
+let latestHostLocale = '';
+
+const hostLocaleListeners = new Set();
+const toolNavListeners = new Set();
+let bufferedNavigation = null;
+let pendingInputNavSig = '';
+
+function extractNavigation(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rawConv = typeof raw.conversationId === 'string' ? raw.conversationId.trim() : '';
+  const rawTab = typeof raw.tab === 'string' ? raw.tab.trim() : '';
+  const conversationId = rawConv || null;
+  const tab = VALID_TABS.has(rawTab) ? rawTab : null;
+  if (!conversationId && !tab) return null;
+  return { conversationId, tab };
+}
+
+function navSignature(nav) {
+  return nav ? `${nav.conversationId || ''}|${nav.tab || ''}` : '';
+}
+
+function emitToolNavigation(nav) {
+  if (!nav) return;
+  if (nav.conversationId && typeof window !== 'undefined' && window.mcpBridge) {
+    window.mcpBridge.conversationId = nav.conversationId;
+  }
+  if (toolNavListeners.size === 0) {
+    bufferedNavigation = nav;
+    return;
+  }
+  for (const cb of [...toolNavListeners]) {
+    try {
+      cb(nav);
+    } catch {
+      // Isolate listener errors
+    }
+  }
+}
+
 function applyHostContext(ctx) {
   if (!ctx || typeof ctx !== 'object') return;
+  currentHostContext = { ...(currentHostContext || {}), ...ctx };
   if (ctx.theme) {
     applyDocumentTheme(ctx.theme);
     if (typeof document !== 'undefined' && document.documentElement) {
@@ -35,11 +83,48 @@ function applyHostContext(ctx) {
   if (ctx.styles?.variables) {
     applyHostStyleVariables(ctx.styles.variables);
   }
+  if (ctx.styles?.css?.fonts && typeof applyHostFonts === 'function') {
+    applyHostFonts(ctx.styles.css.fonts);
+  }
+  if (typeof ctx.locale === 'string' && ctx.locale.trim()) {
+    const nextLocale = ctx.locale.trim();
+    if (nextLocale !== latestHostLocale) {
+      latestHostLocale = nextLocale;
+      for (const cb of [...hostLocaleListeners]) {
+        try {
+          cb(latestHostLocale);
+        } catch {
+          // Isolate listener errors
+        }
+      }
+    }
+  }
 }
 
 // Register lifecycle handlers BEFORE connect() so initial notifications are never missed.
-app.ontoolinput = () => {};
-app.ontoolresult = () => {};
+app.ontoolinput = ({ arguments: args } = {}) => {
+  const nav = extractNavigation(args);
+  if (nav) {
+    pendingInputNavSig = navSignature(nav);
+    emitToolNavigation(nav);
+  } else {
+    pendingInputNavSig = '';
+  }
+};
+
+app.ontoolresult = (result) => {
+  const nav = extractNavigation(result?.structuredContent);
+  const sig = navSignature(nav);
+  if (nav && sig === pendingInputNavSig) {
+    pendingInputNavSig = '';
+    return;
+  }
+  pendingInputNavSig = '';
+  if (nav) {
+    emitToolNavigation(nav);
+  }
+};
+
 app.onhostcontextchanged = (ctx) => {
   applyHostContext(ctx);
 };
@@ -47,6 +132,14 @@ app.onhostcontextchanged = (ctx) => {
 const readyPromise = app
   .connect()
   .then(() => {
+    currentHostCapabilities = app.getHostCapabilities() || {};
+    currentSurface =
+      currentHostCapabilities.message || currentHostCapabilities.updateModelContext
+        ? 'aux_pane'
+        : 'global';
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.setAttribute('data-surface', currentSurface);
+    }
     applyHostContext(app.getHostContext());
   })
   .catch((err) => {
@@ -184,9 +277,56 @@ async function mcpAppFetch(input, init = {}) {
   }
 }
 
+function onToolNavigation(cb) {
+  if (typeof cb !== 'function') return () => {};
+  toolNavListeners.add(cb);
+  if (bufferedNavigation) {
+    const replay = bufferedNavigation;
+    bufferedNavigation = null;
+    try {
+      cb(replay);
+    } catch {
+      // Isolate subscriber errors
+    }
+  }
+  return () => {
+    toolNavListeners.delete(cb);
+  };
+}
+
+function onHostLocaleChange(cb) {
+  if (typeof cb !== 'function') return () => {};
+  hostLocaleListeners.add(cb);
+  if (latestHostLocale) {
+    try {
+      cb(latestHostLocale);
+    } catch {
+      // Isolate subscriber errors
+    }
+  }
+  return () => {
+    hostLocaleListeners.delete(cb);
+  };
+}
+
 if (typeof window !== 'undefined') {
-  window.sidecar = {
+  const bridge = {
     fetch: mcpAppFetch,
     conversationId: '',
+    getHostCapabilities: () => currentHostCapabilities,
+    getHostContext: () => currentHostContext,
+    getSurface: () => currentSurface,
+    onToolNavigation,
+    onHostLocaleChange,
+  };
+  window.mcpBridge = bridge;
+  window.sidecar = {
+    fetch: mcpAppFetch,
+    get conversationId() {
+      return bridge.conversationId;
+    },
+    set conversationId(val) {
+      bridge.conversationId = String(val || '');
+    },
   };
 }

@@ -2,21 +2,27 @@
  * @fileoverview Pure, zero-dependency JSON-RPC 2.0 MCP server for Usage & Speed Monitor.
  *
  * Exposes:
- * - Resource `ui://usage-monitor/dashboard.html` (`text/html;profile=mcp-app`)
- * - Tool `usage_monitor_dashboard` with Antigravity `global` (left sidebar) entrypoint
- * - App-only tool `usage_monitor_api` (`visibility: ['app']`) delegating to the shared
- *   panel API dispatcher (`dispatchBridgeApiRequest`).
+ * - Resources:
+ *   - `ui://usage-monitor/dashboard.html` (`text/html;profile=mcp-app`, `prefersBorder: false`)
+ *   - `ui://usage-monitor/health-card.html` (`text/html;profile=mcp-app`, `prefersBorder: true`)
+ * - Tools:
+ *   - `usage_monitor_dashboard` with Antigravity `aux_pane` + `global` entrypoints
+ *   - `usage_monitor_session_health` (inline chat card only, no entrypoints)
+ *   - `usage_monitor_api` (`visibility: ['app']`) delegating to the shared backend API dispatcher
  */
 
 import {
   BRIDGE_API_PATHS,
   BRIDGE_API_ROUTE_DEFS,
-} from '../sidecars/panel/shared/window-bridge-protocol.mjs';
+} from '../shared/api-protocol.mjs';
 
 export const PROTOCOL = '2025-06-18';
-export const SERVER_VERSION = '1.2.1';
+export const SERVER_VERSION = '2.0.0';
 export const DASHBOARD_URI = 'ui://usage-monitor/dashboard.html';
+export const HEALTH_CARD_URI = 'ui://usage-monitor/health-card.html';
 export const DASHBOARD_MIME = 'text/html;profile=mcp-app';
+
+const VALID_TABS = new Set(['overview', 'consumption', 'steps', 'settings']);
 
 const ALLOWED_ROUTES = new Set(
   BRIDGE_API_ROUTE_DEFS.map((route) => `${route.method}:${route.path}`)
@@ -27,23 +33,55 @@ export const TOOL_SPECS = Object.freeze([
     name: 'usage_monitor_dashboard',
     title: 'Usage Monitor',
     description:
-      'Open the full-page Usage & Speed Monitor dashboard (sidebar global view) and return a concise summary of current session token usage, throughput, context allocation, and quota pools.',
+      'Open the Usage & Speed Monitor dashboard (side pane or full-page sidebar view) and return a concise summary of current session token usage, throughput, context allocation, and quota pools.',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        conversationId: {
+          type: 'string',
+          description: 'Optional conversation ID to inspect (omit to follow the latest session).',
+        },
+        tab: {
+          type: 'string',
+          enum: ['overview', 'consumption', 'steps', 'settings'],
+          description: 'Optional dashboard tab to open.',
+        },
+      },
       required: [],
     },
     _meta: {
       ui: { resourceUri: DASHBOARD_URI },
       'com.google.antigravity/ui': {
-        entrypoints: [{ type: 'global', title: 'Usage Monitor' }],
+        entrypoints: [
+          { type: 'aux_pane', title: 'Usage Monitor' },
+          { type: 'global', title: 'Usage Monitor' },
+        ],
       },
+    },
+  },
+  {
+    name: 'usage_monitor_session_health',
+    title: 'Session Health',
+    description:
+      'Diagnose prompt cache hit/miss attribution, sustained cache collapse, LLM vs. tool active time, effective throughput, active >60s gaps, and context hygiene for the current or specified session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversationId: {
+          type: 'string',
+          description: 'Optional conversation ID to inspect (defaults to the latest active session).',
+        },
+      },
+      required: [],
+    },
+    _meta: {
+      ui: { resourceUri: HEALTH_CARD_URI },
     },
   },
   {
     name: 'usage_monitor_api',
     description:
-      'App-only: execute a Usage & Speed Monitor panel API action (telemetry, settings, context window, or cache rebuild).',
+      'App-only: execute a Usage & Speed Monitor panel API action (telemetry, session health, settings, or cache rebuild).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -76,6 +114,18 @@ export const TOOL_SPECS = Object.freeze([
 
 const TOOL_NAMES = new Set(TOOL_SPECS.map((spec) => spec.name));
 
+const REASON_LABELS = Object.freeze([
+  ['planModeSwitch', 'plan_mode_switch'],
+  ['modelSwitch', 'model_switch'],
+  ['errorRetry', 'error_retry'],
+  ['idleOrWaitGap', 'idle_or_wait_gap'],
+  ['activeSlowGap', 'active_slow_gap'],
+  ['asyncWakeupFast', 'async_wakeup_fast'],
+  ['prefixOrReplicaMiss', 'prefix_or_replica_miss'],
+  ['compactionResets', 'compaction'],
+  ['contextDilutionTurns', 'context_dilution'],
+]);
+
 function formatCompactTokens(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '0';
@@ -88,6 +138,15 @@ function formatUsd(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '$0.00';
   return num < 0.01 ? `$${num.toFixed(4)}` : `$${num.toFixed(2)}`;
+}
+
+function formatDurationCompact(sec) {
+  const num = Number(sec);
+  if (!Number.isFinite(num) || num <= 0) return '0s';
+  if (num < 60) return `${num < 10 ? num.toFixed(1) : Math.round(num)}s`;
+  const m = Math.floor(num / 60);
+  const s = Math.round(num % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
 /**
@@ -172,6 +231,83 @@ export function formatDashboardSummary(payload) {
   return lines.join('\n');
 }
 
+/**
+ * Formats a concise 4-5 line plain-text summary for `usage_monitor_session_health`.
+ *
+ * @param {object | null | undefined} payload
+ * @returns {string}
+ */
+export function formatSessionHealthSummary(payload) {
+  if (!payload || typeof payload !== 'object' || !payload.sessionHealth) {
+    return 'Session Health: unavailable (no session telemetry recorded yet).';
+  }
+
+  const conv = payload.conversation || {};
+  const ctx = payload.context || {};
+  const health = payload.sessionHealth;
+  const attr = health.cacheMissAttribution || {};
+  const collapse = attr.sustainedCollapse || {};
+  const timing = health.timing || {};
+  const hygiene = health.hygiene || {};
+
+  const status = String(health.status || 'healthy').toUpperCase();
+  const title = String(conv.title || conv.cascadeId || 'latest session').trim();
+  const model = String(conv.activeModelShort || conv.activeModelLabel || 'unknown model').trim();
+  const steps = Number(health.evaluatedSteps ?? conv.stepCount ?? 0);
+
+  const lines = [`Session Health: ${status} · ${title} (${model}, ${steps} steps)`];
+
+  // Line 2: Cache Hit + Miss Breakdown + Collapse
+  const hitPct = Number(health.cacheHitPct || 0).toFixed(1);
+  const misses = Number(attr.total || 0);
+  const eligible = Number(attr.eligibleTransitions || 0);
+  const reasonParts = REASON_LABELS.filter(([field]) => Number(attr[field] || 0) > 0).map(
+    ([field, label]) => `${label}=${attr[field]}`
+  );
+  const collapseParts = [];
+  if (Number(collapse.activeStreak || 0) >= 3) {
+    collapseParts.push(`active collapse ${collapse.activeStreak}x`);
+  } else if (Number(collapse.runs || 0) >= 1) {
+    collapseParts.push(
+      `collapse ${collapse.runs} run(s) / ${collapse.turns} turns (max ${collapse.maxStreak}x)`
+    );
+  }
+  lines.push(
+    `Cache: ${hitPct}% hit · ${misses}/${eligible} misses${reasonParts.length > 0 ? ` (${reasonParts.join(', ')})` : ''}${collapseParts.length > 0 ? ` · ${collapseParts.join(', ')}` : ''}`
+  );
+
+  // Line 3: Active Time + Effective TPS + Gaps >60s
+  const effTps =
+    timing.effectiveTps != null && Number.isFinite(Number(timing.effectiveTps))
+      ? `${Number(timing.effectiveTps).toFixed(1)} tok/s`
+      : 'N/A';
+  lines.push(
+    `Active time: ${formatDurationCompact(timing.activeTimeSec)} (LLM ${Math.round(Number(timing.llmSharePct || 0))}% / Tools ${Math.round(Number(timing.toolSharePct || 0))}%) · Eff. ${effTps} · Gaps >60s: ${Number(timing.gapsOver60s || 0)}/${Number(timing.activeGapsTotal || 0)} (${Number(timing.over60sGapPct || 0).toFixed(1)}%)`
+  );
+
+  // Line 4: Context + Hygiene
+  const usedPct = Number(ctx.usedPct || 0).toFixed(1);
+  const batchPart =
+    hygiene.singleToolTurnPct != null && Number.isFinite(Number(hygiene.singleToolTurnPct))
+      ? `${Number(hygiene.singleToolTurnPct).toFixed(0)}% 1-tool`
+      : 'batching N/A';
+  lines.push(
+    `Context: ${formatCompactTokens(ctx.totalTokens)}/${formatCompactTokens(ctx.limitTokens)} (${usedPct}%) · >150k: ${Number(hygiene.over150kTurns || 0)} · Media >=150k: ${Number(hygiene.multimodalHighCtxTurns || 0)} · ${batchPart}`
+  );
+
+  // Line 5: Findings (if any)
+  const findings = Array.isArray(health.findings) ? health.findings : [];
+  if (findings.length > 0) {
+    const summaryFindings = findings
+      .slice(0, 5)
+      .map((f) => `${f.code} (${f.severity})`)
+      .join('; ');
+    lines.push(`Findings: ${summaryFindings}`);
+  }
+
+  return lines.join('\n');
+}
+
 function safeParseJson(body) {
   if (typeof body !== 'string') return body ?? {};
   try {
@@ -192,6 +328,7 @@ function isPlainObject(value) {
  *   write: (line: string) => void,
  *   dispatchApi: (pathname: string, method: string, data?: unknown) => Promise<{ status?: number, body?: string | object }>,
  *   readDashboardHtml: () => Promise<string>,
+ *   readHealthCardHtml?: () => Promise<string>,
  *   log?: (msg: string) => void,
  * }} deps
  */
@@ -210,12 +347,19 @@ export function createMcpServer(deps) {
 
     try {
       if (name === 'usage_monitor_dashboard') {
+        const rawConvId = typeof args.conversationId === 'string' ? args.conversationId.trim() : '';
+        const explicitConvId = rawConvId || null;
+        const rawTab = typeof args.tab === 'string' ? args.tab.trim() : '';
+        const explicitTab = VALID_TABS.has(rawTab) ? rawTab : null;
+
         let summaryText = 'Usage & Speed Monitor dashboard opened.';
         try {
-          const out = await deps.dispatchApi('/api/telemetry', 'GET', {
+          const query = {
             range: 'today',
             stepDetails: 'display',
-          });
+            ...(explicitConvId ? { conversationId: explicitConvId } : {}),
+          };
+          const out = await deps.dispatchApi('/api/telemetry', 'GET', query);
           if (Number(out?.status || 200) < 400) {
             summaryText = formatDashboardSummary(safeParseJson(out?.body));
           }
@@ -224,7 +368,33 @@ export function createMcpServer(deps) {
         }
         return answer(id, {
           content: [{ type: 'text', text: summaryText }],
-          structuredContent: { surface: 'global' },
+          structuredContent: {
+            conversationId: explicitConvId,
+            tab: explicitTab,
+          },
+        });
+      }
+
+      if (name === 'usage_monitor_session_health') {
+        const rawConvId = typeof args.conversationId === 'string' ? args.conversationId.trim() : '';
+        const query = rawConvId ? { conversationId: rawConvId } : undefined;
+        const out = await deps.dispatchApi('/api/session-health', 'GET', query);
+        const status = Number(out?.status || 200);
+        const data = safeParseJson(out?.body);
+        if (status >= 400) {
+          return answer(id, {
+            content: [
+              {
+                type: 'text',
+                text: data?.error || `Failed to inspect session health (HTTP ${status}).`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return answer(id, {
+          content: [{ type: 'text', text: formatSessionHealthSummary(data) }],
+          structuredContent: data,
         });
       }
 
@@ -276,18 +446,23 @@ export function createMcpServer(deps) {
     if (typeof uri !== 'string') {
       return fail(id, -32602, 'resources/read requires a string uri.');
     }
-    if (uri !== DASHBOARD_URI) {
+    if (uri !== DASHBOARD_URI && uri !== HEALTH_CARD_URI) {
       return fail(id, -32602, `Unknown resource: ${uri}`);
     }
     try {
-      const html = await deps.readDashboardHtml();
+      const isHealthCard = uri === HEALTH_CARD_URI;
+      const reader = isHealthCard ? deps.readHealthCardHtml : deps.readDashboardHtml;
+      if (typeof reader !== 'function') {
+        return fail(id, -32603, `Resource reader unavailable: ${uri}`);
+      }
+      const html = await reader();
       return answer(id, {
         contents: [
           {
-            uri: DASHBOARD_URI,
+            uri,
             mimeType: DASHBOARD_MIME,
             text: html,
-            _meta: { ui: { prefersBorder: false } },
+            _meta: { ui: { prefersBorder: isHealthCard } },
           },
         ],
       });
@@ -337,23 +512,28 @@ export function createMcpServer(deps) {
             })),
           });
         case 'tools/call':
-          void handleToolCall(id, params);
-          return;
+          return handleToolCall(id, params);
         case 'resources/list':
           return answer(id, {
             resources: [
               {
                 uri: DASHBOARD_URI,
                 name: 'Usage Monitor Dashboard',
-                description: 'Full-page interactive Usage & Speed Monitor MCP App view.',
+                description: 'Interactive Usage & Speed Monitor MCP App view (side pane and sidebar).',
                 mimeType: DASHBOARD_MIME,
                 _meta: { ui: { prefersBorder: false } },
+              },
+              {
+                uri: HEALTH_CARD_URI,
+                name: 'Session Health Card',
+                description: 'Compact inline chat card for Session Health diagnostics.',
+                mimeType: DASHBOARD_MIME,
+                _meta: { ui: { prefersBorder: true } },
               },
             ],
           });
         case 'resources/read':
-          void handleReadResource(id, params);
-          return;
+          return handleReadResource(id, params);
         default:
           return fail(id, -32601, `Method not found: ${method}`);
       }

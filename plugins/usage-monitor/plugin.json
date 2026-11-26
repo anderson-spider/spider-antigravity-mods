@@ -2,8 +2,8 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "usage-monitor",
   "displayName": "Usage & Speed Monitor",
-  "version": "1.2.1",
-  "description": "Local offline monitor for token usage, generation speed (TPS), TTFT, context breakdown, and quota pools across the left sidebar (full-page MCP App), right side pane, and CLI statusLine.",
+  "version": "2.0.0",
+  "description": "Local offline MCP App and CLI statusLine monitor for token usage, generation speed (TPS), TTFT, context breakdown, quota pools, and Session Health diagnostics across the left sidebar, right side pane, and chat inline cards.",
   "logo": "assets/logo.svg",
   "author": {
     "name": "anderson-spider",
@@ -20,13 +20,13 @@
     "ttft",
     "quota",
     "context",
-    "sidecar",
-    "mcp",
+    "session-health",
+    "mcp-app",
     "offline"
   ],
   "suggestedPrompts": [
     "Open Usage Monitor panel",
-    "Check current session token usage",
+    "Check current session health and cache efficiency",
     "Check today's and this week's model usage breakdown"
   ]
 }

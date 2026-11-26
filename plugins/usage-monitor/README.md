@@ -1,24 +1,31 @@
 # Usage & Speed Monitor
 
-Offline telemetry sidecar and CLI status bar for Google Antigravity Desktop and `agy`.
+Offline MCP App and CLI `statusLine` telemetry monitor for Google Antigravity Desktop and `agy`.
 
 ## Overview
 
-Usage & Speed Monitor tracks token throughput, latency, context allocation, and quota consumption locally on your machine without external network calls or host binary patches.
+Usage & Speed Monitor tracks token throughput, latency, context allocation, quota consumption, and **Session Health** diagnostics locally on your machine without external network calls or host binary patches.
+
+### Surfaces
+
+- **Left Sidebar (`global` MCP App):** Full-page dashboard (`usage_monitor_dashboard` → `ui://usage-monitor/dashboard.html`) accessible from **Plugins > Usage Monitor**.
+- **Right Side Pane (`aux_pane` MCP App):** Responsive auxiliary side-pane dashboard (`usage_monitor_dashboard` → `ui://usage-monitor/dashboard.html`) with automatic active-session tracking and optional agent-driven `{ conversationId?, tab? }` navigation.
+- **Inline Chat Session Health Card (`usage_monitor_session_health`):** Compact in-chat MCP App diagnostic card (`ui://usage-monitor/health-card.html`) with live **Refresh** and capability-gated **Attach diagnosis to context** (`updateModelContext`), plus a concise plain-text summary for non-UI clients.
+- **Antigravity CLI (`agy` `statusLine`):** Single-line 24-bit ANSI status bar (`cli/statusline.mjs`, toggled via `/statusline` or **Settings > Structure > CLI Status Bar**) with a minimal `⚠ cache ×N` alert shown only during an active sustained cache collapse (streak ≥ 3).
 
 ### Key Capabilities
 
-- **Quota Pace & Burn-Rate Tracking:** Computes expected cycle progress for 5-hour and weekly quota windows, overlays a vertical expected-pace marker on each quota bar, and shows directional delta badges (`▼ -9% · exp 52%`, `▲ +14% · exp 38%`, `● On pace`) with burn-rate tooltips. Can be toggled under **Settings > Structure > Overview**.
+- **Session Health Diagnostics:**
+  - **Prompt Cache Miss Attribution:** Classifies cache misses across `plan_mode_switch`, `model_switch`, `error_retry`, `idle_or_wait_gap`, `active_slow_gap`, `async_wakeup_fast`, and `prefix_or_replica_miss` while separating compaction resets and context dilution.
+  - **Sustained Cache Collapse Detection:** Flags consecutive cache-miss streaks of 3+ turns across the Overview `SessionHealthWidget`, inline chat card, and CLI `statusLine`.
+  - **Active Time & Effective TPS:** Separates LLM generation time from non-blocking tool execution time, calculates Effective TPS over active duration, and tracks active inter-step gaps over 60 seconds.
+  - **Context & Workflow Hygiene:** Monitors ≥150k prompt pressure, high-context multimodal turns (≥150k and ≥180k), and single-tool vs. batched tool-turn efficiency, with per-step badges and tooltips in **By Step** and isolated mainline aggregation in multi-agent/swarm sessions.
+- **Quota Pace & Burn-Rate Tracking:** Computes expected cycle progress for 5-hour and weekly quota windows, overlays a vertical expected-pace marker on each quota bar, and shows directional delta badges (`▼ -9% · exp 52%`, `▲ +14% · exp 38%`, `● On pace`) with burn-rate tooltips.
 - **Live Telemetry Cards:** Tracks output speed (`tok/s`), time-to-first-token (`TTFT`), session average throughput, step/session USD estimates, cache hit rate, tightest quota pool, and total session tokens.
 - **10-Category Context Inspector:** Breaks down the active prompt window across assistant replies, tool results, user input, subagent notifications, checkpoints, system prompt, system tools, MCP tools, skills, and user rules, with main/subagent switching.
 - **Multi-Pool Quotas:** Monitors 5-hour and weekly quotas, reset countdowns, and per-cycle token/cost totals across `Gemini`, `Gemini 4 Argon`, `Gemini 4 Carbon`, and `Claude & GPT` pools.
 - **Call & Trend Breakdown:** Inspects **By Step** and **By Model** records with configurable columns, custom token combo formats, turn rails, and aggregated usage views (`Today`, `1d`, `7d`, `14d`, `30d`, `All`, or custom date ranges).
-- **Local Client Modes:**
-  - **Antigravity Desktop (Left Sidebar — Full Page):** Global MCP App (`mcp_config.json` -> `ui://usage-monitor/dashboard.html`) accessible from **Plugins > Usage Monitor** in the left sidebar.
-  - **Antigravity Desktop (Right Side Pane):** Auxiliary sidebar pane (`sidecars/panel/sidecar.json`) with automatic active-conversation tracking.
-  - **Antigravity CLI (`agy`):** Single-line ANSI `statusLine` integration (toggle with `/statusline` or under **Settings > Structure**), plus plain-text summary via `usage_monitor_dashboard`.
-  - **Standalone Local Web UI:** Optional HTTP server (`sidecars/panel/standalone.mjs`) bound to `127.0.0.1:8787` by default.
-- **Bilingual Support (`en-US` / `pt-BR`):** Supports English and Brazilian Portuguese across the panel UI and CLI `statusLine`, with automatic system-locale detection (`Follow System`, defaulting to `en-US`).
+- **Host-Integrated & Bilingual (`en-US` / `pt-BR`):** Applies Antigravity `HostContext` theme, CSS variables, fonts, and locale across all MCP App surfaces and the CLI `statusLine`, with `Follow System` defaulting to `en-US`.
 
 ## Installation
 
@@ -32,24 +39,18 @@ Re-run the same command to update in place, or run `agy plugin uninstall usage-m
 
 After installation, enable **Usage & Speed Monitor** (`usage-monitor`) in `/plugin` or **Customizations > Installed**.
 
-## Standalone Web Mode
+### Upgrading from v1.x
 
-To run the panel outside the Desktop sidebar:
-
-```bash
-node ~/.gemini/config/plugins/usage-monitor/sidecars/panel/standalone.mjs --port 8787
-```
-
-Available flags include `--host`, `--port`, `--token`, `--data-dir`, `--app-data-dir`, `--gemini-dir`, `--ls-addr`, and `--csrf-token`. Binding to a non-loopback address is rejected unless `--token` (or `USAGE_MONITOR_STANDALONE_TOKEN`) is supplied.
-
-When the Antigravity Language Server is offline, the backend reads local SQLite + WAL databases, `annotations/*.pbtxt`, `transcript.jsonl`, and `.deep_stats_cache.json` under `~/.gemini/antigravity-cli`. Plugin settings and caches are persisted under `~/.gemini/antigravity/sidecar_data/usage-monitor/` (or `sidecars/panel/.data/` in standalone mode without `--data-dir`).
+- **Automatic CLI `statusLine` migration:** On MCP server startup, existing plugin-managed v1.x `statusLine` entries in `~/.gemini/antigravity-cli/settings.json` are transparently updated to point to `cli/statusline.mjs` without touching third-party `statusLine` commands.
+- **Settings & cache preservation:** Existing plugin data directories are preserved (falling back to `${PLUGIN_DATA}` on fresh installations). A one-time `settingsSchemaVersion: 2` migration inserts `session_health` into existing `overviewModules` and silently drops removed v1 settings keys.
+- **Offline fallback:** When the Antigravity Language Server is offline, the backend reads local SQLite + WAL databases, `annotations/*.pbtxt`, `transcript.jsonl`, and `.deep_stats_cache.json` under `~/.gemini/antigravity-cli`.
 
 ## Security & Offline Guarantees
 
-- **Strictly local:** Zero external network requests, no remote pricing sync, and no background auto-updater.
-- **Zero host tampering:** No `app.asar` modifications, no CDP/DevTools injection, and no OAuth or account switching code.
-- **Loopback-safe:** Standalone mode binds to `127.0.0.1` by default and enforces token authentication on non-loopback interfaces.
-- **Zero runtime dependencies:** Uses Node.js `22.18+` built-ins (`node:sqlite`, `node:http`) and native Web Components.
+- **Zero external network requests:** Operates strictly against local files and loopback Antigravity Language Server IPC; no remote pricing sync, telemetry upload, or auto-updater.
+- **Zero runtime npm dependencies:** Runs on Node.js `22.18+` built-ins (`node:sqlite`, `node:http`, `node:https`) and native Web Components; Vite and `@modelcontextprotocol/ext-apps` are build-time `devDependencies` only.
+- **Zero host tampering:** No `app.asar` modifications, no CDP/DevTools injection, and no OAuth or account-switching logic.
+- **CSP-safe self-contained HTML:** Both MCP App resources (`mcp/dist/dashboard.html` and `mcp/dist/health-card.html`) are bundled as standalone `< 10 MiB` HTML files with zero external scripts, stylesheets, or remote assets.
 
 ## Development
 
@@ -60,7 +61,9 @@ git clone https://github.com/anderson-spider/spider-antigravity-mods.git
 ln -s "$(pwd)/spider-antigravity-mods/plugins/usage-monitor" ~/.gemini/config/plugins/usage-monitor
 ```
 
-Rebuild `app.js`, `styles.css`, and `mcp/dist/dashboard.html` after editing files under `sidecars/panel/src/` or `mcp/`, then run tests, syntax checks, and manifest validation:
+Source layout: `backend/`, `shared/`, `ui/dashboard/`, `ui/health-card/`, `cli/`, `mcp/`, and `tests/`.
+
+Rebuild `mcp/dist/dashboard.html` and `mcp/dist/health-card.html` after editing UI or MCP files, then run tests, syntax checks, and strict manifest validation:
 
 ```bash
 pnpm --filter usage-monitor build
@@ -72,3 +75,5 @@ agy plugin validate --strict plugins/usage-monitor
 ## License
 
 Licensed under the [GNU General Public License v3.0](./LICENSE).
+
+Prompt cache-miss attribution and active-time heuristics in `backend/session-health.mjs` are adapted from [`INK-Q/agy-fast`](https://github.com/INK-Q/agy-fast) (`src/benchmark-core.ts`), licensed under the MIT License.
