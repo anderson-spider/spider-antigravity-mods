@@ -7,7 +7,7 @@ import { SPECS, type ToolSpec } from './tools.ts'
 import type { Reply } from './run.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.5.0'
+export const SERVER_VERSION = '0.5.1'
 
 type Id = string | number
 type Message = { jsonrpc?: string; id?: Id | null; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown }

@@ -1,3 +1,5 @@
+import type { App } from '@modelcontextprotocol/ext-apps'
+import { ServerBridge } from '../ui/src/bridge.ts'
 import { buildSplitPairs, parseUnifiedDiff, tokenizeCode } from '../ui/src/lib/diff.ts'
 import { parseMarkdown, toggleMarkdownCheckbox } from '../ui/src/lib/markdown.ts'
 import { filterAndSortMrs, formatRelativeTime, groupMrs, parseSearchQuery, readinessScore } from '../ui/src/lib/query.ts'
@@ -151,4 +153,150 @@ test('parseMarkdown renders structured AST safely without executing HTML and tog
   expect(toggled).toContain('- [x] Verify staging')
   const untoggled = toggleMarkdownCheckbox(toggled, 3, false)
   expect(untoggled).toContain('- [ ] Add tests')
+})
+
+type SendCall = { params: Record<string, unknown>; options: Record<string, unknown> | undefined }
+
+function fakeApp(
+  overrides: {
+    capabilities?: Record<string, unknown> | undefined
+    sendMessage?: (params: Record<string, unknown>, options?: Record<string, unknown>) => Promise<Record<string, unknown>>
+    updateModelContext?: (params: Record<string, unknown>) => Promise<Record<string, unknown>>
+  } = {},
+) {
+  const sendCalls: SendCall[] = []
+  const contextCalls: Record<string, unknown>[] = []
+  const app = {
+    getHostCapabilities: () => overrides.capabilities,
+    sendMessage: async (params: Record<string, unknown>, options?: Record<string, unknown>) => {
+      sendCalls.push({ params, options })
+      if (overrides.sendMessage) return overrides.sendMessage(params, options)
+      return {}
+    },
+    updateModelContext: async (params: Record<string, unknown>) => {
+      contextCalls.push(params)
+      if (overrides.updateModelContext) return overrides.updateModelContext(params)
+      return {}
+    },
+  }
+  return { app: app as unknown as App, sendCalls, contextCalls }
+}
+
+test('ServerBridge.capabilities reflects advertised message, updateModelContext, and openLinks', () => {
+  const empty = new ServerBridge(fakeApp({ capabilities: undefined }).app)
+  expect(empty.capabilities).toEqual({ canMessage: false, canUpdateContext: false, canOpenLinks: false })
+
+  const partial = new ServerBridge(fakeApp({ capabilities: { updateModelContext: {}, openLinks: {} } }).app)
+  expect(partial.capabilities).toEqual({ canMessage: false, canUpdateContext: true, canOpenLinks: true })
+
+  const full = new ServerBridge(fakeApp({ capabilities: { message: {}, updateModelContext: {}, openLinks: {} } }).app)
+  expect(full.capabilities).toEqual({ canMessage: true, canUpdateContext: true, canOpenLinks: true })
+})
+
+test('ServerBridge.sendMessage sends target new metadata and extracts conversationId when message is advertised', async () => {
+  const { app, sendCalls } = fakeApp({
+    capabilities: { message: {} },
+    sendMessage: async () => ({
+      _meta: { 'com.google.antigravity/message': { conversationId: 'conv-123' } },
+    }),
+  })
+  const bridge = new ServerBridge(app)
+
+  const res = await bridge.sendMessage('Review MR !1', { target: 'new' })
+  expect(res).toEqual({ ok: true, conversationId: 'conv-123' })
+  expect(sendCalls).toHaveLength(1)
+  expect(sendCalls[0]).toEqual({
+    params: {
+      role: 'user',
+      content: [{ type: 'text', text: 'Review MR !1' }],
+      _meta: { 'com.google.antigravity/message': { target: 'new' } },
+    },
+    options: undefined,
+  })
+
+  const plain = await bridge.sendMessage('Follow up')
+  expect(plain).toEqual({ ok: true, conversationId: 'conv-123' })
+  expect(sendCalls[1]?.params._meta).toBe(undefined)
+  expect(sendCalls[1]?.options).toBe(undefined)
+})
+
+test('ServerBridge.sendMessage blocks unadvertised calls without allowUnadvertised and caches rejection after isError', async () => {
+  const { app, sendCalls } = fakeApp({
+    capabilities: { updateModelContext: {} },
+    sendMessage: async () => ({ isError: true }),
+  })
+  const bridge = new ServerBridge(app)
+
+  expect(await bridge.sendMessage('Blocked', { target: 'new' })).toEqual({ ok: false })
+  expect(sendCalls).toHaveLength(0)
+
+  expect(await bridge.sendMessage('Probe once', { target: 'new', allowUnadvertised: true })).toEqual({ ok: false })
+  expect(sendCalls).toHaveLength(1)
+  expect(sendCalls[0]?.options).toEqual({ timeout: 5000 })
+
+  // Cached rejected state: second call must not invoke app.sendMessage again
+  expect(await bridge.sendMessage('Probe twice', { target: 'new', allowUnadvertised: true })).toEqual({ ok: false })
+  expect(sendCalls).toHaveLength(1)
+})
+
+test('ServerBridge.sendMessage caches rejection after thrown error on unadvertised probe', async () => {
+  const { app, sendCalls } = fakeApp({
+    capabilities: { updateModelContext: {} },
+    sendMessage: async () => {
+      throw new Error('Method not found')
+    },
+  })
+  const bridge = new ServerBridge(app)
+
+  expect(await bridge.sendMessage('Probe throw', { target: 'new', allowUnadvertised: true })).toEqual({ ok: false })
+  expect(sendCalls).toHaveLength(1)
+  expect(sendCalls[0]?.options).toEqual({ timeout: 5000 })
+
+  expect(await bridge.sendMessage('After throw', { target: 'new', allowUnadvertised: true })).toEqual({ ok: false })
+  expect(sendCalls).toHaveLength(1)
+})
+
+test('ServerBridge.sendMessage caches supported after unadvertised probe succeeds and skips probe timeout on later calls', async () => {
+  const { app, sendCalls } = fakeApp({
+    capabilities: { updateModelContext: {} },
+    sendMessage: async () => ({
+      _meta: { 'com.google.antigravity/message': { conversationId: 'conv-probe' } },
+    }),
+  })
+  const bridge = new ServerBridge(app)
+
+  const first = await bridge.sendMessage('First probe', { target: 'new', allowUnadvertised: true })
+  expect(first).toEqual({ ok: true, conversationId: 'conv-probe' })
+  expect(sendCalls).toHaveLength(1)
+  expect(sendCalls[0]?.options).toEqual({ timeout: 5000 })
+  expect(sendCalls[0]?.params._meta).toEqual({ 'com.google.antigravity/message': { target: 'new' } })
+
+  const second = await bridge.sendMessage('Second send', { target: 'new', allowUnadvertised: true })
+  expect(second).toEqual({ ok: true, conversationId: 'conv-probe' })
+  expect(sendCalls).toHaveLength(2)
+  expect(sendCalls[1]?.options).toBe(undefined)
+})
+
+test('ServerBridge.updateContext respects capability gating, sends text or clears context, and catches errors', async () => {
+  const disabled = fakeApp({ capabilities: {} })
+  const disabledBridge = new ServerBridge(disabled.app)
+  expect(await disabledBridge.updateContext('MR summary')).toBe(false)
+  expect(disabled.contextCalls).toHaveLength(0)
+
+  const enabled = fakeApp({ capabilities: { updateModelContext: {} } })
+  const enabledBridge = new ServerBridge(enabled.app)
+  expect(await enabledBridge.updateContext('MR summary')).toBe(true)
+  expect(await enabledBridge.updateContext('')).toBe(true)
+  expect(enabled.contextCalls).toEqual([
+    { content: [{ type: 'text', text: 'MR summary' }] },
+    { content: [] },
+  ])
+
+  const failing = fakeApp({
+    capabilities: { updateModelContext: {} },
+    updateModelContext: async () => {
+      throw new Error('Rejected')
+    },
+  })
+  expect(await new ServerBridge(failing.app).updateContext('MR summary')).toBe(false)
 })

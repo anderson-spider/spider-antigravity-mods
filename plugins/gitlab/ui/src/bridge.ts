@@ -2,6 +2,7 @@
 import type { App } from '@modelcontextprotocol/ext-apps'
 
 const MAX_IN_FLIGHT = 4
+const UNADVERTISED_MESSAGE_TIMEOUT_MS = 5000
 
 export type ToolCallResponse<T = Record<string, unknown>> = {
   ok: boolean
@@ -9,10 +10,16 @@ export type ToolCallResponse<T = Record<string, unknown>> = {
   data?: T
 }
 
+export type SendMessageResult = {
+  ok: boolean
+  conversationId?: string
+}
+
 export class ServerBridge {
   private readonly app: App
   private active = 0
   private readonly queue: (() => void)[] = []
+  private messageProbe: 'unknown' | 'supported' | 'rejected' = 'unknown'
 
   constructor(app: App) {
     this.app = app
@@ -72,8 +79,11 @@ export class ServerBridge {
     } catch {}
   }
 
-  async sendMessage(text: string, opts?: { target?: 'new' }): Promise<boolean> {
-    if (!this.capabilities.canMessage) return false
+  async sendMessage(text: string, opts?: { target?: 'new'; allowUnadvertised?: boolean }): Promise<SendMessageResult> {
+    const unadvertised = !this.capabilities.canMessage
+    if (unadvertised && (!opts?.allowUnadvertised || this.messageProbe === 'rejected')) {
+      return { ok: false }
+    }
     try {
       const payload: Record<string, unknown> = {
         role: 'user',
@@ -82,10 +92,24 @@ export class ServerBridge {
       if (opts?.target === 'new') {
         payload._meta = { 'com.google.antigravity/message': { target: 'new' } }
       }
-      const res = await this.app.sendMessage(payload as Parameters<App['sendMessage']>[0])
-      return !res.isError
+      const probing = unadvertised && this.messageProbe !== 'supported'
+      const res = probing
+        ? await this.app.sendMessage(payload as Parameters<App['sendMessage']>[0], { timeout: UNADVERTISED_MESSAGE_TIMEOUT_MS })
+        : await this.app.sendMessage(payload as Parameters<App['sendMessage']>[0])
+      if (res?.isError) {
+        if (unadvertised) this.messageProbe = 'rejected'
+        return { ok: false }
+      }
+      if (unadvertised) this.messageProbe = 'supported'
+      const meta = (res as { _meta?: Record<string, unknown> } | undefined)?._meta?.['com.google.antigravity/message']
+      const conversationId =
+        meta && typeof meta === 'object' && typeof (meta as Record<string, unknown>).conversationId === 'string'
+          ? ((meta as Record<string, unknown>).conversationId as string)
+          : undefined
+      return { ok: true, ...(conversationId ? { conversationId } : {}) }
     } catch {
-      return false
+      if (unadvertised) this.messageProbe = 'rejected'
+      return { ok: false }
     }
   }
 
