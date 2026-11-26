@@ -34,7 +34,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'gitlab-mr-dashboard', version: '0.5.0' },
+    appInfo: { name: 'gitlab-mr-dashboard', version: '0.5.1' },
     capabilities: {},
     onAppCreated: (instance) => {
       instance.ontoolresult = (result) => {
@@ -118,6 +118,8 @@ export function App() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [diffLoading, setDiffLoading] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+  const [handoffBusy, setHandoffBusy] = useState(false)
+  const handoffBusyRef = useRef(false)
   const [mergeModalOpen, setMergeModalOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
 
@@ -481,10 +483,14 @@ export function App() {
     if (activeTab) void loadDetail(activeTab, true)
   }
 
-  const copyText = (text: string): void => {
+  const copyText = async (text: string): Promise<boolean> => {
     try {
-      void navigator.clipboard?.writeText(text)
-    } catch {}
+      if (!navigator.clipboard?.writeText) return false
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      return false
+    }
   }
 
   const handleCheckoutWorktree = async () => {
@@ -503,9 +509,15 @@ export function App() {
     }
     setPendingForceRemove(null)
     const wtPath = res.data?.path
-    if (wtPath) copyText(wtPath)
+    const copied = wtPath ? await copyText(wtPath) : false
     const warnings = res.data?.warnings ?? []
-    const title = res.data?.reused ? 'Worktree synced (path copied)' : 'Worktree ready (path copied)'
+    const title = res.data?.reused
+      ? copied
+        ? 'Worktree synced (path copied)'
+        : 'Worktree synced'
+      : copied
+        ? 'Worktree ready (path copied)'
+        : 'Worktree ready'
     const detail = warnings.length > 0 ? `${wtPath ?? ''}\n${warnings.join(' ')}`.trim() : wtPath
     pushToast(title, detail, warnings.length > 0 ? 'warning' : 'success')
     await loadDetail(activeTab, true)
@@ -543,25 +555,49 @@ export function App() {
 
   // Agent handoff helpers (only rendered when host offers message/updateModelContext)
   const handoffToAgent = async (kind: 'review' | 'fix-ci' | 'threads' | 'attach') => {
-    if (!bridge || !activeDetail) return
-    const ref = `${activeDetail.project}!${activeDetail.iid} (${activeDetail.host})`
-    const branches = `${activeDetail.source} -> ${activeDetail.target}`
-    const wtNote = activeDetail.activeWorktree
-      ? `\nLocal worktree: ${activeDetail.activeWorktree.path} (branch ${activeDetail.activeWorktree.branch})`
-      : ''
-    if (kind === 'attach') {
-      const ctx = `GitLab MR ${ref}\nTitle: ${activeDetail.title}\nBranches: ${branches}${wtNote}\nURL: ${activeDetail.url}\nBlockers: ${activeDetail.blockers.join(', ') || 'none'}`
-      const ok = await bridge.updateContext(ctx)
-      pushToast(ok ? 'Attached MR context to next message' : 'Could not attach context', ref, ok ? 'success' : 'error')
-      return
+    if (!bridge || !activeDetail || handoffBusyRef.current) return
+    handoffBusyRef.current = true
+    setHandoffBusy(true)
+    try {
+      const ref = `${activeDetail.project}!${activeDetail.iid} (${activeDetail.host})`
+      const branches = `${activeDetail.source} -> ${activeDetail.target}`
+      const wtNote = activeDetail.activeWorktree
+        ? `\nLocal worktree: ${activeDetail.activeWorktree.path} (branch ${activeDetail.activeWorktree.branch})`
+        : ''
+      if (kind === 'attach') {
+        const ctx = `GitLab MR ${ref}\nTitle: ${activeDetail.title}\nBranches: ${branches}${wtNote}\nURL: ${activeDetail.url}\nBlockers: ${activeDetail.blockers.join(', ') || 'none'}`
+        const ok = await bridge.updateContext(ctx)
+        pushToast(ok ? 'Attached MR context to next message' : 'Could not attach context', ref, ok ? 'success' : 'error')
+        return
+      }
+      const prompts = {
+        review: `Review GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and save any findings as draft notes.`,
+        'fix-ci': `Inspect the failing pipeline #${activeDetail.pipeline?.id ?? ''} jobs and logs for GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help fix the failure.`,
+        threads: `Inspect all unresolved discussions on GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help address them.`,
+      }
+      const prompt = prompts[kind]
+      const sent = await bridge.sendMessage(prompt, { target: 'new', allowUnadvertised: caps.canUpdateContext })
+      if (sent.ok) {
+        pushToast('Started new agent conversation', ref, 'success')
+        return
+      }
+      const [attached, copied] = await Promise.all([
+        caps.canUpdateContext ? bridge.updateContext(prompt) : Promise.resolve(false),
+        copyText(prompt),
+      ])
+      if (attached && copied) {
+        pushToast('Attached prompt to chat & copied', 'Send in this chat or paste into a new conversation.', 'success')
+      } else if (attached) {
+        pushToast('Attached prompt to next message', 'Send your next chat message to run it.', 'success')
+      } else if (copied) {
+        pushToast('Copied agent prompt', 'Paste into an agent conversation to run.', 'default')
+      } else {
+        pushToast('Could not start conversation', ref, 'error')
+      }
+    } finally {
+      handoffBusyRef.current = false
+      setHandoffBusy(false)
     }
-    const prompts = {
-      review: `Review GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and save any findings as draft notes.`,
-      'fix-ci': `Inspect the failing pipeline #${activeDetail.pipeline?.id ?? ''} jobs and logs for GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help fix the failure.`,
-      threads: `Inspect all unresolved discussions on GitLab MR !${activeDetail.iid} in ${activeDetail.project} on ${activeDetail.host} (${branches}, ${activeDetail.url})${wtNote} and help address them.`,
-    }
-    const ok = await bridge.sendMessage(prompts[kind], { target: 'new' })
-    pushToast(ok ? 'Started new agent conversation' : 'Could not start conversation', ref, ok ? 'success' : 'error')
   }
 
   if (connectError) {
@@ -715,7 +751,7 @@ export function App() {
                 const dotColor =
                   tab.state === 'merged'
                     ? '#8b5cf6'
-                    : tab.pipelineStatus === 'failed'
+                    : tab.pipelineStatus?.toLowerCase() === 'failed'
                       ? 'var(--fg-danger)'
                       : 'var(--fg-success)'
                 return (
@@ -887,8 +923,10 @@ export function App() {
                       className="btn btn-sm"
                       title="Copy worktree path to clipboard"
                       onClick={() => {
-                        copyText(activeDetail.activeWorktree!.path)
-                        pushToast('Copied worktree path', activeDetail.activeWorktree!.path)
+                        const wtPath = activeDetail.activeWorktree!.path
+                        void copyText(wtPath).then((copied) => {
+                          pushToast(copied ? 'Copied worktree path' : 'Could not copy worktree path', wtPath, copied ? 'default' : 'error')
+                        })
                       }}
                     >
                       <CopyIcon />
@@ -925,39 +963,51 @@ export function App() {
                     <SparkleIcon />
                     Agent:
                   </span>
-                  {caps.canMessage ? (
-                    <>
-                      <button
-                        className="btn btn-sm"
-                        title="Start a new agent conversation to review this MR and save findings as draft notes"
-                        onClick={() => void handoffToAgent('review')}
-                      >
-                        Review MR
-                      </button>
-                      {activeDetail.pipeline?.status === 'failed' ? (
-                        <button
-                          className="btn btn-sm btn-danger"
-                          title="Start a new agent conversation to inspect failing CI jobs and help fix the pipeline"
-                          onClick={() => void handoffToAgent('fix-ci')}
-                        >
-                          Fix failing pipeline
-                        </button>
-                      ) : null}
-                      {unresolvedCount > 0 ? (
-                        <button
-                          className="btn btn-sm"
-                          title="Start a new agent conversation to inspect and address unresolved review threads"
-                          onClick={() => void handoffToAgent('threads')}
-                        >
-                          Address {unresolvedCount} thread{unresolvedCount === 1 ? '' : 's'}
-                        </button>
-                      ) : null}
-                    </>
+                  <button
+                    className="btn btn-sm"
+                    disabled={handoffBusy}
+                    title={
+                      caps.canMessage
+                        ? 'Start a new agent conversation to review this MR and save findings as draft notes'
+                        : 'Start a new agent conversation to review this MR if supported, or attach the prompt to chat context and copy it'
+                    }
+                    onClick={() => void handoffToAgent('review')}
+                  >
+                    Review MR
+                  </button>
+                  {activeDetail.pipeline?.status?.toLowerCase() === 'failed' ? (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      disabled={handoffBusy}
+                      title={
+                        caps.canMessage
+                          ? 'Start a new agent conversation to inspect failing CI jobs and help fix the pipeline'
+                          : 'Start a new agent conversation to inspect failing CI jobs if supported, or attach the prompt to chat context and copy it'
+                      }
+                      onClick={() => void handoffToAgent('fix-ci')}
+                    >
+                      Fix failing pipeline
+                    </button>
+                  ) : null}
+                  {unresolvedCount > 0 ? (
+                    <button
+                      className="btn btn-sm"
+                      disabled={handoffBusy}
+                      title={
+                        caps.canMessage
+                          ? 'Start a new agent conversation to inspect and address unresolved review threads'
+                          : 'Start a new agent conversation to inspect and address unresolved review threads if supported, or attach the prompt to chat context and copy it'
+                      }
+                      onClick={() => void handoffToAgent('threads')}
+                    >
+                      Address {unresolvedCount} thread{unresolvedCount === 1 ? '' : 's'}
+                    </button>
                   ) : null}
                   {caps.canUpdateContext ? (
                     <button
                       className="btn btn-sm"
                       style={{ marginLeft: 'auto' }}
+                      disabled={handoffBusy}
                       title="Attach this MR's summary to your next chat message without sending"
                       onClick={() => void handoffToAgent('attach')}
                     >

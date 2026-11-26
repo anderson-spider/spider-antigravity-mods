@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 - 2026-11-26
+
+- Fix missing Agent Handoff action buttons (`Review MR`, `Fix failing pipeline`, `Address N threads`) in hosts that advertise `updateModelContext` without `message`: render the buttons whenever `message` or `updateModelContext` is available, probe `ui/message` once with a 5s timeout (caching supported/rejected state), and fall back gracefully to attaching the prompt to chat context and/or copying it to the clipboard.
+- Add an in-flight `handoffBusy` guard to prevent duplicate handoffs on rapid clicks, and verify clipboard writes asynchronously before reporting copy success in toasts.
+- Normalize pipeline status to lowercase across REST list and detail payloads (`server/dashboard.ts`) and match failed pipeline states case-insensitively in the UI (`App.tsx`).
+
 ## 0.5.0 - 2026-11-25
 
 - Add multi-root MCP `roots/list` discovery (`foldersOf` and `CallContext.cwds`) so every workspace root is automatically detected alongside persistent registered local repositories (`Repos` popover, backed by `dashboard-state.json`).

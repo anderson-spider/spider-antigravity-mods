@@ -324,7 +324,15 @@ function fromRestMr(host: string, item: RestMr, me: string | undefined, fallback
     conflicts: Boolean(item.has_conflicts),
     mergeStatus: item.detailed_merge_status ?? item.merge_status,
     labels: (item.labels ?? []).map((name) => ({ name })),
-    ...(item.head_pipeline ? { pipeline: { id: item.head_pipeline.id, status: item.head_pipeline.status, url: item.head_pipeline.web_url } } : {}),
+    ...(item.head_pipeline
+      ? {
+          pipeline: {
+            id: item.head_pipeline.id,
+            status: normalizeStatus(item.head_pipeline.status) ?? item.head_pipeline.status,
+            url: item.head_pipeline.web_url,
+          },
+        }
+      : {}),
     url: item.web_url,
   }
 }
@@ -1157,7 +1165,16 @@ export async function runDashboardTool(
           ...(localRepoPath ? { localRepoPath } : {}),
           activeWorktree,
           labels: (rawMr.labels ?? []).map((l) => ({ name: l, ...(labelColors.get(l) ? { color: labelColors.get(l) } : {}) })),
-          pipeline: headPipeline ? { id: headPipeline.id, status: headPipeline.status, sha: headPipeline.sha, url: headPipeline.web_url, jobs, downstream } : null,
+          pipeline: headPipeline
+            ? {
+                id: headPipeline.id,
+                status: normalizeStatus(headPipeline.status) ?? headPipeline.status,
+                sha: headPipeline.sha,
+                url: headPipeline.web_url,
+                jobs,
+                downstream,
+              }
+            : null,
           discussions,
           drafts,
         }
