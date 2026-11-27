@@ -6,6 +6,7 @@ Native plugins for [Google Antigravity](https://antigravity.google) by [anderson
 
 | Plugin | Version | Description |
 | :--- | :--- | :--- |
+| [`claude-agent`](./plugins/claude-agent) | `0.1.0` | Agent-driven Claude Code monitor and Antigravity bridge powered by `@agentclientprotocol/claude-agent-acp`, with streaming responses, grouped tool timelines, diffs, permission approvals, and scoped session archiving and persistence across sidebar and side pane. |
 | [`gitlab`](./plugins/gitlab) | `0.5.1` | Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and labels with an interactive MR Dashboard (multi-repo tracking, isolated worktree checkout, Global sidebar & side pane) across `gitlab.com` and self-hosted GitLab instances. |
 | [`usage-monitor`](./plugins/usage-monitor) | `2.0.0` | Local offline MCP App and CLI `statusLine` monitor for token usage, generation speed (`tok/s`), TTFT, context breakdown, quota pace, and Session Health diagnostics (left sidebar `global`, right side pane `aux_pane`, and inline chat health card). |
 
@@ -19,6 +20,7 @@ Native plugins for [Google Antigravity](https://antigravity.google) by [anderson
 Install any plugin directly from its GitHub subdirectory with the `agy` CLI:
 
 ```bash
+agy plugin install https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/claude-agent
 agy plugin install https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/gitlab
 agy plugin install https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/usage-monitor
 ```
