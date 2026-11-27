@@ -1,0 +1,28 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "claude-agent",
+  "displayName": "Claude Agent",
+  "version": "0.1.0",
+  "description": "Agent-driven Claude Code monitor and Antigravity bridge powered by @agentclientprotocol/claude-agent-acp, with streaming responses, grouped tool timelines, diffs, permission approvals, and session persistence across sidebar and side pane.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "anderson-spider",
+    "url": "https://github.com/anderson-spider"
+  },
+  "homepage": "https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/claude-agent",
+  "repository": "https://github.com/anderson-spider/spider-antigravity-mods",
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "acp",
+    "agent-client-protocol",
+    "mcp-app",
+    "chat"
+  ],
+  "suggestedPrompts": [
+    "Open Claude Agent panel",
+    "Ask Claude to review the current branch changes",
+    "Delegate an interactive task to Claude Agent"
+  ]
+}
