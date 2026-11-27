@@ -2012,9 +2012,10 @@ async function executeSingleQuery(
     if (query.path !== undefined && query.path !== '') {
       const decision = await policy.authorizeRead(query.path, baseCwd, 'batch_search')
       if (!decision.ok) {
+        const safeHeader = redactSecrets(header)
         return {
-          header,
-          text: `${header}\nERROR: ${redactSecrets(decision.error)}`,
+          header: safeHeader,
+          text: `${safeHeader}\nERROR: ${redactSecrets(decision.error)}`,
           errored: true,
           blocked: true,
         }
@@ -2120,8 +2121,9 @@ async function executeSingleQuery(
         : {}),
     }
   } catch (err) {
+    const safeHeader = redactSecrets(header)
     const msg = redactSecrets(err instanceof Error ? err.message : String(err))
-    return { header, text: `${header}\nERROR: ${msg}`, errored: true }
+    return { header: safeHeader, text: `${safeHeader}\nERROR: ${msg}`, errored: true }
   }
 }
 
@@ -2318,16 +2320,17 @@ export async function runBatchSearch(
     rootsRes.ok ? rootsRes.value : undefined,
   )
 
+  const allErrored = errorCount === queries.length
   audit?.record({
     tool: 'batch_search',
-    status: blockedCount === queries.length ? 'blocked' : 'ok',
+    status: blockedCount === queries.length ? 'blocked' : allErrored ? 'error' : 'ok',
     sanitizedPath: sanitizedCwd,
     summary: `queries=${queries.length} engine=${engine} errors=${errorCount} blocked=${blockedCount} truncated=${truncated}`,
   })
 
   return {
     text: fitted.text,
-    isError: false,
+    isError: allErrored,
     structuredContent: {
       engine,
       queryCount: queries.length,

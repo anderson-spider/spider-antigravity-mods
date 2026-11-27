@@ -527,4 +527,53 @@ describe('search.ts — security hardening', () => {
     assert.ok(!auditSerialized.includes('SHARED_NEEDLE_OUTSIDE_LEAK'))
     assert.ok(audit.list().some((e) => e.status === 'blocked'))
   })
+
+  it('blocks uppercase/mixed-case secret paths with --iglob=! and sets isError: true + redacts headers when all queries fail', async () => {
+    const ws = await makeTempDir('bt-search-case-err-')
+    await fs.mkdir(path.join(ws, 'Secrets'), { recursive: true })
+    await fs.writeFile(path.join(ws, '.ENV'), 'CASE_NEEDLE=UPPERCASE_ENV_SECRET\n', 'utf8')
+    await fs.writeFile(
+      path.join(ws, 'Secrets', 'cred.txt'),
+      'CASE_NEEDLE=MIXED_SECRETS_DIR\n',
+      'utf8',
+    )
+    await fs.writeFile(path.join(ws, 'server.PEM'), 'CASE_NEEDLE=UPPERCASE_PEM_KEY\n', 'utf8')
+    await fs.writeFile(path.join(ws, 'safe.txt'), 'CASE_NEEDLE=VISIBLE_OK\n', 'utf8')
+
+    const audit = createAuditLog()
+    const policy = createPolicyGuard({ mcpRoots: [ws], env: {}, audit })
+
+    for (const forceNodeFallback of [false, true]) {
+      const res = await runBatchSearch(
+        {
+          cwd: ws,
+          queries: [{ type: 'text', pattern: 'CASE_NEEDLE', glob: '**/*' }],
+        },
+        { policy, audit, forceNodeFallback },
+      )
+      assert.equal(res.isError, false)
+      assert.ok(res.text.includes('VISIBLE_OK'))
+      assert.ok(!res.text.includes('UPPERCASE_ENV_SECRET'))
+      assert.ok(!res.text.includes('MIXED_SECRETS_DIR'))
+      assert.ok(!res.text.includes('UPPERCASE_PEM_KEY'))
+    }
+
+    // All-blocked batch returns isError: true and redacts credential patterns in errored headers
+    const allBlocked = await runBatchSearch(
+      {
+        cwd: ws,
+        queries: [
+          { type: 'text', pattern: 'glpat-SecretLeakToken1234', path: '.ENV' },
+          { type: 'text', pattern: 'Bearer SuperSecretBearer999', path: '../escape' },
+        ],
+      },
+      { policy, audit },
+    )
+    assert.equal(allBlocked.isError, true)
+    assert.equal(allBlocked.structuredContent?.errorCount, 2)
+    assert.ok(!allBlocked.text.includes('SecretLeakToken1234'))
+    assert.ok(!allBlocked.text.includes('SuperSecretBearer999'))
+    assert.ok(allBlocked.text.includes('glpat-***'))
+    assert.ok(allBlocked.text.includes('Bearer ***'))
+  })
 })

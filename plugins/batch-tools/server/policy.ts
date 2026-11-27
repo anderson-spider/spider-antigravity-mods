@@ -111,6 +111,10 @@ export function isTildePath(inputPath: string): boolean {
   return trimmed === '~' || trimmed.startsWith('~/') || trimmed.startsWith('~\\')
 }
 
+export function hasNullByte(inputPath: string): boolean {
+  return inputPath.includes('\0')
+}
+
 export function isEditAllowedFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env[ENV_ALLOW_EDITS]
   if (typeof raw !== 'string') return true
@@ -216,13 +220,13 @@ function compileSimpleGlob(pattern: string): { re: RegExp; hasSlash: boolean } |
 }
 
 export function getRgDenyGlobs(extraDenyGlobs: readonly string[] = []): string[] {
-  const flags = RG_BUILTIN_DENY_PATTERNS.map((pattern) => `--glob=!${pattern}`)
+  const flags = RG_BUILTIN_DENY_PATTERNS.map((pattern) => `--iglob=!${pattern}`)
   for (const raw of extraDenyGlobs) {
     const cleaned = raw.trim().replace(/^!+/, '').replace(/\\/g, '/')
     if (!cleaned) continue
-    flags.push(`--glob=!${cleaned}`)
+    flags.push(`--iglob=!${cleaned}`)
     if (!cleaned.includes('/')) {
-      flags.push(`--glob=!**/${cleaned}`)
+      flags.push(`--iglob=!**/${cleaned}`)
     }
   }
   return flags
@@ -255,51 +259,86 @@ function isInstalledPluginPath(dirPath: string): boolean {
   )
 }
 
+const MAX_SYMLINK_HOPS = 40
+
+export class SymlinkLoopError extends Error {
+  constructor(message = 'Access denied: symlink loop or excessive symlink depth detected.') {
+    super(message)
+    this.name = 'SymlinkLoopError'
+  }
+}
+
 /**
  * Canonicalizes `absPath` using `fs.realpath`, walking up to the nearest
- * existing ancestor when the target does not yet exist. If `absPath` is a
- * dangling symlink, resolves the symlink target against its parent directory
- * and canonicalizes that target so escapes are caught reliably.
+ * existing ancestor when the target does not yet exist. If any existing path
+ * or ancestor segment is a dangling symlink, resolves its target while
+ * tracking visited symlinks and hop depth (`<= 40`) to fail closed on cycles.
  */
-export async function canonicalizePath(absPath: string): Promise<string> {
+export async function canonicalizePath(
+  absPath: string,
+  visited: ReadonlySet<string> = new Set(),
+  hops = 0,
+): Promise<string> {
+  if (hops > MAX_SYMLINK_HOPS) {
+    throw new SymlinkLoopError()
+  }
   const resolved = path.resolve(absPath)
   try {
     return await fs.realpath(resolved)
-  } catch {
-    try {
-      const lst = await fs.lstat(resolved)
-      if (lst.isSymbolicLink()) {
-        const linkTarget = await fs.readlink(resolved)
-        const parentCanon = await canonicalizePath(path.dirname(resolved))
-        const targetAbs = path.resolve(parentCanon, linkTarget)
-        if (targetAbs !== resolved) {
-          return canonicalizePath(targetAbs)
-        }
-      }
-    } catch {
-      // Target does not exist; walk up to nearest existing ancestor below.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ELOOP') {
+      throw new SymlinkLoopError()
     }
+  }
 
-    const trailing: string[] = []
-    let current = resolved
-    while (true) {
+  const trailing: string[] = []
+  let current = resolved
+  while (true) {
+    try {
+      const lst = await fs.lstat(current)
+      if (lst.isSymbolicLink()) {
+        if (visited.has(current) || hops >= MAX_SYMLINK_HOPS) {
+          throw new SymlinkLoopError()
+        }
+        const nextVisited = new Set(visited)
+        nextVisited.add(current)
+        const linkTarget = await fs.readlink(current)
+        const parentDir = path.dirname(current)
+        const parentCanon =
+          parentDir === current
+            ? parentDir
+            : await canonicalizePath(parentDir, nextVisited, hops + 1)
+        const canonLinkPath = path.join(parentCanon, path.basename(current))
+        if (visited.has(canonLinkPath)) {
+          throw new SymlinkLoopError()
+        }
+        nextVisited.add(canonLinkPath)
+        const targetAbs = path.resolve(parentCanon, linkTarget)
+        const targetCanon = await canonicalizePath(targetAbs, nextVisited, hops + 1)
+        return trailing.length > 0
+          ? path.join(targetCanon, ...trailing.reverse())
+          : targetCanon
+      }
+      const realAncestor = await fs.realpath(current)
+      return trailing.length > 0
+        ? path.join(realAncestor, ...trailing.reverse())
+        : realAncestor
+    } catch (err) {
+      if (err instanceof SymlinkLoopError) throw err
+      if ((err as NodeJS.ErrnoException)?.code === 'ELOOP') {
+        throw new SymlinkLoopError()
+      }
       const parent = path.dirname(current)
       if (parent === current) return resolved
       trailing.push(path.basename(current))
       current = parent
-      try {
-        const realAncestor = await fs.realpath(current)
-        return path.join(realAncestor, ...trailing.reverse())
-      } catch {
-        // Keep walking up.
-      }
     }
   }
 }
 
 async function canonicalizeExistingDir(dirPath: string): Promise<string | null> {
   const trimmed = dirPath.trim()
-  if (!trimmed || isTildePath(trimmed)) return null
+  if (!trimmed || hasNullByte(trimmed) || isTildePath(trimmed)) return null
   const resolved = path.resolve(trimmed)
   try {
     const canon = await fs.realpath(resolved)
@@ -585,6 +624,15 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
       return deny('invalid_path', 'Invalid cwd: must be a string path.', toolName)
     }
     const trimmed = requestedCwd.trim()
+    if (hasNullByte(trimmed)) {
+      return deny(
+        'invalid_path',
+        'Invalid cwd: path must not contain NUL bytes.',
+        toolName,
+        trimmed.replace(/\0/g, ''),
+        roots,
+      )
+    }
     if (isTildePath(trimmed)) {
       return deny(
         'tilde_forbidden',
@@ -596,7 +644,15 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
     }
 
     const absCwd = path.resolve(defaultRoot, trimmed)
-    const canonCwd = await canonicalizePath(absCwd)
+    let canonCwd: string
+    try {
+      canonCwd = await canonicalizePath(absCwd)
+    } catch (err) {
+      if (err instanceof SymlinkLoopError) {
+        return deny('symlink_forbidden', err.message, toolName, trimmed, roots)
+      }
+      throw err
+    }
     const matchedRoot = findContainingRoot(canonCwd, roots)
     if (!matchedRoot) {
       return deny(
@@ -639,6 +695,14 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
       return deny('invalid_path', 'Invalid path: must be a non-empty string.', toolName)
     }
     const trimmed = targetPath.trim()
+    if (hasNullByte(trimmed)) {
+      return deny(
+        'invalid_path',
+        'Invalid path: path must not contain NUL bytes.',
+        toolName,
+        trimmed.replace(/\0/g, ''),
+      )
+    }
     if (isTildePath(trimmed)) {
       return deny(
         'tilde_forbidden',
@@ -655,7 +719,15 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
     const roots = rootsRes.value
 
     const absPath = path.resolve(cwdRes.value.cwd, trimmed)
-    const canonicalPath = await canonicalizePath(absPath)
+    let canonicalPath: string
+    try {
+      canonicalPath = await canonicalizePath(absPath)
+    } catch (err) {
+      if (err instanceof SymlinkLoopError) {
+        return deny('symlink_forbidden', err.message, toolName, trimmed, roots)
+      }
+      throw err
+    }
     const matchedRoot = findContainingRoot(canonicalPath, roots)
     if (!matchedRoot) {
       return deny(
@@ -711,6 +783,14 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
       return deny('invalid_path', 'Invalid path: must be a non-empty string.', toolName)
     }
     const trimmed = targetPath.trim()
+    if (hasNullByte(trimmed)) {
+      return deny(
+        'invalid_path',
+        'Invalid path: path must not contain NUL bytes.',
+        toolName,
+        trimmed.replace(/\0/g, ''),
+      )
+    }
     if (isTildePath(trimmed)) {
       return deny(
         'tilde_forbidden',
@@ -727,7 +807,15 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
     const roots = rootsRes.value
 
     const absPath = path.resolve(cwdRes.value.cwd, trimmed)
-    const canonicalPath = await canonicalizePath(absPath)
+    let canonicalPath: string
+    try {
+      canonicalPath = await canonicalizePath(absPath)
+    } catch (err) {
+      if (err instanceof SymlinkLoopError) {
+        return deny('symlink_forbidden', err.message, toolName, trimmed, roots)
+      }
+      throw err
+    }
     const matchedRoot = findContainingRoot(canonicalPath, roots)
     const logicalRoot = findContainingRoot(absPath, roots)
     if (!matchedRoot || !logicalRoot) {
@@ -794,13 +882,22 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
     targetPath: string,
     baseCwd: string,
   ): Promise<boolean> {
-    if (!targetPath || isTildePath(targetPath)) return false
+    if (!targetPath || hasNullByte(targetPath) || hasNullByte(baseCwd) || isTildePath(targetPath)) {
+      return false
+    }
     const rootsRes = await getRoots()
     if (!rootsRes.ok) return false
     const roots = rootsRes.value
-    const canonBase = await canonicalizePath(baseCwd)
-    const absPath = path.resolve(canonBase, targetPath)
-    const canonicalPath = await canonicalizePath(absPath)
+    let canonBase: string
+    let absPath: string
+    let canonicalPath: string
+    try {
+      canonBase = await canonicalizePath(baseCwd)
+      absPath = path.resolve(canonBase, targetPath)
+      canonicalPath = await canonicalizePath(absPath)
+    } catch {
+      return false
+    }
     const matchedRoot = findContainingRoot(canonicalPath, roots)
     if (!matchedRoot) return false
     const relCanonical = path.relative(matchedRoot, canonicalPath).split(path.sep).join('/')

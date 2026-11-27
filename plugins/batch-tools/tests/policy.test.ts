@@ -236,9 +236,57 @@ describe('policy.ts', () => {
     await fs.symlink(path.join(ws, 'ok.ts'), path.join(ws, 'internal-link.ts'))
 
     // Tilde forbidden
-    const tildeRead = await policy.authorizeRead('~/env.sh', undefined, 'read_slices')
+    const tildeRead = await policy.authorizeRead('~/example.txt', undefined, 'read_slices')
     assert.equal(tildeRead.ok, false)
     assert.equal(tildeRead.reason, 'tilde_forbidden')
+
+    // NUL bytes forbidden upfront across read, write, cwd, and output filter
+    const nullRead = await policy.authorizeRead('ok.ts\0.env', undefined, 'read_slices')
+    assert.equal(nullRead.ok, false)
+    assert.equal(nullRead.reason, 'invalid_path')
+
+    const nullWrite = await policy.authorizeWrite('ok.ts\0.ts', undefined, 'apply_edits')
+    assert.equal(nullWrite.ok, false)
+    assert.equal(nullWrite.reason, 'invalid_path')
+
+    const nullCwd = await policy.resolveCwd('sub\0dir', 'batch_search')
+    assert.equal(nullCwd.ok, false)
+    assert.equal(nullCwd.reason, 'invalid_path')
+
+    assert.equal(await policy.isAllowedOutputPath('ok.ts\0.env', ws), false)
+
+    // 2-node symlink cycle & indirect cycle fail fast (no infinite recursion/hang)
+    await fs.symlink(path.join(ws, 'loop_b'), path.join(ws, 'loop_a'))
+    await fs.symlink(path.join(ws, 'loop_a'), path.join(ws, 'loop_b'))
+    await fs.symlink(path.join(ws, 'loop_d', 'sub'), path.join(ws, 'loop_c'))
+    await fs.symlink(path.join(ws, 'loop_c'), path.join(ws, 'loop_d'))
+
+    const cycleRead = await policy.authorizeRead('loop_a', undefined, 'read_slices')
+    assert.equal(cycleRead.ok, false)
+    assert.equal(cycleRead.reason, 'symlink_forbidden')
+
+    const indirectCycleRead = await policy.authorizeRead('loop_c', undefined, 'read_slices')
+    assert.equal(indirectCycleRead.ok, false)
+    assert.equal(indirectCycleRead.reason, 'symlink_forbidden')
+
+    const cycleWrite = await policy.authorizeWrite('loop_a', undefined, 'apply_edits')
+    assert.equal(cycleWrite.ok, false)
+    assert.equal(cycleWrite.reason, 'symlink_forbidden')
+
+    assert.equal(await policy.isAllowedOutputPath('loop_a', ws), false)
+    assert.equal(await policy.isAllowedOutputPath('loop_c', ws), false)
+
+    // Dangling directory ancestor symlink pointing outside workspace is caught
+    await fs.symlink(path.join(outside, 'nonexistent_dir_xyz'), path.join(ws, 'dangling_dir'))
+    const danglingDirRead = await policy.authorizeRead('dangling_dir/file.txt', undefined, 'read_slices')
+    assert.equal(danglingDirRead.ok, false)
+    assert.equal(danglingDirRead.reason, 'outside_workspace')
+
+    const danglingDirWrite = await policy.authorizeWrite('dangling_dir/file.txt', undefined, 'apply_edits')
+    assert.equal(danglingDirWrite.ok, false)
+    assert.equal(danglingDirWrite.reason, 'outside_workspace')
+
+    assert.equal(await policy.isAllowedOutputPath('dangling_dir/file.txt', ws), false)
 
     const tildeCwd = await policy.resolveCwd('~', 'batch_search')
     assert.equal(tildeCwd.ok, false)
@@ -340,14 +388,14 @@ describe('policy.ts', () => {
     assert.equal(isBuiltinSecretPath('.env.example'), false)
 
     const rgGlobs = getRgDenyGlobs(policy.getExtraDenyGlobs())
-    assert.ok(rgGlobs.includes('--glob=!**/.env'))
-    assert.ok(rgGlobs.includes('--glob=!**/secrets/**'))
-    assert.ok(rgGlobs.includes('--glob=!**/*.pem'))
-    assert.ok(rgGlobs.includes('--glob=!**/private/**'))
-    assert.ok(rgGlobs.includes('--glob=!*.credentials'))
-    assert.ok(rgGlobs.includes('--glob=!**/*.credentials'))
+    assert.ok(rgGlobs.includes('--iglob=!**/.env'))
+    assert.ok(rgGlobs.includes('--iglob=!**/secrets/**'))
+    assert.ok(rgGlobs.includes('--iglob=!**/*.pem'))
+    assert.ok(rgGlobs.includes('--iglob=!**/private/**'))
+    assert.ok(rgGlobs.includes('--iglob=!*.credentials'))
+    assert.ok(rgGlobs.includes('--iglob=!**/*.credentials'))
     // Must never emit a positive glob that restricts ripgrep.
-    assert.ok(rgGlobs.every((flag) => flag.startsWith('--glob=!')))
+    assert.ok(rgGlobs.every((flag) => flag.startsWith('--iglob=!')))
   })
 
   it('protects .git writes across case/Win32 variants while allowing .gitignore and .github', async () => {
