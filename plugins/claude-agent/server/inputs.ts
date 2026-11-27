@@ -72,8 +72,9 @@ export type ToolInputs = {
     optionId?: string
   }
   claude_ui_poll: {
-    sessionId: string
-    afterSeq: number
+    sessionId?: string
+    afterSeq?: number
+    afterCatalogVersion?: number
     waitMs?: number
     clientId?: string
   }

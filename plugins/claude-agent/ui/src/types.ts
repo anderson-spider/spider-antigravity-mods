@@ -158,6 +158,7 @@ export type BootstrapPayload = {
   workspaceRoots: string[]
   recentCwds: string[]
   sessions: SessionSummary[]
+  catalogVersion?: number
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
   pendingReplies?: PendingChatReplyRef[]
@@ -182,11 +183,14 @@ export type PollEvent =
   | { seq: number; type: 'turn_finished'; sessionId: string; stopReason: string; error?: string }
 
 export type PollResponse = {
-  sessionId: string
+  sessionId?: string
   events: PollEvent[]
   latestSeq: number
   resync: boolean
   snapshot?: SessionSnapshot
+  catalogVersion?: number
+  sessions?: SessionSummary[]
+  focusSessionId?: string
   pendingReplies?: PendingChatReplyRef[]
 }
 

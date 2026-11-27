@@ -1011,3 +1011,49 @@ test('claude_session wait returns progress without cancelling turn and clears pe
   const boot = await manager.getBootstrap({ workspaceRoots: [dir] })
   assert.equal(boot.pendingReplies, undefined, 'consuming completed turn via wait should clear pendingChatReply')
 })
+
+test('pollEvents pushes live catalog updates and focusSessionId across views including empty welcome view', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-catalog-sync-'))
+  const manager = createTestManager(dir, dir)
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // 1. Empty view (no active session) polls catalog updates
+  const boot0 = await manager.getBootstrap({ workspaceRoots: [dir] })
+  assert.equal(boot0.sessions.length, 0)
+  const emptyPollStart = Date.now()
+  const emptyPollPromise = manager.pollEvents(undefined, 0, 5_000, 'view-empty', boot0.catalogVersion)
+  await new Promise(r => setTimeout(r, 20))
+
+  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] live panel sync', cwd: dir, mode: 'plan' }, [dir])
+  const openSc = openRes.structuredContent as { activeSession?: { sessionId: string }; catalogVersion: number }
+  const newSessionId = openSc.activeSession?.sessionId!
+  assert.ok(newSessionId)
+
+  const emptyPoll = await emptyPollPromise
+  assert.ok(Date.now() - emptyPollStart < 2_000, 'empty view poller should wake immediately when claude_open creates a session')
+  assert.ok(emptyPoll.catalogVersion > boot0.catalogVersion)
+  assert.equal(emptyPoll.focusSessionId, newSessionId)
+  assert.ok(emptyPoll.sessions?.some(s => s.sessionId === newSessionId))
+
+  // 2. Subsequent poll with the latest catalogVersion does NOT re-emit focusSessionId or sessions
+  const steadyPoll = await manager.pollEvents(newSessionId, 0, 0, 'view-empty', openSc.catalogVersion)
+  assert.equal(steadyPoll.focusSessionId, undefined)
+  assert.equal(steadyPoll.sessions, undefined)
+
+  // 3. Another view currently watching an idle session receives focusSessionId when claude_open starts session 2
+  await manager.cancelTurn(newSessionId)
+  const settledPoll = await manager.pollEvents(newSessionId, 0, 0, 'view-aux', 0)
+  const viewOldPoll = manager.pollEvents(newSessionId, settledPoll.latestSeq, 5_000, 'view-aux', settledPoll.catalogVersion)
+  await new Promise(r => setTimeout(r, 20))
+
+  const open2 = await manager.handleOpenTool({ prompt: '[trigger:slow] second task', cwd: dir, mode: 'plan' }, [dir])
+  const secondSessionId = (open2.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId!
+  assert.notEqual(secondSessionId, newSessionId)
+
+  const woke = await viewOldPoll
+  assert.equal(woke.focusSessionId, secondSessionId)
+  assert.ok(woke.sessions?.some(s => s.sessionId === secondSessionId))
+})

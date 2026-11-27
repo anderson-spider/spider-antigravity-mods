@@ -181,16 +181,17 @@ export const SPECS: readonly ToolSpec[] = [
   },
   {
     name: 'claude_ui_poll',
-    description: 'App-only: long-poll session events after a given sequence number.',
+    description: 'App-only: long-poll session events and global session catalog updates.',
     inputSchema: {
       type: 'object',
       properties: {
         sessionId: { type: 'string' },
         afterSeq: { type: 'integer' },
+        afterCatalogVersion: { type: 'integer' },
         waitMs: { type: 'integer' },
         clientId: { type: 'string' },
       },
-      required: ['sessionId', 'afterSeq'],
+      required: [],
     } satisfies SchemaFor<Inputs['claude_ui_poll']>,
     _meta: APP_ONLY_META,
   },
