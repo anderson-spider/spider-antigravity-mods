@@ -159,6 +159,7 @@ export type BootstrapPayload = {
   workspaceRoots: string[]
   recentCwds: string[]
   sessions: SessionSummary[]
+  catalogVersion: number
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
   pendingReplies?: PendingChatReplyRef[]
@@ -177,6 +178,7 @@ type InternalPermission = PermissionRequestState & {
 type PollWaiter = {
   afterSeq: number
   clientId?: string
+  watchCatalog?: boolean
   wake: () => void
   timer?: ReturnType<typeof setTimeout>
   coalesceTimer?: ReturnType<typeof setTimeout>
@@ -556,6 +558,10 @@ export class SessionManager {
   private lastError: string | undefined
   private lastStderrTail: string[] = []
   private reqCounter = 0
+  private catalogVersion = 1
+  private focusSessionId: string | undefined
+  private focusCatalogVersion = 0
+  private readonly catalogWaiters = new Set<PollWaiter>()
 
   constructor(deps: SessionManagerDeps) {
     this.deps = deps
@@ -696,6 +702,7 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       this.flushWaitersNow(session)
     }
+    this.flushCatalogWaiters()
     // Drain any in-flight store writes before returning so callers can safely clean up dataDir or exit.
     await this.deps.store.load().catch(() => undefined)
   }
@@ -875,7 +882,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.0' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.1' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -943,7 +950,7 @@ export class SessionManager {
     }
   }
 
-  async createSession(opts: { cwd?: string; modeId?: string; modelId?: string; strictMode?: boolean } = {}): Promise<SessionSnapshot> {
+  async createSession(opts: { cwd?: string; modeId?: string; modelId?: string; strictMode?: boolean; focus?: boolean } = {}): Promise<SessionSnapshot> {
     await this.ensureHydrated()
     const client = await this.ensureConnected()
     const resolved = await resolveDirectory(opts.cwd, await this.pickFallbackCwd())
@@ -999,6 +1006,10 @@ export class SessionManager {
     }
 
     this.sessions.set(session.sessionId, session)
+    if (opts.focus) {
+      this.focusSessionId = session.sessionId
+      this.focusCatalogVersion = this.catalogVersion + 1
+    }
     await this.deps.store.recordCwd(resolved.cwd)
 
     const storeData = await this.deps.store.load()
@@ -1040,6 +1051,7 @@ export class SessionManager {
     }
 
     await this.deps.store.upsertSession(toPersisted(session))
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -1203,6 +1215,7 @@ export class SessionManager {
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -1249,6 +1262,7 @@ export class SessionManager {
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -1277,6 +1291,7 @@ export class SessionManager {
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -1288,6 +1303,7 @@ export class SessionManager {
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -1302,6 +1318,7 @@ export class SessionManager {
       session.archivedAt = nowIso()
       this.emitMeta(session)
       await this.deps.store.upsertSession(toPersisted(session))
+      this.bumpCatalog()
     }
     return this.snapshotOf(session)
   }
@@ -1315,6 +1332,7 @@ export class SessionManager {
       session.updatedAt = nowIso()
       this.emitMeta(session)
       await this.deps.store.upsertSession(toPersisted(session))
+      this.bumpCatalog()
     }
     return this.snapshotOf(session)
   }
@@ -1354,8 +1372,10 @@ export class SessionManager {
       session.pendingPermissions.clear()
       this.flushWaitersNow(session)
       this.sessions.delete(sessionId)
+      if (this.focusSessionId === sessionId) this.focusSessionId = undefined
     }
     await this.deps.store.deleteSession(sessionId)
+    this.bumpCatalog()
   }
 
   async startPrompt(
@@ -1405,6 +1425,7 @@ export class SessionManager {
     session.activeTurnStartIndex = session.items.length
     this.pushEvent(session, { type: 'timeline_upsert', sessionId: session.sessionId, item: userItem }, true)
     this.emitMeta(session)
+    this.bumpCatalog()
 
     const myTurnGen = ++session.turnGen
     const turnPromise = (async () => {
@@ -1431,6 +1452,7 @@ export class SessionManager {
           .catch(err => this.deps.log?.(`claude-agent: store persist failed: ${err instanceof Error ? err.message : String(err)}`))
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         this.emitMeta(session)
+        this.bumpCatalog()
         this.pushEvent(
           session,
           {
@@ -1627,22 +1649,23 @@ export class SessionManager {
   }
 
   async pollEvents(
-    sessionId: string,
-    afterSeq: number,
+    sessionId: string | undefined,
+    afterSeq = 0,
     waitMs = DEFAULT_POLL_WAIT_MS,
     clientId?: string,
+    afterCatalogVersion?: number,
   ): Promise<{
-    sessionId: string
+    sessionId?: string
     events: PollEvent[]
     latestSeq: number
     resync: boolean
     snapshot?: SessionSnapshot
+    catalogVersion: number
+    sessions?: SessionSummary[]
+    focusSessionId?: string
     pendingReplies?: PendingChatReplyRef[]
   }> {
     await this.ensureHydrated()
-    const session = this.sessions.get(sessionId)
-    if (!session) throw new Error(`Unknown session: ${sessionId}`)
-
     const normalizedClientId = typeof clientId === 'string' && clientId.trim() ? clientId.trim() : undefined
 
     // Wake only waiters belonging to the same view/clientId so switching sessions in one view is instant
@@ -1656,6 +1679,68 @@ export class SessionManager {
         }
       }
     }
+    for (const waiter of [...this.catalogWaiters]) {
+      if (waiter.clientId === normalizedClientId) {
+        waiter.wake()
+      }
+    }
+
+    const catalogUpdate = () => {
+      const changed = afterCatalogVersion !== undefined && afterCatalogVersion < this.catalogVersion
+      if (!changed) return {}
+      const focusValid =
+        this.focusSessionId !== undefined &&
+        this.focusCatalogVersion > afterCatalogVersion &&
+        this.sessions.has(this.focusSessionId)
+      return {
+        sessions: this.sortedSessions().map(s => this.summaryOf(s)),
+        ...(focusValid ? { focusSessionId: this.focusSessionId } : {}),
+      }
+    }
+
+    if (!sessionId) {
+      const hasCatalogDiff = afterCatalogVersion !== undefined && afterCatalogVersion < this.catalogVersion
+      if (hasCatalogDiff || waitMs <= 0) {
+        const pendingReplies = this.listPendingReplies()
+        return {
+          events: [],
+          latestSeq: 0,
+          resync: false,
+          catalogVersion: this.catalogVersion,
+          ...catalogUpdate(),
+          ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
+        }
+      }
+
+      const clampedWait = Math.min(MAX_POLL_WAIT_MS, Math.max(200, waitMs))
+      await new Promise<void>(resolve => {
+        const waiter: PollWaiter = {
+          afterSeq: 0,
+          ...(normalizedClientId !== undefined ? { clientId: normalizedClientId } : {}),
+          wake: () => {
+            if (waiter.timer) clearTimeout(waiter.timer)
+            if (waiter.coalesceTimer) clearTimeout(waiter.coalesceTimer)
+            this.catalogWaiters.delete(waiter)
+            resolve()
+          },
+        }
+        waiter.timer = setTimeout(waiter.wake, clampedWait)
+        this.catalogWaiters.add(waiter)
+      })
+
+      const pendingReplies = this.listPendingReplies()
+      return {
+        events: [],
+        latestSeq: 0,
+        resync: false,
+        catalogVersion: this.catalogVersion,
+        ...catalogUpdate(),
+        ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
+      }
+    }
+
+    const session = this.sessions.get(sessionId)
+    if (!session) throw new Error(`Unknown session: ${sessionId}`)
 
     const latestSeq = session.nextSeq - 1
     const oldestSeq = session.events[0]?.seq ?? session.nextSeq
@@ -1667,18 +1752,23 @@ export class SessionManager {
         latestSeq,
         resync: true,
         snapshot: this.snapshotOf(session),
+        catalogVersion: this.catalogVersion,
+        ...catalogUpdate(),
         ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
       }
     }
 
     const immediate = session.events.filter(ev => ev.seq > afterSeq)
-    if (immediate.length > 0 || waitMs <= 0) {
+    const hasCatalogDiff = afterCatalogVersion !== undefined && afterCatalogVersion < this.catalogVersion
+    if (immediate.length > 0 || hasCatalogDiff || waitMs <= 0) {
       const pendingReplies = this.listPendingReplies()
       return {
         sessionId,
         events: immediate,
         latestSeq: session.nextSeq - 1,
         resync: false,
+        catalogVersion: this.catalogVersion,
+        ...catalogUpdate(),
         ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
       }
     }
@@ -1688,6 +1778,7 @@ export class SessionManager {
       const waiter: PollWaiter = {
         afterSeq,
         ...(normalizedClientId !== undefined ? { clientId: normalizedClientId } : {}),
+        ...(afterCatalogVersion !== undefined ? { watchCatalog: true } : {}),
         wake: () => {
           if (waiter.timer) clearTimeout(waiter.timer)
           if (waiter.coalesceTimer) clearTimeout(waiter.coalesceTimer)
@@ -1705,6 +1796,8 @@ export class SessionManager {
       events: session.events.filter(ev => ev.seq > afterSeq),
       latestSeq: session.nextSeq - 1,
       resync: false,
+      catalogVersion: this.catalogVersion,
+      ...catalogUpdate(),
       ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
     }
   }
@@ -1745,6 +1838,7 @@ export class SessionManager {
       workspaceRoots: roots,
       recentCwds: data.recentCwds,
       sessions: this.sortedSessions().map(s => this.summaryOf(s)),
+      catalogVersion: this.catalogVersion,
       ...(activeSnapshot ? { activeSession: activeSnapshot } : {}),
       ...(truncatedItems ? { truncatedItems: true } : {}),
       ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
@@ -1763,9 +1857,9 @@ export class SessionManager {
     await this.ensureHydrated()
     let targetSessionId = input.sessionId
     const promptText = typeof input.prompt === 'string' ? input.prompt.trim() : ''
+    let createdFresh = false
     if (promptText) {
       let session: InternalSession
-      let createdFresh = false
       if (targetSessionId && this.sessions.has(targetSessionId)) {
         session = await this.ensureSessionLoaded(targetSessionId)
         if (session.status === 'running' || session.readOnlyLock) {
@@ -1781,6 +1875,7 @@ export class SessionManager {
             modeId: input.mode,
             modelId: input.model,
             strictMode: Boolean(input.mode),
+            focus: true,
           })
           session = this.sessions.get(created.sessionId)!
           createdFresh = true
@@ -1839,6 +1934,10 @@ export class SessionManager {
       if (resolved.cwd) {
         await this.deps.store.recordCwd(resolved.cwd)
       }
+    }
+
+    if (!createdFresh && targetSessionId && this.sessions.has(targetSessionId)) {
+      this.bumpCatalog(targetSessionId)
     }
 
     const bootstrap = await this.getBootstrap({
@@ -2323,9 +2422,13 @@ export class SessionManager {
   }
 
   async handleUiPoll(input: ToolInputs['claude_ui_poll']): Promise<Reply> {
-    if (!input.sessionId) return { text: 'sessionId is required.', isError: true }
+    const sessionId = typeof input.sessionId === 'string' && input.sessionId.trim() ? input.sessionId.trim() : undefined
     const afterSeq = typeof input.afterSeq === 'number' && Number.isFinite(input.afterSeq) ? input.afterSeq : 0
-    const data = await this.pollEvents(input.sessionId, afterSeq, input.waitMs, input.clientId)
+    const afterCatalogVersion =
+      typeof input.afterCatalogVersion === 'number' && Number.isFinite(input.afterCatalogVersion)
+        ? input.afterCatalogVersion
+        : undefined
+    const data = await this.pollEvents(sessionId, afterSeq, input.waitMs, input.clientId, afterCatalogVersion)
     return { text: 'ok', structuredContent: data as unknown as Record<string, unknown> }
   }
 
@@ -2684,10 +2787,31 @@ export class SessionManager {
     }
   }
 
+  private flushCatalogWaiters(): void {
+    for (const waiter of [...this.catalogWaiters]) {
+      waiter.wake()
+    }
+  }
+
   private flushAllSessionWaiters(): void {
     for (const session of this.sessions.values()) {
       this.flushWaitersNow(session)
     }
+    this.flushCatalogWaiters()
+  }
+
+  private bumpCatalog(focusSessionId?: string): void {
+    this.catalogVersion++
+    if (focusSessionId) {
+      this.focusSessionId = focusSessionId
+      this.focusCatalogVersion = this.catalogVersion
+    }
+    for (const session of this.sessions.values()) {
+      for (const waiter of [...session.waiters]) {
+        if (waiter.watchCatalog) waiter.wake()
+      }
+    }
+    this.flushCatalogWaiters()
   }
 
   private queuePendingChatReply(session: InternalSession, status: 'completed' | 'error', errorText?: string): void {

@@ -85,12 +85,18 @@ export class ServerBridge {
     }
   }
 
-  async pollTool<T = Record<string, unknown>>(args: { sessionId: string; afterSeq: number; waitMs?: number }): Promise<ToolCallResponse<T>> {
-    if (this.pollInFlightCount > 0 && (this.activePollSessionId === args.sessionId || this.pollInFlightCount >= 2)) {
+  async pollTool<T = Record<string, unknown>>(args: {
+    sessionId?: string
+    afterSeq?: number
+    afterCatalogVersion?: number
+    waitMs?: number
+  }): Promise<ToolCallResponse<T>> {
+    const pollKey = args.sessionId ?? '__catalog__'
+    if (this.pollInFlightCount > 0 && (this.activePollSessionId === pollKey || this.pollInFlightCount >= 2)) {
       return { ok: false, text: 'Poll already active' }
     }
     this.pollInFlightCount++
-    this.activePollSessionId = args.sessionId
+    this.activePollSessionId = pollKey
     try {
       const result = await this.app.callServerTool({
         name: 'claude_ui_poll',

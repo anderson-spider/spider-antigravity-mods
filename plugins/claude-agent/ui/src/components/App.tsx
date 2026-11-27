@@ -26,7 +26,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.3.0' },
+    appInfo: { name: 'claude-agent-ui', version: '0.3.1' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -144,9 +144,14 @@ export function App() {
     [bridge, pushToast],
   )
 
+  const catalogVersionRef = useRef(0)
+
   const applyBootstrap = useCallback((payload: BootstrapPayload) => {
     setDiagnostics(payload.diagnostics)
     setSessions(payload.sessions ?? [])
+    if (typeof payload.catalogVersion === 'number') {
+      catalogVersionRef.current = Math.max(catalogVersionRef.current, payload.catalogVersion)
+    }
     if (payload.activeSession) {
       setActiveSession(payload.activeSession)
     }
@@ -224,7 +229,7 @@ export function App() {
     })
   }, [])
 
-  // Dedicated long-polling loop on the active session
+  // Dedicated long-polling loop for both active session events and global catalog updates
   const activeId = activeSession?.sessionId ?? null
   const activeSeqRef = useRef(0)
   useEffect(() => {
@@ -232,58 +237,87 @@ export function App() {
   }, [activeSession])
 
   useEffect(() => {
-    if (!bridge || !activeId) return
+    if (!isConnected || !bridge) return
     let cancelled = false
 
     const loop = async () => {
       while (!cancelled) {
         const startedAt = Date.now()
         const res: ToolCallResponse<PollResponse> = await bridge.pollTool<PollResponse>({
-          sessionId: activeId,
-          afterSeq: activeSeqRef.current,
+          ...(activeId ? { sessionId: activeId, afterSeq: activeSeqRef.current } : {}),
+          afterCatalogVersion: catalogVersionRef.current,
           waitMs: 12_000,
         })
         if (cancelled) break
         if (!res.ok || !res.data) {
+          if (activeId && /Unknown session/i.test(res.text)) {
+            setActiveSession(null)
+            break
+          }
           await new Promise(r => setTimeout(r, 800))
           continue
         }
         const data: PollResponse = res.data
+        if (typeof data.catalogVersion === 'number') {
+          catalogVersionRef.current = Math.max(catalogVersionRef.current, data.catalogVersion)
+        }
+        if (Array.isArray(data.sessions)) {
+          setSessions(data.sessions)
+        }
         if (data.pendingReplies?.length) {
           void deliverPendingReplies(data.pendingReplies)
         }
-        if (data.sessionId !== activeId) continue
+        if (data.focusSessionId && data.focusSessionId !== activeId) {
+          const got = await bridge.callTool<{ session: SessionSnapshot }>('claude_ui_session', {
+            action: 'get',
+            sessionId: data.focusSessionId,
+          })
+          if (!cancelled && got.ok && got.data?.session) {
+            updateSessionSnapshot(got.data.session)
+            break
+          }
+        }
+        if (!activeId || data.sessionId !== activeId) {
+          if (!Array.isArray(data.sessions) && Date.now() - startedAt < 300) {
+            await new Promise(r => setTimeout(r, 250))
+          }
+          continue
+        }
         if (data.resync && data.snapshot) {
           activeSeqRef.current = data.snapshot.latestSeq
           updateSessionSnapshot(data.snapshot)
         } else if (data.events.length > 0) {
           activeSeqRef.current = Math.max(activeSeqRef.current, data.latestSeq)
+          let latestUpdated: SessionSnapshot | null = null
           setActiveSession(prev => {
             if (!prev || prev.sessionId !== activeId) return prev
-            const updated = applyPollEvents(prev, data.events, data.latestSeq)
+            latestUpdated = applyPollEvents(prev, data.events, data.latestSeq)
+            return latestUpdated
+          })
+          if (latestUpdated) {
+            const snap: SessionSnapshot = latestUpdated
             setSessions(list =>
               list.map(item =>
-                item.sessionId === updated.sessionId
+                item.sessionId === snap.sessionId
                   ? {
                       ...item,
-                      title: updated.title,
-                      status: updated.status,
-                      updatedAt: updated.updatedAt,
-                      archivedAt: updated.archivedAt,
-                      pendingPermissionCount: updated.pendingPermissions.length,
-                      touchedFilesCount: updated.touchedFiles.length,
-                      modeId: updated.modeId,
-                      modelId: updated.modelId,
-                      usage: updated.usage,
-                      replyToChat: updated.replyToChat,
-                      pendingChatReplyId: updated.pendingChatReplyId,
+                      title: snap.title,
+                      status: snap.status,
+                      updatedAt: snap.updatedAt,
+                      archivedAt: snap.archivedAt,
+                      pendingPermissionCount: snap.pendingPermissions.length,
+                      touchedFilesCount: snap.touchedFiles.length,
+                      modeId: snap.modeId,
+                      modelId: snap.modelId,
+                      usage: snap.usage,
+                      replyToChat: snap.replyToChat,
+                      pendingChatReplyId: snap.pendingChatReplyId,
                     }
                   : item,
               ),
             )
-            return updated
-          })
-        } else if (Date.now() - startedAt < 300) {
+          }
+        } else if (!Array.isArray(data.sessions) && Date.now() - startedAt < 300) {
           // Guard against rapid empty-poll wakeups when another view polls a different session
           await new Promise(r => setTimeout(r, 250))
         }
@@ -294,7 +328,7 @@ export function App() {
     return () => {
       cancelled = true
     }
-  }, [bridge, activeId, updateSessionSnapshot, deliverPendingReplies])
+  }, [isConnected, bridge, activeId, updateSessionSnapshot, deliverPendingReplies])
 
   const selectGenRef = useRef(0)
 

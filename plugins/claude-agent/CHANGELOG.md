@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-11-27
+
+### Fixed
+
+- Live session catalog synchronization in `claude_ui_poll`: allow polling with an optional `sessionId` (so empty/welcome panels stay live), push updated `sessions` lists via `catalogVersion`, and emit `focusSessionId` when `claude_open` dispatches or focuses a session so an already-open `aux_pane` or `global` panel switches immediately to the new conversation.
+
 ## [0.3.0] - 2026-11-27
 
 ### Added
