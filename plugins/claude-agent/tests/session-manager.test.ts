@@ -45,6 +45,7 @@ test('SessionManager handles streaming, interactive permissions, touched files, 
   const created = await manager.createSession({ cwd: dir })
   assert.equal(created.cwd, dir)
   assert.equal(created.modeId, 'auto')
+  assert.equal(created.modelId, 'claude-opus-4-1')
   assert.equal(created.availableModes.length, 5)
   assert.ok(created.availableModes.some(m => m.id === 'auto'))
 
@@ -178,7 +179,10 @@ test('setSessionModel resolves case-insensitive model alias', async t => {
   })
 
   const created = await manager.createSession({ cwd: dir })
-  const updated = await manager.setSessionModel(created.sessionId, 'opus')
+  assert.equal(created.modelId, 'claude-opus-4-1')
+  const switchedToSonnet = await manager.setSessionModel(created.sessionId, 'SONNET')
+  assert.equal(switchedToSonnet.modelId, 'claude-sonnet-4-5')
+  const updated = await manager.setSessionModel(created.sessionId, 'Opus')
   assert.equal(updated.modelId, 'claude-opus-4-1')
 })
 
@@ -772,4 +776,120 @@ test('readOnlyLock blocks setSessionConfigOption and protects mode-switch setup 
 
   const askDone = await askPromise
   assert.equal(askDone.isError, undefined)
+})
+
+test('claude_open and claude_ask default to opus model (with auto for open, plan for ask) and honor overrides', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-defaults-'))
+  const manager = createTestManager(dir, dir)
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // claude_open without explicit mode/model defaults to auto + opus
+  const openDefault = await manager.handleOpenTool({ prompt: 'Default check', cwd: dir }, [dir])
+  assert.equal(openDefault.isError, undefined)
+  const openSc = openDefault.structuredContent as { activeSession?: { modeId?: string; modelId?: string } }
+  assert.equal(openSc.activeSession?.modeId, 'auto')
+  assert.equal(openSc.activeSession?.modelId, 'claude-opus-4-1')
+
+  // claude_open explicit overrides win
+  const openOverride = await manager.handleOpenTool(
+    { prompt: 'Override check', cwd: dir, mode: 'acceptEdits', model: 'sonnet' },
+    [dir],
+  )
+  assert.equal(openOverride.isError, undefined)
+  const overrideSc = openOverride.structuredContent as { activeSession?: { modeId?: string; modelId?: string } }
+  assert.equal(overrideSc.activeSession?.modeId, 'acceptEdits')
+  assert.equal(overrideSc.activeSession?.modelId, 'claude-sonnet-4-5')
+
+  // claude_ask stays read-only plan mode and defaults to opus
+  const askDefault = await manager.handleAskTool({ prompt: 'Read-only default check', cwd: dir }, [dir], () => undefined)
+  assert.equal(askDefault.isError, undefined)
+  const askDefaultSc = askDefault.structuredContent as { modeId?: string; modelId?: string }
+  assert.equal(askDefaultSc.modeId, 'plan')
+  assert.equal(askDefaultSc.modelId, 'claude-opus-4-1')
+
+  // claude_ask explicit model override wins
+  const askOverride = await manager.handleAskTool(
+    { prompt: 'Read-only sonnet check', cwd: dir, model: 'sonnet' },
+    [dir],
+    () => undefined,
+  )
+  assert.equal(askOverride.isError, undefined)
+  const askOverrideSc = askOverride.structuredContent as { modeId?: string; modelId?: string }
+  assert.equal(askOverrideSc.modeId, 'plan')
+  assert.equal(askOverrideSc.modelId, 'claude-sonnet-4-5')
+
+  await new Promise(r => setTimeout(r, 150))
+})
+
+test('createSession applies opus before auto, avoids opusplan alias collision, and falls back gracefully without opus', async t => {
+  // 1. Model is applied before mode so agents requiring Opus for Auto mode activate both cleanly
+  const dir1 = await mkdtemp(join(tmpdir(), 'claude-agent-order-'))
+  const mgrOrder = createTestManager(dir1, dir1, {
+    FAKE_ACP_AUTO_REQUIRES_OPUS: '1',
+    FAKE_ACP_MODE_CONFIG: '1',
+  })
+  t.after(async () => {
+    await mgrOrder.dispose()
+    await rm(dir1, { recursive: true, force: true })
+  })
+  const ordered = await mgrOrder.createSession({ cwd: dir1 })
+  assert.equal(ordered.modelId, 'claude-opus-4-1')
+  assert.equal(ordered.modeId, 'auto')
+
+  // 2. Opus alias avoids matching opusplan / default when concrete Opus model exists
+  const dir2 = await mkdtemp(join(tmpdir(), 'claude-agent-opusplan-'))
+  const mgrOpusPlan = createTestManager(dir2, dir2, { FAKE_ACP_WITH_OPUSPLAN: '1' })
+  t.after(async () => {
+    await mgrOpusPlan.dispose()
+    await rm(dir2, { recursive: true, force: true })
+  })
+  const concrete = await mgrOpusPlan.createSession({ cwd: dir2 })
+  assert.equal(concrete.modelId, 'claude-opus-4-1')
+
+  // 3. When agent does not offer any Opus model, default falls back gracefully to agent default
+  const dir3 = await mkdtemp(join(tmpdir(), 'claude-agent-no-opus-'))
+  const mgrNoOpus = createTestManager(dir3, dir3, { FAKE_ACP_NO_OPUS: '1' })
+  t.after(async () => {
+    await mgrNoOpus.dispose()
+    await rm(dir3, { recursive: true, force: true })
+  })
+  const fallback = await mgrNoOpus.createSession({ cwd: dir3 })
+  assert.equal(fallback.modelId, 'claude-sonnet-4-5')
+  assert.equal(fallback.modeId, 'auto')
+})
+
+test('ensureSessionLoaded fallback to session/new preserves model and mode defaults', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-load-fallback-'))
+  const store = createStore(dir)
+  await store.upsertSession({
+    sessionId: 'stale-sess-1',
+    title: 'Stale Session',
+    cwd: dir,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    touchedFiles: [],
+    items: [],
+  })
+
+  const manager = new SessionManager({
+    store,
+    binaryDeps: {
+      env: { CLAUDE_AGENT_ACP_BIN: process.execPath, CLAUDE_AGENT_ACP_ARGS: FAKE_AGENT },
+      isExecutable: () => true,
+    },
+    env: { ...process.env, FAKE_ACP_FAIL_LOAD: '1', FAKE_ACP_AUTO_REQUIRES_OPUS: '1' },
+    defaultCwd: dir,
+  })
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const loaded = await manager.ensureSessionLoaded('stale-sess-1')
+  assert.notEqual(loaded.sessionId, 'stale-sess-1')
+  assert.equal(loaded.modelId, 'claude-opus-4-1')
+  assert.equal(loaded.modeId, 'auto')
 })

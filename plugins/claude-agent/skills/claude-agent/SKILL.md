@@ -11,8 +11,8 @@ Use this plugin's MCP server (`claude-agent_claude-agent`) to consult Claude Cod
 
 Tools may be exposed directly or lazy-loaded via `call_mcp_tool` with `ServerName: "claude-agent_claude-agent"`:
 
-- `claude_ask`: Synchronous **read-only** consultation (runs in `plan` mode; any write/execute permission prompt is automatically declined so it never hangs). Use for second opinions, code reviews, architecture analysis, or explaining a module.
-- `claude_open`: Opens or focuses the interactive **Claude Agent** MCP App in the side pane (`aux_pane`) or sidebar (`global`). Pass optional `cwd`, `sessionId`, `prompt`, `mode` (`default`, `auto`, `acceptEdits`, or `plan`; defaults to `auto` when supported, falling back to `default`), and `model`. When `prompt` is provided, it starts an asynchronous Claude turn and opens the side pane so the user can watch streaming output and approve permissions live.
+- `claude_ask`: Synchronous **read-only** consultation (runs in `plan` mode; any write/execute permission prompt is automatically declined so it never hangs; `model` defaults to `opus` when supported). Use for second opinions, code reviews, architecture analysis, or explaining a module.
+- `claude_open`: Opens or focuses the interactive **Claude Agent** MCP App in the side pane (`aux_pane`) or sidebar (`global`). Pass optional `cwd`, `sessionId`, `prompt`, `mode` (`default`, `auto`, `acceptEdits`, or `plan`; defaults to `auto` when supported, falling back to `default`), and `model` (defaults to `opus` when supported). When `prompt` is provided, it starts an asynchronous Claude turn and opens the side pane so the user can watch streaming output and approve permissions live.
 - `claude_session`: Manage dispatched or existing sessions (`list`, `get` to inspect status/latest response/touched files, or `cancel` to stop an active turn).
 
 ## Choosing between `claude_ask` and `claude_open`

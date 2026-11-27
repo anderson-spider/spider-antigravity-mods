@@ -5,7 +5,7 @@ Interactive [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overvie
 ## Features
 
 - **Live Session Monitor (`aux_pane` & `global`)**: Agent-driven console for observing Antigravity-dispatched Claude Code runs with streaming Markdown responses, collapsible prompt/thought/plan disclosures, grouped tool call timelines, inline unified diffs, and a Touched Files popover that opens files directly in Antigravity (`com.google.antigravity/toggle-aux-pane`).
-- **Interactive Permission & Session Controls**: Live `session/request_permission` approval cards, `Stop` cancellation, context window usage meter, and an Options popover for ACP mode (`auto` by default when supported, falling back to `default`; also supports `acceptEdits`, `plan`, and `bypassPermissions` with warning), model, and session config options. `claude_ask` remains strictly read-only (`plan`).
+- **Interactive Permission & Session Controls**: Live `session/request_permission` approval cards, `Stop` cancellation, context window usage meter, and an Options popover for ACP mode (`auto` by default when supported, falling back to `default`; also supports `acceptEdits`, `plan`, and `bypassPermissions` with warning), model (`opus` by default when supported, falling back to the agent's default model), and session config options. `claude_ask` remains strictly read-only (`plan`).
 - **Antigravity Agent Bridge**:
   - `claude_ask`: Synchronous read-only (`plan` mode) consultation for code reviews and second opinions. Ephemeral one-shot `claude_ask` sessions are archived automatically after completion.
   - `claude_open`: Opens the side pane / sidebar monitor or dispatches an asynchronous interactive task with `prompt`.

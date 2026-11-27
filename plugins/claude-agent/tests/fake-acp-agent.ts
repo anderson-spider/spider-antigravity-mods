@@ -45,12 +45,28 @@ function makeModes(currentModeId: string) {
 }
 
 function makeModels(currentModelId: string) {
+  if (process.env.FAKE_ACP_NO_OPUS === '1') {
+    return {
+      currentModelId,
+      availableModels: [
+        { modelId: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+        { modelId: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+      ],
+    }
+  }
+  const availableModels = [
+    ...(process.env.FAKE_ACP_WITH_OPUSPLAN === '1'
+      ? [
+          { modelId: 'default', name: 'Default (recommended)' },
+          { modelId: 'opusplan', name: 'Opus Plan Mode' },
+        ]
+      : []),
+    { modelId: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+    { modelId: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
+  ]
   return {
     currentModelId,
-    availableModels: [
-      { modelId: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-      { modelId: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
-    ],
+    availableModels,
   }
 }
 
@@ -442,6 +458,10 @@ createInterface({ input: process.stdin }).on('line', line => {
       return
     }
     case 'session/load': {
+      if (process.env.FAKE_ACP_FAIL_LOAD === '1') {
+        write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'Session not found' } })
+        return
+      }
       const sessionId = String(params.sessionId ?? '')
       let rec = sessions.get(sessionId)
       if (!rec) {
@@ -515,6 +535,10 @@ createInterface({ input: process.stdin }).on('line', line => {
           write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'plan mode disabled in test' } })
           return
         }
+        if (process.env.FAKE_ACP_AUTO_REQUIRES_OPUS === '1' && nextMode === 'auto' && !rec.modelId.includes('opus')) {
+          write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'auto mode requires opus model' } })
+          return
+        }
         rec.modeId = nextMode
         write({ jsonrpc: '2.0', id, result: {} })
       }
@@ -545,7 +569,10 @@ createInterface({ input: process.stdin }).on('line', line => {
           write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'plan mode disabled in test' } })
           return
         }
-        rec.modeId = value
+        rec.modeId =
+          process.env.FAKE_ACP_AUTO_REQUIRES_OPUS === '1' && value === 'auto' && !rec.modelId.includes('opus')
+            ? 'acceptEdits'
+            : value
         write({
           jsonrpc: '2.0',
           id,

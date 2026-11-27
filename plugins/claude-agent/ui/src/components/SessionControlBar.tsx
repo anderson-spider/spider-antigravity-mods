@@ -41,8 +41,17 @@ export function SessionControlBar({
 
   const currentModeId = session.modeId ?? modes.find(m => m.id === 'auto')?.id ?? modes[0]?.id ?? 'auto'
   const currentModeLabel = modes.find(m => m.id === currentModeId)?.name ?? currentModeId
-  const currentModelId = session.modelId ?? session.availableModels[0]?.modelId ?? ''
-  const currentModelLabel = session.availableModels.find(m => m.modelId === currentModelId)?.name
+  const modelConfigOpt = session.configOptions.find(c => c.category === 'model')
+  const models =
+    session.availableModels.length > 0
+      ? session.availableModels
+      : modelConfigOpt
+        ? modelConfigOpt.options
+            .flatMap(opt => ('group' in opt ? opt.options : [opt]))
+            .map(opt => ({ modelId: opt.value, name: opt.name }))
+        : []
+  const currentModelId = session.modelId ?? models[0]?.modelId ?? ''
+  const currentModelLabel = models.find(m => m.modelId === currentModelId)?.name ?? (currentModelId || undefined)
   const extraConfigs = session.configOptions.filter(c => c.category !== 'mode' && c.category !== 'model')
 
   const isRunning = session.status === 'running'
@@ -103,7 +112,7 @@ export function SessionControlBar({
               </select>
             </div>
 
-            {session.availableModels.length > 0 && (
+            {models.length > 0 && (
               <div className="option-field">
                 <label className="option-label" htmlFor="opt-model">Model</label>
                 <select
@@ -113,7 +122,7 @@ export function SessionControlBar({
                   disabled={busy}
                   onChange={e => onSetModel(e.target.value)}
                 >
-                  {session.availableModels.map(m => (
+                  {models.map(m => (
                     <option key={m.modelId} value={m.modelId}>
                       {m.name}
                     </option>
