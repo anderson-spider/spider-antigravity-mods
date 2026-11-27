@@ -10,6 +10,7 @@ export type ToolInputs = {
     prompt?: string
     mode?: OpenMode
     model?: string
+    replyToChat?: boolean
   }
   claude_ask: {
     prompt: string
@@ -19,10 +20,11 @@ export type ToolInputs = {
     timeoutSeconds?: number
   }
   claude_session: {
-    action: 'list' | 'get' | 'cancel'
+    action: 'list' | 'get' | 'wait' | 'cancel'
     sessionId?: string
     cwd?: string
     includeArchived?: boolean
+    timeoutSeconds?: number
   }
   claude_ui_bootstrap: {
     cwd?: string
@@ -43,6 +45,9 @@ export type ToolInputs = {
       | 'set_model'
       | 'set_config'
       | 'authenticate'
+      | 'claim_reply'
+      | 'ack_reply'
+      | 'release_reply'
     sessionId?: string
     cwd?: string
     title?: string
@@ -51,6 +56,8 @@ export type ToolInputs = {
     configId?: string
     value?: string
     methodId?: string
+    replyId?: string
+    clientId?: string
   }
   claude_ui_prompt: {
     action: 'send' | 'cancel'

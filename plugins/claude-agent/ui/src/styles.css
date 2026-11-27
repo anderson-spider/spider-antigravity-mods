@@ -958,6 +958,20 @@ details[open] > .tool-subrow-summary::before {
 .status-chip-warn { color: var(--fg-warning); }
 .status-chip-error { color: var(--fg-danger); }
 
+.auto-reply-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--bd-info, var(--bd-primary));
+  background: var(--bg-info, var(--bg-primary));
+  color: var(--fg-info, var(--fg-secondary));
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .control-options-btn {
   max-width: 210px;
   border-color: var(--bd-primary);

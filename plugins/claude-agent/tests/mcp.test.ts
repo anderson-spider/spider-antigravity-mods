@@ -53,7 +53,7 @@ function rpcHarness(manager: SessionManager, opts: { roots?: string[] } = {}) {
         case 'claude_ask':
           return manager.handleAskTool(input as ToolInputs['claude_ask'], context.cwds, context.progress)
         case 'claude_session':
-          return manager.handleSessionTool(input as ToolInputs['claude_session'])
+          return manager.handleSessionTool(input as ToolInputs['claude_session'], context.progress)
         case 'claude_ui_bootstrap':
           return manager.handleUiBootstrap(input as ToolInputs['claude_ui_bootstrap'], context.cwds)
         case 'claude_ui_session':

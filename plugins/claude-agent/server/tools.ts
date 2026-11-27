@@ -26,7 +26,7 @@ export type ToolSpec = {
 }
 
 const OPEN_MODES = allOf<'default' | 'auto' | 'acceptEdits' | 'plan'>()('default', 'auto', 'acceptEdits', 'plan')
-const SESSION_ACTIONS = allOf<Inputs['claude_session']['action']>()('list', 'get', 'cancel')
+const SESSION_ACTIONS = allOf<Inputs['claude_session']['action']>()('list', 'get', 'wait', 'cancel')
 const UI_SESSION_ACTIONS = allOf<Inputs['claude_ui_session']['action']>()(
   'connect',
   'reconnect',
@@ -41,6 +41,9 @@ const UI_SESSION_ACTIONS = allOf<Inputs['claude_ui_session']['action']>()(
   'set_model',
   'set_config',
   'authenticate',
+  'claim_reply',
+  'ack_reply',
+  'release_reply',
 )
 const UI_PROMPT_ACTIONS = allOf<Inputs['claude_ui_prompt']['action']>()('send', 'cancel')
 const PERMISSION_OUTCOMES = allOf<Inputs['claude_ui_permission']['outcome']>()('selected', 'cancelled')
@@ -52,8 +55,10 @@ export const SPECS: readonly ToolSpec[] = [
     title: 'Claude Agent',
     description:
       'Open the interactive Claude Agent MCP App (side pane or full-page sidebar). When `prompt` is provided, ' +
-      'starts an asynchronous Claude Code turn in the chosen workspace (`cwd`) and opens the side pane so the user ' +
-      'can watch streaming output and approve permissions live. Leave all arguments empty to open the panel.',
+      'starts an asynchronous Claude Code turn with no timeout in the chosen workspace (`cwd`) and opens the side pane ' +
+      'for live streaming and permission approvals. By default (`replyToChat: true`), the side pane automatically posts ' +
+      'Claude\'s completed reply back into this conversation so you can end your turn and wait. Preferred over `claude_ask` ' +
+      'for MR/PR reviews, multi-file audits, or any task that may take more than ~1 minute. Leave all arguments empty to open the panel.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -62,6 +67,10 @@ export const SPECS: readonly ToolSpec[] = [
         prompt: { type: 'string', description: 'Optional task prompt to dispatch asynchronously to Claude.' },
         mode: { type: 'string', enum: OPEN_MODES, description: 'Initial permission mode (default, auto, acceptEdits, or plan). Defaults to auto when supported.' },
         model: { type: 'string', description: 'Optional model ID override. Defaults to opus when supported.' },
+        replyToChat: {
+          type: 'boolean',
+          description: 'When prompt is provided, automatically deliver Claude\'s final response back to this Antigravity chat via the open side pane when the turn completes (default true).',
+        },
       },
       required: [],
     } satisfies SchemaFor<Inputs['claude_open']>,
@@ -71,8 +80,9 @@ export const SPECS: readonly ToolSpec[] = [
     name: 'claude_ask',
     title: 'Ask Claude (Read-Only)',
     description:
-      'Synchronously consult Claude Code in read-only `plan` mode for code reviews, architecture questions, or second ' +
-      'opinions. Any write/execute permission prompt is automatically declined so this call never blocks on UI approval.',
+      'Synchronously consult Claude Code in read-only `plan` mode for quick questions or short second opinions ' +
+      '(auto-declines write/execute prompts; subject to timeout). For thorough MR/PR reviews or multi-file analyses ' +
+      'that may take over a minute, prefer asynchronous `claude_open` with `mode: "plan"` and `replyToChat: true`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -89,14 +99,16 @@ export const SPECS: readonly ToolSpec[] = [
     name: 'claude_session',
     title: 'Claude Sessions',
     description:
-      'List Claude Agent sessions, inspect a dispatched session status/latest response/touched files (`get`), or cancel an in-flight turn (`cancel`).',
+      'List Claude Agent sessions, inspect a dispatched session status/latest response/touched files (`get`), wait up to ' +
+      '60s for a running turn without cancelling it (`wait`), or cancel an in-flight turn (`cancel`).',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: SESSION_ACTIONS },
-        sessionId: { type: 'string', description: 'Target session ID (required for get and cancel).' },
+        sessionId: { type: 'string', description: 'Target session ID (required for get, wait, and cancel).' },
         cwd: { type: 'string', description: 'Optional directory filter for list.' },
         includeArchived: { type: 'boolean', description: 'Include archived sessions when listing (default false).' },
+        timeoutSeconds: { type: 'integer', description: 'Max seconds to wait for action "wait" (5-60, default 25). Never cancels the turn.' },
       },
       required: ['action'],
     } satisfies SchemaFor<Inputs['claude_session']>,
@@ -130,6 +142,8 @@ export const SPECS: readonly ToolSpec[] = [
         configId: { type: 'string' },
         value: { type: 'string' },
         methodId: { type: 'string' },
+        replyId: { type: 'string' },
+        clientId: { type: 'string' },
       },
       required: ['action'],
     } satisfies SchemaFor<Inputs['claude_ui_session']>,

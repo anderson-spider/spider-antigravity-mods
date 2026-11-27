@@ -76,6 +76,15 @@ export function SessionControlBar({
           <span>{statusLabel}</span>
         </div>
 
+        {isRunning && session.replyToChat && canMessage && (
+          <span
+            className="auto-reply-chip"
+            title="Claude's final response will be posted back to Antigravity chat automatically when this turn finishes"
+          >
+            Auto-reply
+          </span>
+        )}
+
         <button
           type="button"
           className={`btn btn-sm btn-ghost control-options-btn ${isBypass ? 'control-options-warn' : ''}`}

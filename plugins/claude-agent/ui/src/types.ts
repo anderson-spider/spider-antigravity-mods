@@ -98,6 +98,12 @@ export type PlanEntry = {
   status: string
 }
 
+export type PendingChatReplyRef = {
+  sessionId: string
+  replyId: string
+  status: 'completed' | 'error'
+}
+
 export type SessionSummary = {
   sessionId: string
   title: string
@@ -112,6 +118,8 @@ export type SessionSummary = {
   modeId?: string
   modelId?: string
   usage?: PersistedUsage
+  replyToChat?: boolean
+  pendingChatReplyId?: string
 }
 
 export type SessionSnapshot = SessionSummary & {
@@ -152,6 +160,7 @@ export type BootstrapPayload = {
   sessions: SessionSummary[]
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
+  pendingReplies?: PendingChatReplyRef[]
 }
 
 export type PollEvent =
@@ -178,6 +187,7 @@ export type PollResponse = {
   latestSeq: number
   resync: boolean
   snapshot?: SessionSnapshot
+  pendingReplies?: PendingChatReplyRef[]
 }
 
 export type DirectorySuggestion = {

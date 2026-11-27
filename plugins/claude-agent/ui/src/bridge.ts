@@ -34,6 +34,10 @@ export class ServerBridge {
         : `view-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   }
 
+  get id(): string {
+    return this.clientId
+  }
+
   get capabilities() {
     const caps = this.app.getHostCapabilities() as Record<string, unknown> | undefined
     return {

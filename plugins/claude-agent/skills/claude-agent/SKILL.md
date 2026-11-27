@@ -11,13 +11,14 @@ Use this plugin's MCP server (`claude-agent_claude-agent`) to consult Claude Cod
 
 Tools may be exposed directly or lazy-loaded via `call_mcp_tool` with `ServerName: "claude-agent_claude-agent"`:
 
-- `claude_ask`: Synchronous **read-only** consultation (runs in `plan` mode; any write/execute permission prompt is automatically declined so it never hangs; `model` defaults to `opus` when supported). Use for second opinions, code reviews, architecture analysis, or explaining a module.
-- `claude_open`: Opens or focuses the interactive **Claude Agent** MCP App in the side pane (`aux_pane`) or sidebar (`global`). Pass optional `cwd`, `sessionId`, `prompt`, `mode` (`default`, `auto`, `acceptEdits`, or `plan`; defaults to `auto` when supported, falling back to `default`), and `model` (defaults to `opus` when supported). When `prompt` is provided, it starts an asynchronous Claude turn and opens the side pane so the user can watch streaming output and approve permissions live.
-- `claude_session`: Manage dispatched or existing sessions (`list`, `get` to inspect status/latest response/touched files, or `cancel` to stop an active turn).
+- `claude_ask`: Synchronous **read-only** consultation (runs in `plan` mode; any write/execute permission prompt is automatically declined so it never hangs; `model` defaults to `opus` when supported; subject to timeout). Reserve this for quick, short questions.
+- `claude_open`: Opens or focuses the interactive **Claude Agent** MCP App in the side pane (`aux_pane`) or sidebar (`global`). Pass optional `cwd`, `sessionId`, `prompt`, `mode` (`default`, `auto`, `acceptEdits`, or `plan`; defaults to `auto` when supported, falling back to `default`), `model` (defaults to `opus` when supported), and `replyToChat` (defaults to `true` when `prompt` is provided). When `prompt` is provided, it starts an asynchronous Claude turn with **no timeout**, opens the side pane for live streaming and permission approvals, and automatically posts Claude's completed response back into this conversation when finished.
+- `claude_session`: Manage dispatched or existing sessions (`list`, `get` to inspect status/latest response/touched files, `wait` to wait up to 60s on a running turn without cancelling it, or `cancel` to stop an active turn).
 
 ## Choosing between `claude_ask` and `claude_open`
 
-- Use `claude_ask` when you need Claude's read-only analysis right away inside your own reasoning loop (pass `cwd` to target the active repository).
-- Use `claude_open` with `prompt` when the task involves editing files, running tests/commands, or interactive user supervision in the side pane. After dispatching, tell the user the session ID and that they can review/approve tool calls in the **Claude Agent** panel; use `claude_session` (`action: "get"`) if asked to check progress or collect the result.
+- **Prefer `claude_open` with `prompt` (async, no timeout)** for thorough MR/PR reviews, multi-file audits, architecture deep-dives, refactors, edits, or any task that may take longer than ~1 minute. Pass `mode: "plan"` when you want a read-only review, or omit `mode` (defaults to `auto`) for coding tasks. Because `replyToChat` defaults to `true`, tell the user the session ID and **end your turn** so the open **Claude Agent** side pane automatically delivers Claude's reply back to this conversation once finished.
+- Use `claude_ask` only for short, quick read-only questions that will finish well within a minute.
+- If the side pane was closed (or in a headless session without UI) or the user asks for a progress check, use `claude_session` (`action: "wait"` or `action: "get"`).
 - Use `claude_open` with `{}` (no arguments) when the user simply wants to open the Claude Agent chat UI.
 - Never pass `bypassPermissions` or work around user permission prompts.

@@ -7,9 +7,9 @@ Interactive [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overvie
 - **Live Session Monitor (`aux_pane` & `global`)**: Agent-driven console for observing Antigravity-dispatched Claude Code runs with streaming Markdown responses, collapsible prompt/thought/plan disclosures, grouped tool call timelines, inline unified diffs, and a Touched Files popover that opens files directly in Antigravity (`com.google.antigravity/toggle-aux-pane`).
 - **Interactive Permission & Session Controls**: Live `session/request_permission` approval cards, `Stop` cancellation, context window usage meter, and an Options popover for ACP mode (`auto` by default when supported, falling back to `default`; also supports `acceptEdits`, `plan`, and `bypassPermissions` with warning), model (`opus` by default when supported, falling back to the agent's default model), and session config options. `claude_ask` remains strictly read-only (`plan`).
 - **Antigravity Agent Bridge**:
-  - `claude_ask`: Synchronous read-only (`plan` mode) consultation for code reviews and second opinions. Ephemeral one-shot `claude_ask` sessions are archived automatically after completion.
-  - `claude_open`: Opens the side pane / sidebar monitor or dispatches an asynchronous interactive task with `prompt`.
-  - `claude_session`: List (with optional `includeArchived`), inspect (`get`), or `cancel` sessions.
+  - `claude_open`: Opens the side pane / sidebar monitor or dispatches an asynchronous task with `prompt` (no timeout). By default (`replyToChat: true`), the open side pane automatically delivers Claude's completed reply back to the Antigravity conversation via `ext-apps` `sendMessage` so the agent resumes automatically.
+  - `claude_ask`: Synchronous read-only (`plan` mode) consultation for quick questions. Ephemeral one-shot `claude_ask` sessions are archived automatically after completion.
+  - `claude_session`: List (with optional `includeArchived`), inspect (`get`), `wait` (up to 60s without cancelling the turn), or `cancel` sessions.
   - UI handoff actions to attach session summaries to your next Antigravity message (`updateModelContext`) or post directly to chat (`sendMessage`).
 - **Scoped Sessions & Archiving**: Tracks Antigravity-created sessions locally in `${PLUGIN_DATA}` without importing external Claude Code CLI history. The sidebar separates active sessions from a collapsed **Archived** section with manual archive/restore actions, auto-archiving completed one-shot `claude_ask` sessions and idle sessions older than 7 days.
 
@@ -34,9 +34,9 @@ agy plugin install https://github.com/anderson-spider/spider-antigravity-mods/tr
 
 | Tool | Visibility | Purpose |
 | :--- | :--- | :--- |
-| `claude_open` | Model & UI entrypoints | Open the Claude Agent panel (`aux_pane` / `global`) or dispatch an async `prompt`. |
-| `claude_ask` | Model | Synchronous read-only consultation in `plan` mode (auto-declines write prompts). |
-| `claude_session` | Model | `list`, `get`, or `cancel` Claude Agent sessions. |
+| `claude_open` | Model & UI entrypoints | Open the Claude Agent panel (`aux_pane` / `global`) or dispatch an async `prompt` with optional `replyToChat` (default `true`). |
+| `claude_ask` | Model | Synchronous read-only consultation in `plan` mode for quick questions (auto-declines write prompts). |
+| `claude_session` | Model | `list`, `get`, `wait` (non-cancelling), or `cancel` Claude Agent sessions. |
 | `claude_ui_*` | App-only (`visibility: ['app']`) | Internal bootstrap, session lifecycle, prompt/cancel, permissions, long-polling, and fs autocomplete. |
 
 ## Development

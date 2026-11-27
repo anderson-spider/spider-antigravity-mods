@@ -41,6 +41,11 @@ const MAX_POLL_WAIT_MS = 25_000
 const DEFAULT_ASK_TIMEOUT_SECONDS = 120
 const MIN_ASK_TIMEOUT_MS = 10_000
 const MAX_ASK_TIMEOUT_SECONDS = 300
+const DEFAULT_WAIT_TIMEOUT_SECONDS = 25
+const MIN_WAIT_TIMEOUT_MS = 5_000
+const MAX_WAIT_TIMEOUT_SECONDS = 60
+const MAX_CHAT_REPLY_CHARS = 24_000
+const REPLY_CLAIM_LEASE_MS = 15_000
 const MAX_BOOTSTRAP_ITEMS = 80
 const DEFAULT_AUTO_ARCHIVE_IDLE_MS = 7 * 24 * 60 * 60 * 1_000
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 5_000
@@ -65,6 +70,12 @@ export type PermissionRequestState = {
   createdAt: string
 }
 
+export type PendingChatReplyRef = {
+  sessionId: string
+  replyId: string
+  status: 'completed' | 'error'
+}
+
 export type SessionSummary = {
   sessionId: string
   title: string
@@ -79,6 +90,8 @@ export type SessionSummary = {
   modeId?: string
   modelId?: string
   usage?: PersistedUsage
+  replyToChat?: boolean
+  pendingChatReplyId?: string
 }
 
 export type SessionSnapshot = SessionSummary & {
@@ -148,6 +161,7 @@ export type BootstrapPayload = {
   sessions: SessionSummary[]
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
+  pendingReplies?: PendingChatReplyRef[]
 }
 
 export type Reply = {
@@ -166,6 +180,16 @@ type PollWaiter = {
   wake: () => void
   timer?: ReturnType<typeof setTimeout>
   coalesceTimer?: ReturnType<typeof setTimeout>
+}
+
+type PendingChatReply = {
+  replyId: string
+  turnGen: number
+  status: 'completed' | 'error'
+  createdAt: string
+  text: string
+  claimedBy?: string
+  claimedAt?: number
 }
 
 type InternalSession = {
@@ -190,6 +214,9 @@ type InternalSession = {
   pendingPermissions: Map<string, InternalPermission>
   readOnlyLock: boolean
   cancelling: boolean
+  activeTurnReplyToChat: boolean
+  activeTurnStartIndex: number
+  pendingChatReply?: PendingChatReply
   activeAssistantId?: string
   activeThoughtId?: string
   events: PollEvent[]
@@ -212,6 +239,7 @@ export type SessionManagerDeps = {
   autoArchiveIdleMs?: number
   cancelTimeoutMs?: number
   minAskTimeoutMs?: number
+  minWaitTimeoutMs?: number
 }
 
 function nowIso(): string {
@@ -313,6 +341,62 @@ function deriveTitle(prompt: string): string {
     .find(Boolean)
   if (!firstLine) return 'Untitled session'
   return firstLine.length > 72 ? `${firstLine.slice(0, 71)}…` : firstLine
+}
+
+function extractTurnAssistantText(items: readonly TimelineItem[], startIndex?: number): string {
+  let from = startIndex
+  if (from === undefined || from < 0 || from > items.length) {
+    let lastUserIdx = -1
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i]!.kind === 'user') {
+        lastUserIdx = i
+        break
+      }
+    }
+    from = lastUserIdx >= 0 ? lastUserIdx + 1 : 0
+  }
+  return items
+    .slice(from)
+    .filter(i => i.kind === 'assistant' && typeof i.text === 'string' && i.text.trim().length > 0)
+    .map(i => i.text!.trim())
+    .join('\n\n')
+    .trim()
+}
+
+function clipForChatReply(text: string, sessionId: string, maxChars = MAX_CHAT_REPLY_CHARS): string {
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}\n\n… [truncated at ${maxChars} chars; call claude_session(action: "get", sessionId: "${sessionId}") to inspect the full session]`
+}
+
+function formatChatReplyMessage(
+  session: InternalSession,
+  status: 'completed' | 'error',
+  startIndex: number,
+  errorText?: string,
+): string {
+  const assistantText = extractTurnAssistantText(session.items, startIndex)
+  const metaParts = [
+    `session ${session.sessionId}`,
+    `cwd: ${session.cwd}`,
+    session.modeId ? `mode: ${session.modeId}` : undefined,
+    session.modelId ? `model: ${session.modelId}` : undefined,
+  ].filter(Boolean)
+  const header =
+    status === 'error'
+      ? `[Claude Agent error · "${session.title}" · ${metaParts.join(' · ')}]`
+      : `[Claude Agent reply · "${session.title}" · ${metaParts.join(' · ')}]`
+  const touched =
+    session.touchedFiles.size > 0 ? `Touched files: ${[...session.touchedFiles].join(', ')}` : undefined
+  const body =
+    status === 'error'
+      ? [
+          errorText ? `Error: ${errorText}` : 'Error: Claude Agent turn failed.',
+          assistantText ? `Partial response:\n${assistantText}` : undefined,
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : assistantText || '(Claude Agent completed with no text output.)'
+  return [header, touched, '', clipForChatReply(body, session.sessionId)].filter(v => v !== undefined).join('\n')
 }
 
 function toPersisted(session: InternalSession): PersistedSession {
@@ -455,6 +539,7 @@ export class SessionManager {
   private readonly autoArchiveIdleMs: number
   private readonly cancelTimeoutMs: number
   private readonly minAskTimeoutMs: number
+  private readonly minWaitTimeoutMs: number
   private client: AcpClient | null = null
   private connectingClient: AcpClient | null = null
   private connectPromise: Promise<void> | null = null
@@ -477,6 +562,7 @@ export class SessionManager {
     this.autoArchiveIdleMs = deps.autoArchiveIdleMs ?? DEFAULT_AUTO_ARCHIVE_IDLE_MS
     this.cancelTimeoutMs = deps.cancelTimeoutMs ?? DEFAULT_CANCEL_SETTLE_TIMEOUT_MS
     this.minAskTimeoutMs = deps.minAskTimeoutMs ?? MIN_ASK_TIMEOUT_MS
+    this.minWaitTimeoutMs = deps.minWaitTimeoutMs ?? MIN_WAIT_TIMEOUT_MS
     try {
       this.binaryResolution = resolveAcpBinary(deps.binaryDeps)
     } catch (err) {
@@ -527,6 +613,8 @@ export class SessionManager {
         pendingPermissions: new Map(),
         readOnlyLock: false,
         cancelling: false,
+        activeTurnReplyToChat: false,
+        activeTurnStartIndex: 0,
         events: [],
         nextSeq: 1,
         waiters: new Set(),
@@ -658,6 +746,7 @@ export class SessionManager {
         session.turnGen++
         session.activeTurn = undefined
         session.cancelling = false
+        session.activeTurnReplyToChat = false
       }
       const hadPermissions = this.clearSessionPendingPermissions(session, !this.disposed)
       if (wasRunning) {
@@ -732,11 +821,13 @@ export class SessionManager {
             for (const session of this.sessions.values()) {
               const wasRunning = session.status === 'running'
               const wasLoaded = session.loadedInProcess
+              const shouldReplyToChat = session.activeTurnReplyToChat
               session.loadedInProcess = false
               if (wasRunning || session.activeTurn) {
                 session.turnGen++
                 session.activeTurn = undefined
                 session.cancelling = false
+                session.activeTurnReplyToChat = false
               }
               const hadPermissions = this.clearSessionPendingPermissions(session, true)
               if (wasRunning) {
@@ -744,6 +835,9 @@ export class SessionManager {
                 session.status = 'error'
                 session.updatedAt = nowIso()
                 this.appendSystemItem(session, 'error', this.lastError)
+                if (shouldReplyToChat) {
+                  this.queuePendingChatReply(session, 'error', this.lastError)
+                }
                 this.pushEvent(
                   session,
                   {
@@ -781,7 +875,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.2.0' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.0' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -896,6 +990,8 @@ export class SessionManager {
       pendingPermissions: new Map(),
       readOnlyLock: false,
       cancelling: false,
+      activeTurnReplyToChat: false,
+      activeTurnStartIndex: 0,
       events: [],
       nextSeq: 1,
       waiters: new Set(),
@@ -1247,6 +1343,8 @@ export class SessionManager {
       session.activeTurn = undefined
       session.cancelling = false
       session.readOnlyLock = false
+      session.activeTurnReplyToChat = false
+      session.pendingChatReply = undefined
       if (session.status === 'running' && this.client?.isAlive && session.loadedInProcess) {
         this.client.notify('session/cancel', { sessionId })
       }
@@ -1264,7 +1362,7 @@ export class SessionManager {
     sessionId: string,
     promptText: string,
     files: readonly string[] = [],
-    opts: { allowReadOnlyLock?: boolean } = {},
+    opts: { allowReadOnlyLock?: boolean; replyToChat?: boolean } = {},
   ): Promise<SessionSnapshot> {
     const trimmed = promptText.trim()
     if (!trimmed) throw new Error('Prompt cannot be empty.')
@@ -1291,6 +1389,8 @@ export class SessionManager {
     session.archivedAt = undefined
     session.status = 'running'
     session.cancelling = false
+    session.activeTurnReplyToChat = Boolean(opts.replyToChat)
+    session.pendingChatReply = undefined
     session.updatedAt = nowIso()
     session.activeAssistantId = undefined
     session.activeThoughtId = undefined
@@ -1302,6 +1402,7 @@ export class SessionManager {
       timestamp: nowIso(),
     }
     session.items.push(userItem)
+    session.activeTurnStartIndex = session.items.length
     this.pushEvent(session, { type: 'timeline_upsert', sessionId: session.sessionId, item: userItem }, true)
     this.emitMeta(session)
 
@@ -1315,7 +1416,9 @@ export class SessionManager {
         )
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         const wasCancelling = session.cancelling
+        const shouldReplyToChat = session.activeTurnReplyToChat
         session.cancelling = false
+        session.activeTurnReplyToChat = false
         this.finalizeStreamingItems(session)
         session.status = 'idle'
         session.updatedAt = nowIso()
@@ -1323,20 +1426,26 @@ export class SessionManager {
           .upsertSession(toPersisted(session))
           .catch(err => this.deps.log?.(`claude-agent: store persist failed: ${err instanceof Error ? err.message : String(err)}`))
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
+        const stopReason = wasCancelling ? 'cancelled' : result?.stopReason ?? 'end_turn'
+        if (shouldReplyToChat && stopReason !== 'cancelled') {
+          this.queuePendingChatReply(session, 'completed')
+        }
         this.emitMeta(session)
         this.pushEvent(
           session,
           {
             type: 'turn_finished',
             sessionId: session.sessionId,
-            stopReason: wasCancelling ? 'cancelled' : result?.stopReason ?? 'end_turn',
+            stopReason,
           },
           true,
         )
       } catch (err) {
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         const wasCancelling = session.cancelling
+        const shouldReplyToChat = session.activeTurnReplyToChat
         session.cancelling = false
+        session.activeTurnReplyToChat = false
         this.finalizeStreamingItems(session)
         if (wasCancelling) {
           session.status = 'idle'
@@ -1374,6 +1483,9 @@ export class SessionManager {
             this.deps.log?.(`claude-agent: store persist failed: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`),
           )
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
+        if (shouldReplyToChat) {
+          this.queuePendingChatReply(session, 'error', msg)
+        }
         this.emitMeta(session)
         this.pushEvent(
           session,
@@ -1389,6 +1501,7 @@ export class SessionManager {
         if (session.turnGen === myTurnGen) {
           session.activeTurn = undefined
           session.cancelling = false
+          session.activeTurnReplyToChat = false
         }
       }
     })()
@@ -1402,6 +1515,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`Unknown session: ${sessionId}`)
 
+    session.activeTurnReplyToChat = false
     const prevTurn = session.activeTurn
     if (prevTurn) {
       session.cancelling = true
@@ -1523,6 +1637,7 @@ export class SessionManager {
     latestSeq: number
     resync: boolean
     snapshot?: SessionSnapshot
+    pendingReplies?: PendingChatReplyRef[]
   }> {
     await this.ensureHydrated()
     const session = this.sessions.get(sessionId)
@@ -1545,22 +1660,26 @@ export class SessionManager {
     const latestSeq = session.nextSeq - 1
     const oldestSeq = session.events[0]?.seq ?? session.nextSeq
     if (afterSeq > latestSeq || (afterSeq > 0 && afterSeq < oldestSeq - 1)) {
+      const pendingReplies = this.listPendingReplies()
       return {
         sessionId,
         events: [],
         latestSeq,
         resync: true,
         snapshot: this.snapshotOf(session),
+        ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
       }
     }
 
     const immediate = session.events.filter(ev => ev.seq > afterSeq)
     if (immediate.length > 0 || waitMs <= 0) {
+      const pendingReplies = this.listPendingReplies()
       return {
         sessionId,
         events: immediate,
         latestSeq: session.nextSeq - 1,
         resync: false,
+        ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
       }
     }
 
@@ -1580,11 +1699,13 @@ export class SessionManager {
       session.waiters.add(waiter)
     })
 
+    const pendingReplies = this.listPendingReplies()
     return {
       sessionId,
       events: session.events.filter(ev => ev.seq > afterSeq),
       latestSeq: session.nextSeq - 1,
       resync: false,
+      ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
     }
   }
 
@@ -1617,6 +1738,7 @@ export class SessionManager {
       }
     }
 
+    const pendingReplies = this.listPendingReplies()
     return {
       diagnostics: this.getDiagnostics(),
       preferences: data.preferences,
@@ -1625,6 +1747,7 @@ export class SessionManager {
       sessions: this.sortedSessions().map(s => this.summaryOf(s)),
       ...(activeSnapshot ? { activeSession: activeSnapshot } : {}),
       ...(truncatedItems ? { truncatedItems: true } : {}),
+      ...(pendingReplies.length > 0 ? { pendingReplies } : {}),
     }
   }
 
@@ -1708,7 +1831,8 @@ export class SessionManager {
           }
         }
       }
-      await this.startPrompt(session.sessionId, promptText)
+      const replyToChat = input.replyToChat ?? true
+      await this.startPrompt(session.sessionId, promptText, [], { replyToChat })
       targetSessionId = session.sessionId
     } else if (input.cwd && !targetSessionId) {
       const resolved = await resolveDirectory(input.cwd, workspaceRoots[0] ?? this.deps.defaultCwd)
@@ -1723,8 +1847,14 @@ export class SessionManager {
       workspaceRoots,
     })
 
-    const text = input.prompt
-      ? `Started interactive Claude Agent turn in session ${targetSessionId}. The Claude Agent panel is open for streaming output and permission approvals. Use claude_session to check status or results.`
+    const replyEnabled = Boolean(promptText) && (input.replyToChat ?? true)
+    const active = bootstrap.activeSession
+    const modeLabel = active?.modeId ? `, mode: ${active.modeId}` : ''
+    const modelLabel = active?.modelId ? `, model: ${active.modelId}` : ''
+    const text = promptText
+      ? replyEnabled
+        ? `Started asynchronous Claude Agent turn in session ${targetSessionId}${modeLabel}${modelLabel} (auto-reply enabled). End your turn now and wait — when Claude finishes, the open Claude Agent side pane will automatically deliver the response back into this conversation. If the side pane is closed or you need to check progress manually, call claude_session (action: "wait" or "get", sessionId: "${targetSessionId}").`
+        : `Started interactive Claude Agent turn in session ${targetSessionId}${modeLabel}${modelLabel}. The Claude Agent panel is open for streaming output and permission approvals. Use claude_session (action: "wait" or "get") to check status or collect results.`
       : `Claude Agent panel ready (${bootstrap.sessions.filter(s => !s.archivedAt).length} active session(s)).`
 
     return {
@@ -1896,7 +2026,7 @@ export class SessionManager {
     }
   }
 
-  async handleSessionTool(input: ToolInputs['claude_session']): Promise<Reply> {
+  async handleSessionTool(input: ToolInputs['claude_session'], progress?: (message: string) => void): Promise<Reply> {
     await this.ensureHydrated()
     await this.archiveStaleSessions()
     switch (input.action) {
@@ -1929,25 +2059,54 @@ export class SessionManager {
         if (!input.sessionId) return { text: 'sessionId is required for action "get".', isError: true }
         const session = this.sessions.get(input.sessionId)
         if (!session) return { text: `Unknown session: ${input.sessionId}`, isError: true }
-        const snap = this.snapshotOf(session)
-        const lastAssistant = [...snap.items].reverse().find(i => i.kind === 'assistant' && i.text)?.text
-        const summaryText = [
-          `Session ${snap.sessionId}: "${snap.title}" [${snap.status}${snap.archivedAt ? ', archived' : ''}]`,
-          `cwd: ${snap.cwd}`,
-          snap.pendingPermissions.length > 0 ? `Pending permissions: ${snap.pendingPermissions.length}` : undefined,
-          snap.touchedFiles.length > 0 ? `Touched files: ${snap.touchedFiles.join(', ')}` : undefined,
-          lastAssistant ? `\nLatest response:\n${lastAssistant.slice(0, 4_000)}` : undefined,
-        ]
-          .filter(Boolean)
-          .join('\n')
-        return {
-          text: summaryText,
-          structuredContent: {
-            ...this.summaryOf(session),
-            touchedFiles: snap.touchedFiles,
-            ...(lastAssistant ? { latestResponse: lastAssistant.slice(0, 8_000) } : {}),
-          },
+        if (session.status !== 'running' && session.pendingChatReply) {
+          session.pendingChatReply = undefined
+          this.emitMeta(session)
         }
+        return this.formatSessionInspection(session, false)
+      }
+      case 'wait': {
+        if (!input.sessionId) return { text: 'sessionId is required for action "wait".', isError: true }
+        const session = this.sessions.get(input.sessionId)
+        if (!session) return { text: `Unknown session: ${input.sessionId}`, isError: true }
+        const rawTimeout =
+          typeof input.timeoutSeconds === 'number' && Number.isFinite(input.timeoutSeconds)
+            ? input.timeoutSeconds
+            : DEFAULT_WAIT_TIMEOUT_SECONDS
+        const timeoutMs = Math.min(
+          MAX_WAIT_TIMEOUT_SECONDS * 1_000,
+          Math.max(this.minWaitTimeoutMs, Math.round(rawTimeout * 1_000)),
+        )
+        const turn = session.activeTurn
+        let timedOut = false
+        if (turn && session.status === 'running') {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          let heartbeat: ReturnType<typeof setInterval> | undefined
+          try {
+            if (progress) {
+              heartbeat = setInterval(() => progress(`Waiting on Claude Agent session ${session.sessionId}…`), 10_000)
+            }
+            await Promise.race([
+              turn,
+              new Promise<void>(resolve => {
+                timer = setTimeout(() => {
+                  timedOut = true
+                  resolve()
+                }, timeoutMs)
+              }),
+            ])
+          } finally {
+            if (timer) clearTimeout(timer)
+            if (heartbeat) clearInterval(heartbeat)
+          }
+        }
+        const current = this.sessions.get(input.sessionId)
+        if (!current) return { text: `Session ${input.sessionId} was deleted while waiting.`, isError: true }
+        if (current.status !== 'running' && current.pendingChatReply) {
+          current.pendingChatReply = undefined
+          this.emitMeta(current)
+        }
+        return this.formatSessionInspection(current, timedOut && current.status === 'running')
       }
       case 'cancel': {
         if (!input.sessionId) return { text: 'sessionId is required for action "cancel".', isError: true }
@@ -1959,7 +2118,7 @@ export class SessionManager {
       }
       default:
         return {
-          text: `Invalid action for claude_session: ${String((input as { action?: unknown }).action)}. Allowed: list, get, cancel.`,
+          text: `Invalid action for claude_session: ${String((input as { action?: unknown }).action)}. Allowed: list, get, wait, cancel.`,
           isError: true,
         }
     }
@@ -2099,6 +2258,27 @@ export class SessionManager {
         }
         const session = await this.setSessionConfigOption(input.sessionId, input.configId, input.value)
         return { text: 'ok', structuredContent: { session } }
+      }
+      case 'claim_reply': {
+        if (!input.sessionId || !input.replyId) {
+          return { text: 'sessionId and replyId are required.', isError: true }
+        }
+        const claim = this.claimChatReply(input.sessionId, input.replyId, input.clientId)
+        return { text: claim.claimed ? 'claimed' : 'unavailable', structuredContent: claim }
+      }
+      case 'ack_reply': {
+        if (!input.sessionId || !input.replyId) {
+          return { text: 'sessionId and replyId are required.', isError: true }
+        }
+        const acked = this.ackChatReply(input.sessionId, input.replyId, input.clientId)
+        return { text: acked ? 'acked' : 'noop', structuredContent: { acked } }
+      }
+      case 'release_reply': {
+        if (!input.sessionId || !input.replyId) {
+          return { text: 'sessionId and replyId are required.', isError: true }
+        }
+        const released = this.releaseChatReply(input.sessionId, input.replyId, input.clientId)
+        return { text: released ? 'released' : 'noop', structuredContent: { released } }
       }
       default:
         return {
@@ -2504,6 +2684,127 @@ export class SessionManager {
     }
   }
 
+  private flushAllSessionWaiters(): void {
+    for (const session of this.sessions.values()) {
+      this.flushWaitersNow(session)
+    }
+  }
+
+  private queuePendingChatReply(session: InternalSession, status: 'completed' | 'error', errorText?: string): void {
+    session.pendingChatReply = {
+      replyId: makeId('reply'),
+      turnGen: session.turnGen,
+      status,
+      createdAt: nowIso(),
+      text: formatChatReplyMessage(session, status, session.activeTurnStartIndex, errorText),
+    }
+    this.flushAllSessionWaiters()
+  }
+
+  private listPendingReplies(): PendingChatReplyRef[] {
+    const now = Date.now()
+    const refs: PendingChatReplyRef[] = []
+    for (const session of this.sessions.values()) {
+      const pending = session.pendingChatReply
+      if (!pending) continue
+      const leaseActive = pending.claimedAt !== undefined && now - pending.claimedAt < REPLY_CLAIM_LEASE_MS
+      if (leaseActive) continue
+      refs.push({
+        sessionId: session.sessionId,
+        replyId: pending.replyId,
+        status: pending.status,
+      })
+    }
+    return refs
+  }
+
+  private claimChatReply(
+    sessionId: string,
+    replyId: string,
+    clientId?: string,
+  ): { claimed: boolean; replyId: string; text?: string } {
+    const session = this.sessions.get(sessionId)
+    const pending = session?.pendingChatReply
+    if (!session || !pending || pending.replyId !== replyId) {
+      return { claimed: false, replyId }
+    }
+    const now = Date.now()
+    const holder = clientId?.trim() || 'anonymous'
+    const leaseActive = pending.claimedAt !== undefined && now - pending.claimedAt < REPLY_CLAIM_LEASE_MS
+    if (leaseActive && pending.claimedBy !== holder) {
+      return { claimed: false, replyId }
+    }
+    pending.claimedBy = holder
+    pending.claimedAt = now
+    return { claimed: true, replyId, text: pending.text }
+  }
+
+  private ackChatReply(sessionId: string, replyId: string, clientId?: string): boolean {
+    const session = this.sessions.get(sessionId)
+    const pending = session?.pendingChatReply
+    if (!session || !pending || pending.replyId !== replyId) return false
+    const holder = clientId?.trim() || 'anonymous'
+    if (pending.claimedBy && pending.claimedBy !== holder) return false
+    session.pendingChatReply = undefined
+    this.emitMeta(session)
+    return true
+  }
+
+  private releaseChatReply(sessionId: string, replyId: string, clientId?: string): boolean {
+    const session = this.sessions.get(sessionId)
+    const pending = session?.pendingChatReply
+    if (!session || !pending || pending.replyId !== replyId) return false
+    const holder = clientId?.trim() || 'anonymous'
+    if (pending.claimedBy && pending.claimedBy !== holder) return false
+    pending.claimedBy = undefined
+    pending.claimedAt = undefined
+    return true
+  }
+
+  private formatSessionInspection(session: InternalSession, stillRunningAfterWait: boolean): Reply {
+    const snap = this.snapshotOf(session)
+    const turnStart = session.activeTurnStartIndex > 0 && session.activeTurnStartIndex <= snap.items.length
+      ? session.activeTurnStartIndex
+      : undefined
+    const latestResponse = extractTurnAssistantText(snap.items, turnStart)
+    const latestError = [...snap.items].reverse().find(i => i.kind === 'error' && i.text)?.text
+    const toolCallsCount = snap.items.filter(i => i.kind === 'tool_call').length
+    const lastTool = [...snap.items].reverse().find(i => i.kind === 'tool_call')
+    const clippedResponse = latestResponse ? clipForChatReply(latestResponse, snap.sessionId) : undefined
+
+    const summaryText = [
+      `Session ${snap.sessionId}: "${snap.title}" [${snap.status}${snap.archivedAt ? ', archived' : ''}]`,
+      `cwd: ${snap.cwd}`,
+      snap.modeId || snap.modelId
+        ? [snap.modeId ? `mode: ${snap.modeId}` : undefined, snap.modelId ? `model: ${snap.modelId}` : undefined]
+            .filter(Boolean)
+            .join(' · ')
+        : undefined,
+      stillRunningAfterWait
+        ? `Still running after wait window (${toolCallsCount} tool call(s) so far${lastTool?.title ? `; latest: ${lastTool.title}` : ''}). Turn was NOT cancelled; wait again or let the side pane deliver the final reply.`
+        : undefined,
+      snap.pendingPermissions.length > 0 ? `Pending permissions: ${snap.pendingPermissions.length}` : undefined,
+      snap.touchedFiles.length > 0 ? `Touched files: ${snap.touchedFiles.join(', ')}` : undefined,
+      latestError && snap.status === 'error' ? `\nError:\n${latestError}` : undefined,
+      clippedResponse ? `\nLatest response:\n${clippedResponse}` : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+    return {
+      text: summaryText,
+      structuredContent: {
+        ...this.summaryOf(session),
+        stillRunning: snap.status === 'running',
+        toolCallsCount,
+        ...(lastTool?.title ? { lastToolTitle: lastTool.title } : {}),
+        touchedFiles: snap.touchedFiles,
+        ...(latestError && snap.status === 'error' ? { error: latestError } : {}),
+        ...(clippedResponse ? { latestResponse: clippedResponse } : {}),
+      },
+    }
+  }
+
   private async pickFallbackCwd(): Promise<string> {
     const data = await this.deps.store.load()
     return data.preferences.lastCwd || data.recentCwds[0] || this.deps.defaultCwd
@@ -2528,6 +2829,8 @@ export class SessionManager {
       ...(session.modeId ? { modeId: session.modeId } : {}),
       ...(session.modelId ? { modelId: session.modelId } : {}),
       ...(session.usage ? { usage: session.usage } : {}),
+      ...(session.status === 'running' && session.activeTurnReplyToChat ? { replyToChat: true } : {}),
+      ...(session.pendingChatReply ? { pendingChatReplyId: session.pendingChatReply.replyId } : {}),
     }
   }
 
