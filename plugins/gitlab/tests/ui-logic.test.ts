@@ -1,9 +1,10 @@
 import type { App } from '@modelcontextprotocol/ext-apps'
 import { ServerBridge } from '../ui/src/bridge.ts'
 import { buildSplitPairs, parseUnifiedDiff, tokenizeCode } from '../ui/src/lib/diff.ts'
+import { buildDiffFileTree, filterDiffFiles, splitFilePath } from '../ui/src/lib/fileTree.ts'
 import { parseMarkdown, toggleMarkdownCheckbox } from '../ui/src/lib/markdown.ts'
 import { filterAndSortMrs, formatRelativeTime, groupMrs, parseSearchQuery, readinessScore } from '../ui/src/lib/query.ts'
-import type { MrListItem } from '../ui/src/types.ts'
+import type { DiffFile, MrListItem } from '../ui/src/types.ts'
 import { expect, test } from './expect.ts'
 
 const sampleMr = (overrides: Partial<MrListItem>): MrListItem => ({
@@ -299,4 +300,57 @@ test('ServerBridge.updateContext respects capability gating, sends text or clear
     },
   })
   expect(await new ServerBridge(failing.app).updateContext('MR summary')).toBe(false)
+})
+
+const sampleDiffFile = (newPath: string, overrides: Partial<DiffFile> = {}): DiffFile => ({
+  oldPath: newPath,
+  newPath,
+  status: 'M',
+  diff: '',
+  tooLarge: false,
+  collapsed: false,
+  additions: 10,
+  deletions: 2,
+  ...overrides,
+})
+
+test('splitFilePath separates directory prefix from basename', () => {
+  expect(splitFilePath('README.md')).toEqual({ dir: '', name: 'README.md' })
+  expect(splitFilePath('.claude/hooks/check-mr.py')).toEqual({ dir: '.claude/hooks/', name: 'check-mr.py' })
+})
+
+test('buildDiffFileTree groups duplicate filenames under path-compressed folders and sorts directories before files', () => {
+  const files = [
+    sampleDiffFile('README.md'),
+    sampleDiffFile('.claude/skills/template-mr/SKILL.md', { status: 'A' }),
+    sampleDiffFile('.claude/skills/check-ci/SKILL.md', { status: 'A' }),
+    sampleDiffFile('.claude/hooks/check-mr.py', { status: 'A' }),
+    sampleDiffFile('fastlane/README.md'),
+    sampleDiffFile('src/deep/only/one/file.ts'),
+  ]
+
+  const tree = buildDiffFileTree(files)
+  expect(tree.map((n) => (n.kind === 'dir' ? `dir:${n.name}` : `file:${n.name}`))).toEqual([
+    'dir:.claude',
+    'dir:fastlane',
+    'dir:src/deep/only/one',
+    'file:README.md',
+  ])
+
+  const claudeDir = tree[0]
+  expect(claudeDir?.kind).toBe('dir')
+  if (claudeDir?.kind === 'dir') {
+    expect(claudeDir.fileCount).toBe(3)
+    expect(claudeDir.children.map((c) => (c.kind === 'dir' ? c.name : c.name))).toEqual(['hooks', 'skills'])
+    const skillsDir = claudeDir.children[1]
+    if (skillsDir?.kind === 'dir') {
+      expect(skillsDir.children.map((c) => (c.kind === 'dir' ? c.name : c.name))).toEqual(['check-ci', 'template-mr'])
+    }
+  }
+
+  expect(filterDiffFiles(files, 'skill.md').map((f) => f.newPath)).toEqual([
+    '.claude/skills/template-mr/SKILL.md',
+    '.claude/skills/check-ci/SKILL.md',
+  ])
+  expect(filterDiffFiles(files, '   ')).toHaveLength(6)
 })
