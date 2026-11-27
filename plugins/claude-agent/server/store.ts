@@ -68,6 +68,7 @@ const MAX_TEXT_CHARS = 32_000
 const DEFAULT_PREFERENCES: UiPreferences = {
   sidebarWidthPct: 28,
   defaultModeId: 'auto',
+  defaultModelId: 'opus',
 }
 
 export function defaultStoreData(): StoreData {

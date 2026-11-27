@@ -25,7 +25,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.1.0' },
+    appInfo: { name: 'claude-agent-ui', version: '0.2.0' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {

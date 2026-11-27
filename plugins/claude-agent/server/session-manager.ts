@@ -44,6 +44,8 @@ const MAX_ASK_TIMEOUT_SECONDS = 300
 const MAX_BOOTSTRAP_ITEMS = 80
 const DEFAULT_AUTO_ARCHIVE_IDLE_MS = 7 * 24 * 60 * 60 * 1_000
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 5_000
+const DEFAULT_MODE_ID = 'auto'
+const DEFAULT_MODEL_ID = 'opus'
 const ALLOWED_OPEN_MODES = new Set(['default', 'auto', 'acceptEdits', 'plan'])
 
 export type TimelineItem = PersistedTimelineItem & {
@@ -356,31 +358,95 @@ function enrichAcpError(err: unknown, client?: AcpClient | null): Error {
   return new Error(parts.join('\n'))
 }
 
-function resolveModelId(session: InternalSession, requested: string): string {
-  const needle = requested.trim().toLowerCase()
-  if (!needle) return requested
-  const modelOpt = session.configOptions.find(c => c.category === 'model')
-  const configValues = modelOpt
-    ? modelOpt.options.flatMap(o => ('group' in o ? o.options : [o]))
-    : []
+type ModelMatch = {
+  resolvedId: string
+  matched: boolean
+  hasCatalog: boolean
+}
 
+function collectModelEntries(session: InternalSession): { id: string; name: string }[] {
+  const entries: { id: string; name: string }[] = []
+  const seen = new Set<string>()
   for (const m of session.availableModels) {
-    if (m.modelId === requested) return m.modelId
-  }
-  for (const v of configValues) {
-    if (v.value === requested) return v.value
-  }
-  for (const m of session.availableModels) {
-    if (m.modelId.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle)) {
-      return m.modelId
+    if (!seen.has(m.modelId)) {
+      seen.add(m.modelId)
+      entries.push({ id: m.modelId, name: m.name })
     }
   }
-  for (const v of configValues) {
-    if (v.value.toLowerCase().includes(needle) || v.name.toLowerCase().includes(needle)) {
-      return v.value
+  const modelOpt = session.configOptions.find(c => c.category === 'model')
+  if (modelOpt) {
+    const configValues = modelOpt.options.flatMap(o => ('group' in o ? o.options : [o]))
+    for (const v of configValues) {
+      if (!seen.has(v.value)) {
+        seen.add(v.value)
+        entries.push({ id: v.value, name: v.name })
+      }
     }
   }
-  return requested
+  return entries
+}
+
+function splitModelWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+}
+
+function containsModelWords(haystack: string, needleWords: readonly string[]): boolean {
+  if (needleWords.length === 0) return false
+  const words = splitModelWords(haystack)
+  for (let i = 0; i + needleWords.length <= words.length; i++) {
+    if (needleWords.every((w, offset) => words[i + offset] === w)) return true
+  }
+  return false
+}
+
+function matchModelId(session: InternalSession, requested: string): ModelMatch {
+  const trimmed = requested.trim()
+  const entries = collectModelEntries(session)
+  const hasCatalog = entries.length > 0
+  if (!trimmed) return { resolvedId: requested, matched: false, hasCatalog }
+  const needle = trimmed.toLowerCase()
+
+  const exactId = entries.find(e => e.id === trimmed) ?? entries.find(e => e.id.toLowerCase() === needle)
+  if (exactId) return { resolvedId: exactId.id, matched: true, hasCatalog }
+
+  const exactName = entries.find(e => e.name.toLowerCase() === needle)
+  if (exactName) return { resolvedId: exactName.id, matched: true, hasCatalog }
+
+  const needleWords = splitModelWords(trimmed)
+  const isMetaAlias = (id: string) => {
+    const lower = id.toLowerCase()
+    return lower === 'default' || lower === 'opusplan'
+  }
+  const allowMeta = needle.includes('default') || needle.includes('plan')
+  const candidates = allowMeta ? entries : entries.filter(e => !isMetaAlias(e.id))
+
+  const wordId = candidates.find(e => containsModelWords(e.id, needleWords))
+  if (wordId) return { resolvedId: wordId.id, matched: true, hasCatalog }
+
+  const wordName = candidates.find(e => containsModelWords(e.name, needleWords))
+  if (wordName) return { resolvedId: wordName.id, matched: true, hasCatalog }
+
+  const sub = candidates.find(e => e.id.toLowerCase().includes(needle) || e.name.toLowerCase().includes(needle))
+  if (sub) return { resolvedId: sub.id, matched: true, hasCatalog }
+
+  return { resolvedId: trimmed, matched: false, hasCatalog }
+}
+
+function isModeSupported(session: InternalSession, modeId: string): boolean {
+  if (session.availableModes.length > 0) {
+    return session.availableModes.some(m => m.id === modeId)
+  }
+  const modeOpt = session.configOptions.find(c => c.category === 'mode')
+  if (modeOpt) {
+    const values = modeOpt.options.flatMap(o => ('group' in o ? o.options : [o]))
+    if (values.length > 0) {
+      return values.some(v => v.value === modeId)
+    }
+  }
+  return true
 }
 
 export class SessionManager {
@@ -715,7 +781,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.1.0' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.2.0' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -840,9 +906,20 @@ export class SessionManager {
     await this.deps.store.recordCwd(resolved.cwd)
 
     const storeData = await this.deps.store.load()
-    const desiredMode = opts.modeId ?? storeData.preferences.defaultModeId ?? 'auto'
-    const modeSupported =
-      session.availableModes.length === 0 || session.availableModes.some(m => m.id === desiredMode)
+
+    // Apply model before mode: claude-agent-acp checks currentModelInfo.supportsAutoMode
+    // when activating `auto`, so switching to Opus first avoids a premature fallback.
+    const desiredModel = opts.modelId ?? storeData.preferences.defaultModelId ?? DEFAULT_MODEL_ID
+    if (desiredModel) {
+      const match = matchModelId(session, desiredModel)
+      const modelSupported = !match.hasCatalog || match.matched
+      if ((opts.modelId || modelSupported) && match.resolvedId !== session.modelId) {
+        await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
+      }
+    }
+
+    const desiredMode = opts.modeId ?? storeData.preferences.defaultModeId ?? DEFAULT_MODE_ID
+    const modeSupported = isModeSupported(session, desiredMode)
     if (desiredMode && desiredMode !== session.modeId) {
       if (opts.strictMode) {
         if (!modeSupported) {
@@ -857,12 +934,13 @@ export class SessionManager {
             `Could not switch session into requested mode "${desiredMode}": ${redactSecrets(err instanceof Error ? err.message : String(err))}`,
           )
         }
+        if (session.modeId !== desiredMode) {
+          await this.deleteSession(session.sessionId).catch(() => undefined)
+          throw new Error(`Could not switch session into requested mode "${desiredMode}".`)
+        }
       } else if (modeSupported) {
         await this.setSessionMode(session.sessionId, desiredMode).catch(() => undefined)
       }
-    }
-    if (opts.modelId && opts.modelId !== session.modelId) {
-      await this.setSessionModel(session.sessionId, opts.modelId).catch(() => undefined)
     }
 
     await this.deps.store.upsertSession(toPersisted(session))
@@ -939,6 +1017,8 @@ export class SessionManager {
         throw enriched
       }
       const oldId = existing.sessionId
+      const prevModeId = existing.modeId
+      const prevModelId = existing.modelId
       this.sessions.delete(oldId)
       existing.sessionId = fresh.sessionId
       existing.loadedInProcess = true
@@ -954,6 +1034,22 @@ export class SessionManager {
       )
       this.sessions.set(fresh.sessionId, existing)
       await this.deps.store.deleteSession(oldId)
+
+      const storeData = await this.deps.store.load()
+      const desiredModel = prevModelId ?? storeData.preferences.defaultModelId ?? DEFAULT_MODEL_ID
+      if (desiredModel) {
+        const match = matchModelId(existing, desiredModel)
+        if ((!match.hasCatalog || match.matched) && match.resolvedId !== existing.modelId) {
+          await this.setSessionModel(existing.sessionId, match.resolvedId).catch(() => undefined)
+        }
+      }
+      const desiredMode = existing.readOnlyLock
+        ? 'plan'
+        : prevModeId ?? storeData.preferences.defaultModeId ?? DEFAULT_MODE_ID
+      if (desiredMode && desiredMode !== existing.modeId && isModeSupported(existing, desiredMode)) {
+        await this.setSessionMode(existing.sessionId, desiredMode).catch(() => undefined)
+      }
+
       await this.deps.store.upsertSession(toPersisted(existing))
       return existing
     })()
@@ -974,6 +1070,8 @@ export class SessionManager {
       throw new Error('Cannot change mode while a read-only claude_ask turn is in progress.')
     }
     const client = await this.ensureConnected()
+    const prevModeId = session.modeId
+    let effectiveModeId = modeId
     const modeOpt = session.configOptions.find(c => c.category === 'mode')
     if (modeOpt) {
       let appliedViaConfig = false
@@ -986,7 +1084,10 @@ export class SessionManager {
         if (Array.isArray(res?.configOptions)) {
           session.configOptions = res.configOptions
           const updatedModeOpt = session.configOptions.find(c => c.category === 'mode')
-          if (!updatedModeOpt || updatedModeOpt.currentValue === modeId) {
+          if (!updatedModeOpt) {
+            appliedViaConfig = true
+          } else if (updatedModeOpt.currentValue === modeId || updatedModeOpt.currentValue !== prevModeId) {
+            effectiveModeId = updatedModeOpt.currentValue
             appliedViaConfig = true
           }
         } else {
@@ -997,11 +1098,12 @@ export class SessionManager {
       }
       if (!appliedViaConfig) {
         await client.request('session/set_mode', { sessionId: session.sessionId, modeId })
+        effectiveModeId = modeId
       }
     } else {
       await client.request('session/set_mode', { sessionId: session.sessionId, modeId })
     }
-    session.modeId = modeId
+    session.modeId = effectiveModeId
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
@@ -1011,9 +1113,12 @@ export class SessionManager {
   async setSessionModel(sessionId: string, modelId: string): Promise<SessionSnapshot> {
     const session = await this.ensureSessionLoaded(sessionId)
     const client = await this.ensureConnected()
-    const resolvedId = resolveModelId(session, modelId)
+    const resolvedId = matchModelId(session, modelId).resolvedId
+    const prevModelId = session.modelId
+    let effectiveModelId = resolvedId
     const modelOpt = session.configOptions.find(c => c.category === 'model')
     if (modelOpt) {
+      let appliedViaConfig = false
       try {
         const res = await client.request<{ configOptions?: AcpConfigOption[] }>('session/set_config_option', {
           sessionId: session.sessionId,
@@ -1022,14 +1127,29 @@ export class SessionManager {
         })
         if (Array.isArray(res?.configOptions)) {
           session.configOptions = res.configOptions
+          const updatedModeOpt = session.configOptions.find(c => c.category === 'mode')
+          if (updatedModeOpt) session.modeId = updatedModeOpt.currentValue
+          const updatedModelOpt = session.configOptions.find(c => c.category === 'model')
+          if (!updatedModelOpt) {
+            appliedViaConfig = true
+          } else if (updatedModelOpt.currentValue === resolvedId || updatedModelOpt.currentValue !== prevModelId) {
+            effectiveModelId = updatedModelOpt.currentValue
+            appliedViaConfig = true
+          }
+        } else {
+          appliedViaConfig = true
         }
       } catch {
+        // Fall through to legacy session/set_model below.
+      }
+      if (!appliedViaConfig) {
         await client.request('session/set_model', { sessionId: session.sessionId, modelId: resolvedId })
+        effectiveModelId = resolvedId
       }
     } else {
       await client.request('session/set_model', { sessionId: session.sessionId, modelId: resolvedId })
     }
-    session.modelId = resolvedId
+    session.modelId = effectiveModelId
     session.updatedAt = nowIso()
     this.emitMeta(session)
     await this.deps.store.upsertSession(toPersisted(session))
@@ -1551,18 +1671,22 @@ export class SessionManager {
           throw err
         }
       }
-      if (input.mode && input.mode !== session.modeId) {
-        const modeSupported =
-          session.availableModes.length === 0 || session.availableModes.some(m => m.id === input.mode)
-        if (!modeSupported) {
-          if (createdFresh) {
-            await this.deleteSession(session.sessionId).catch(() => undefined)
-          }
-          return {
-            text: `claude_open aborted: could not switch session into requested mode "${input.mode}": mode is not supported by this ACP agent.`,
-            isError: true,
-          }
+      if (input.mode && !isModeSupported(session, input.mode)) {
+        if (createdFresh) {
+          await this.deleteSession(session.sessionId).catch(() => undefined)
         }
+        return {
+          text: `claude_open aborted: could not switch session into requested mode "${input.mode}": mode is not supported by this ACP agent.`,
+          isError: true,
+        }
+      }
+      if (input.model) {
+        const match = matchModelId(session, input.model)
+        if (match.resolvedId !== session.modelId) {
+          await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
+        }
+      }
+      if (input.mode && input.mode !== session.modeId) {
         try {
           await this.setSessionMode(session.sessionId, input.mode)
         } catch (err) {
@@ -1583,9 +1707,6 @@ export class SessionManager {
             isError: true,
           }
         }
-      }
-      if (input.model && input.model !== session.modelId) {
-        await this.setSessionModel(session.sessionId, input.model).catch(() => undefined)
       }
       await this.startPrompt(session.sessionId, promptText)
       targetSessionId = session.sessionId
@@ -1680,8 +1801,11 @@ export class SessionManager {
           isError: true,
         }
       }
-      if (input.model && input.model !== session.modelId) {
-        await this.setSessionModel(session.sessionId, input.model).catch(() => undefined)
+      if (input.model) {
+        const match = matchModelId(session, input.model)
+        if (match.resolvedId !== session.modelId) {
+          await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
+        }
       }
 
       heartbeat = setInterval(() => progress('Waiting on Claude Agent (read-only)…'), 10_000)
