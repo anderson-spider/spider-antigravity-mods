@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { redactSecrets } from '../server/redact.ts'
 import { computeLineDiff } from '../ui/src/lib/diff.ts'
-import { applyPollEvents, buildTimelineEntries, formatToolTitle, stripCwdPrefix, summarizeToolGroup } from '../ui/src/lib/timeline.ts'
+import {
+  applyPollEvents,
+  buildTimelineEntries,
+  extractLatestTurnResponse,
+  formatToolTitle,
+  stripCwdPrefix,
+  summarizeToolGroup,
+} from '../ui/src/lib/timeline.ts'
 import {
   applyTriggerReplacement,
   detectInputTrigger,
@@ -160,4 +167,17 @@ test('applyPollEvents clears archivedAt when session_meta unarchives a session a
   assert.equal(updated.status, 'idle')
   assert.equal(updated.items[0]!.streaming, false)
   assert.equal(updated.latestSeq, 3)
+})
+
+test('extractLatestTurnResponse joins all assistant blocks from the latest turn only', () => {
+  const ts = '2026-11-27T12:00:00Z'
+  const items: TimelineItem[] = [
+    { id: 'u1', kind: 'user', text: 'First prompt', timestamp: ts },
+    { id: 'a1', kind: 'assistant', text: 'Old answer', timestamp: ts },
+    { id: 'u2', kind: 'user', text: 'Second prompt', timestamp: ts },
+    { id: 'a2', kind: 'assistant', text: 'Checking files...', timestamp: ts },
+    { id: 't1', kind: 'tool_call', toolCallId: '1', title: 'Read a.ts', status: 'completed', timestamp: ts },
+    { id: 'a3', kind: 'assistant', text: 'Final review report.', timestamp: ts },
+  ]
+  assert.equal(extractLatestTurnResponse(items), 'Checking files...\n\nFinal review report.')
 })

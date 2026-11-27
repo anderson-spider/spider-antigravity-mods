@@ -1,11 +1,12 @@
 import { useApp, useHostStyles } from '@modelcontextprotocol/ext-apps/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ServerBridge, type ToolCallResponse } from '../bridge.ts'
-import { applyPollEvents, stripCwdPrefix } from '../lib/timeline.ts'
+import { applyPollEvents, extractLatestTurnResponse, stripCwdPrefix } from '../lib/timeline.ts'
 import { basenameOf } from '../lib/triggers.ts'
 import type {
   BootstrapPayload,
   DiagnosticsInfo,
+  PendingChatReplyRef,
   PollResponse,
   SessionSnapshot,
   SessionSummary,
@@ -25,7 +26,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.2.0' },
+    appInfo: { name: 'claude-agent-ui', version: '0.3.0' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -97,13 +98,69 @@ export function App() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }, [])
 
+  const deliveringReplyIdsRef = useRef(new Set<string>())
+  const failedReplyIdsRef = useRef(new Set<string>())
+
+  const deliverPendingReplies = useCallback(
+    async (refs: readonly PendingChatReplyRef[] | undefined) => {
+      if (!bridge || !refs || refs.length === 0) return
+      if (!bridge.capabilities.canMessage) return
+      for (const ref of refs) {
+        if (deliveringReplyIdsRef.current.has(ref.replyId) || failedReplyIdsRef.current.has(ref.replyId)) continue
+        deliveringReplyIdsRef.current.add(ref.replyId)
+        try {
+          const claimRes = await bridge.callTool<{ claimed: boolean; text?: string }>('claude_ui_session', {
+            action: 'claim_reply',
+            sessionId: ref.sessionId,
+            replyId: ref.replyId,
+            clientId: bridge.id,
+          })
+          if (!claimRes.ok || !claimRes.data?.claimed || !claimRes.data.text) continue
+
+          const sendRes = await bridge.sendMessage(claimRes.data.text)
+          if (sendRes.ok) {
+            await bridge.callTool('claude_ui_session', {
+              action: 'ack_reply',
+              sessionId: ref.sessionId,
+              replyId: ref.replyId,
+              clientId: bridge.id,
+            })
+            pushToast('Reply delivered to Antigravity chat', undefined, 'success')
+          } else {
+            failedReplyIdsRef.current.add(ref.replyId)
+            await bridge.callTool('claude_ui_session', {
+              action: 'release_reply',
+              sessionId: ref.sessionId,
+              replyId: ref.replyId,
+              clientId: bridge.id,
+            })
+            pushToast('Auto-reply failed', 'Use "To Chat" to send manually.', 'error')
+          }
+        } finally {
+          deliveringReplyIdsRef.current.delete(ref.replyId)
+        }
+      }
+    },
+    [bridge, pushToast],
+  )
+
   const applyBootstrap = useCallback((payload: BootstrapPayload) => {
     setDiagnostics(payload.diagnostics)
     setSessions(payload.sessions ?? [])
     if (payload.activeSession) {
       setActiveSession(payload.activeSession)
     }
-  }, [])
+    if (payload.pendingReplies?.length) {
+      void deliverPendingReplies(payload.pendingReplies)
+    }
+  }, [deliverPendingReplies])
+
+  useEffect(() => {
+    if (!isConnected || !bridge || !caps.canMessage) return
+    if (bootstrap?.pendingReplies?.length) {
+      void deliverPendingReplies(bootstrap.pendingReplies)
+    }
+  }, [isConnected, bridge, caps.canMessage, bootstrap?.pendingReplies, deliverPendingReplies])
 
   const didAutoConnectRef = useRef(false)
   const diagGenRef = useRef(0)
@@ -155,6 +212,8 @@ export function App() {
         ...(snap.modeId ? { modeId: snap.modeId } : {}),
         ...(snap.modelId ? { modelId: snap.modelId } : {}),
         ...(snap.usage ? { usage: snap.usage } : {}),
+        ...(snap.replyToChat ? { replyToChat: snap.replyToChat } : {}),
+        ...(snap.pendingChatReplyId ? { pendingChatReplyId: snap.pendingChatReplyId } : {}),
       }
       if (idx >= 0) {
         const copy = [...prev]
@@ -190,6 +249,9 @@ export function App() {
           continue
         }
         const data: PollResponse = res.data
+        if (data.pendingReplies?.length) {
+          void deliverPendingReplies(data.pendingReplies)
+        }
         if (data.sessionId !== activeId) continue
         if (data.resync && data.snapshot) {
           activeSeqRef.current = data.snapshot.latestSeq
@@ -213,6 +275,8 @@ export function App() {
                       modeId: updated.modeId,
                       modelId: updated.modelId,
                       usage: updated.usage,
+                      replyToChat: updated.replyToChat,
+                      pendingChatReplyId: updated.pendingChatReplyId,
                     }
                   : item,
               ),
@@ -230,7 +294,7 @@ export function App() {
     return () => {
       cancelled = true
     }
-  }, [bridge, activeId, updateSessionSnapshot])
+  }, [bridge, activeId, updateSessionSnapshot, deliverPendingReplies])
 
   const selectGenRef = useRef(0)
 
@@ -375,11 +439,15 @@ export function App() {
   }
 
   const buildSessionSummaryText = (session: SessionSnapshot): string => {
-    const lastAssistant = [...session.items].reverse().find(i => i.kind === 'assistant' && i.text)?.text ?? ''
+    const latestTurnText = extractLatestTurnResponse(session.items)
+    const clipped =
+      latestTurnText.length > 24_000
+        ? `${latestTurnText.slice(0, 24_000)}\n\n… [truncated at 24000 chars]`
+        : latestTurnText
     return [
-      `Claude Agent session "${session.title}" (${session.cwd})`,
+      `[Claude Agent reply · "${session.title}" · session ${session.sessionId} · cwd: ${session.cwd}]`,
       session.touchedFiles.length > 0 ? `Touched files: ${session.touchedFiles.join(', ')}` : undefined,
-      lastAssistant ? `\nLatest Claude response:\n${lastAssistant.slice(0, 3_000)}` : undefined,
+      clipped ? `\n${clipped}` : undefined,
     ]
       .filter(Boolean)
       .join('\n')

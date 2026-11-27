@@ -140,6 +140,23 @@ export function buildTimelineEntries(items: TimelineItem[]): TimelineEntry[] {
   return entries
 }
 
+export function extractLatestTurnResponse(items: readonly TimelineItem[]): string {
+  let lastUserIdx = -1
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i]!.kind === 'user') {
+      lastUserIdx = i
+      break
+    }
+  }
+  const from = lastUserIdx >= 0 ? lastUserIdx + 1 : 0
+  return items
+    .slice(from)
+    .filter(i => i.kind === 'assistant' && typeof i.text === 'string' && i.text.trim().length > 0)
+    .map(i => i.text!.trim())
+    .join('\n\n')
+    .trim()
+}
+
 export function applyPollEvents(prev: SessionSnapshot, events: PollEvent[], latestSeq: number): SessionSnapshot {
   let next: SessionSnapshot = {
     ...prev,
@@ -175,6 +192,8 @@ export function applyPollEvents(prev: SessionSnapshot, events: PollEvent[], late
           modeId: ev.summary.modeId,
           modelId: ev.summary.modelId,
           usage: ev.summary.usage,
+          replyToChat: ev.summary.replyToChat,
+          pendingChatReplyId: ev.summary.pendingChatReplyId,
           ...(ev.availableModes ? { availableModes: ev.availableModes } : {}),
           ...(ev.availableModels ? { availableModels: ev.availableModels } : {}),
           ...(ev.configOptions ? { configOptions: ev.configOptions } : {}),

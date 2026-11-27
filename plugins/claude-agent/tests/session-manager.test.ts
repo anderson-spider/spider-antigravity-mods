@@ -14,7 +14,7 @@ function createTestManager(
   dataDir: string,
   defaultCwd: string,
   extraEnv: Record<string, string> = {},
-  extraDeps: { autoArchiveIdleMs?: number; cancelTimeoutMs?: number; minAskTimeoutMs?: number } = {},
+  extraDeps: { autoArchiveIdleMs?: number; cancelTimeoutMs?: number; minAskTimeoutMs?: number; minWaitTimeoutMs?: number } = {},
 ): SessionManager {
   return new SessionManager({
     store: createStore(dataDir),
@@ -106,20 +106,21 @@ test('claude_ask enforces plan mode and auto-declines permission prompts without
 
 test('claude_open with prompt dispatches async turn and supports reconnect + session/load', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-open-'))
-  t.after(async () => {
-    await rm(dir, { recursive: true, force: true })
-  })
-
   const manager = createTestManager(dir, dir)
   t.after(async () => {
     await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
   })
 
   const openRes = await manager.handleOpenTool({ prompt: 'Summarize project', cwd: dir, mode: 'plan' }, [dir])
-  assert.ok(openRes.text.includes('Started interactive Claude Agent turn'))
-  const sc = openRes.structuredContent as { activeSession?: { sessionId: string } }
+  assert.ok(openRes.text.includes('Started asynchronous Claude Agent turn'))
+  const sc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean; pendingChatReplyId?: string } }
   const sessionId = sc.activeSession?.sessionId
   assert.ok(sessionId)
+  assert.ok(
+    sc.activeSession?.replyToChat || sc.activeSession?.pendingChatReplyId,
+    'expected active auto-reply flag or queued pendingChatReplyId for fast turn',
+  )
 
   // Wait briefly for fake turn to complete, then reconnect and load session
   await new Promise(r => setTimeout(r, 150))
@@ -892,4 +893,121 @@ test('ensureSessionLoaded fallback to session/new preserves model and mode defau
   assert.notEqual(loaded.sessionId, 'stale-sess-1')
   assert.equal(loaded.modelId, 'claude-opus-4-1')
   assert.equal(loaded.modeId, 'auto')
+})
+
+test('claude_open auto-reply queues pendingReplies with atomic claim/release/ack and cross-session wakeup', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-autoreply-'))
+  const manager = createTestManager(dir, dir)
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // Create another session B that a view is actively polling
+  const sessionB = await manager.createSession({ cwd: dir })
+
+  // Start long-poll on session B before dispatching async turn on session A
+  const pollStart = Date.now()
+  const pollBPromise = manager.pollEvents(sessionB.sessionId, sessionB.latestSeq, 5_000, 'aux-view-1')
+  await new Promise(r => setTimeout(r, 20))
+
+  // Dispatch async turn on session A with default replyToChat=true
+  const openRes = await manager.handleOpenTool({ prompt: 'Review MR async', cwd: dir, mode: 'plan' }, [dir])
+  assert.equal(openRes.isError, undefined)
+  const sessionAId = (openRes.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId
+  assert.ok(sessionAId)
+
+  // Poll on session B should wake promptly when session A finishes and include pendingReplies
+  const pollB = await pollBPromise
+  assert.ok(Date.now() - pollStart < 2_000, 'expected cross-session poll wakeup when pending reply became ready')
+  const pendingRef = pollB.pendingReplies?.find(r => r.sessionId === sessionAId)
+  assert.ok(pendingRef, 'expected pendingReplies entry for completed session A')
+  assert.equal(pendingRef!.status, 'completed')
+
+  // Claim atomically from view 1; view 2 must be denied while lease is active
+  const claim1 = (
+    await manager.handleUiSession(
+      { action: 'claim_reply', sessionId: sessionAId!, replyId: pendingRef!.replyId, clientId: 'aux-view-1' },
+      [dir],
+    )
+  ).structuredContent as { claimed: boolean; text?: string }
+  assert.equal(claim1.claimed, true)
+  assert.ok(claim1.text?.includes('Review MR async'))
+  assert.ok(claim1.text?.includes(sessionAId!))
+
+  const claim2 = (
+    await manager.handleUiSession(
+      { action: 'claim_reply', sessionId: sessionAId!, replyId: pendingRef!.replyId, clientId: 'aux-view-2' },
+      [dir],
+    )
+  ).structuredContent as { claimed: boolean }
+  assert.equal(claim2.claimed, false)
+
+  // Release from view 1 allows view 2 to claim and ack
+  await manager.handleUiSession(
+    { action: 'release_reply', sessionId: sessionAId!, replyId: pendingRef!.replyId, clientId: 'aux-view-1' },
+    [dir],
+  )
+  const claim2Retry = (
+    await manager.handleUiSession(
+      { action: 'claim_reply', sessionId: sessionAId!, replyId: pendingRef!.replyId, clientId: 'aux-view-2' },
+      [dir],
+    )
+  ).structuredContent as { claimed: boolean; text?: string }
+  assert.equal(claim2Retry.claimed, true)
+
+  await manager.handleUiSession(
+    { action: 'ack_reply', sessionId: sessionAId!, replyId: pendingRef!.replyId, clientId: 'aux-view-2' },
+    [dir],
+  )
+  const bootAfterAck = await manager.getBootstrap({ workspaceRoots: [dir] })
+  assert.equal(bootAfterAck.pendingReplies, undefined)
+
+  // replyToChat: false must NOT queue pendingReplies
+  const noReplyOpen = await manager.handleOpenTool({ prompt: 'Silent run', cwd: dir, replyToChat: false }, [dir])
+  assert.ok(noReplyOpen.text.includes('Started interactive Claude Agent turn'))
+  await new Promise(r => setTimeout(r, 150))
+  const bootSilent = await manager.getBootstrap({ workspaceRoots: [dir] })
+  assert.equal(bootSilent.pendingReplies, undefined)
+
+  // Manual cancel must NOT queue pendingReplies
+  const cancelOpen = await manager.handleOpenTool({ prompt: '[trigger:slow] cancel me', cwd: dir, replyToChat: true }, [dir])
+  const cancelSessionId = (cancelOpen.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId!
+  await new Promise(r => setTimeout(r, 40))
+  await manager.cancelTurn(cancelSessionId)
+  const bootAfterCancel = await manager.getBootstrap({ workspaceRoots: [dir] })
+  assert.equal(bootAfterCancel.pendingReplies, undefined)
+})
+
+test('claude_session wait returns progress without cancelling turn and clears pendingChatReply on completion', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-wait-'))
+  const manager = createTestManager(dir, dir, {}, { minWaitTimeoutMs: 50 })
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] deep review', cwd: dir, mode: 'plan' }, [dir])
+  const openSc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean } }
+  const sessionId = openSc.activeSession?.sessionId!
+  assert.equal(openSc.activeSession?.replyToChat, true)
+
+  // Short wait window times out WITHOUT cancelling the active turn
+  const midWait = await manager.handleSessionTool({ action: 'wait', sessionId, timeoutSeconds: 0.08 })
+  assert.equal(midWait.isError, undefined)
+  const midSc = midWait.structuredContent as { status: string; stillRunning: boolean }
+  assert.equal(midSc.status, 'running')
+  assert.equal(midSc.stillRunning, true)
+  assert.ok(midWait.text.includes('NOT cancelled'))
+
+  // Subsequent wait completes and returns the full response while clearing pendingChatReply to avoid duplicate send
+  const doneWait = await manager.handleSessionTool({ action: 'wait', sessionId, timeoutSeconds: 5 })
+  assert.equal(doneWait.isError, undefined)
+  const doneSc = doneWait.structuredContent as { status: string; stillRunning: boolean; latestResponse?: string }
+  assert.equal(doneSc.status, 'idle')
+  assert.equal(doneSc.stillRunning, false)
+  assert.ok(doneSc.latestResponse?.includes('Finished slow turn.'))
+
+  const boot = await manager.getBootstrap({ workspaceRoots: [dir] })
+  assert.equal(boot.pendingReplies, undefined, 'consuming completed turn via wait should clear pendingChatReply')
 })

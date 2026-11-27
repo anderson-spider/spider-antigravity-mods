@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-11-27
+
+### Added
+
+- Automatic async reply delivery (`replyToChat`, default `true` when `claude_open` receives a `prompt`): the open `aux_pane` receives cross-session `pendingReplies` notifications, atomically claims the completed turn (`claim_reply` / `ack_reply` / `release_reply`), and posts Claude's full turn response back into the Antigravity chat via `@modelcontextprotocol/ext-apps` `app.sendMessage()` so the agent resumes automatically without timeouts.
+- `claude_session` `action: "wait"` (5–60s window, default 25s, with MCP progress heartbeats) to wait on a running asynchronous turn without ever cancelling it, serving as a reliable fallback when the side pane is closed or in headless sessions.
+- `Auto-reply` status chip in `SessionControlBar` while an auto-reply turn is running in the side pane.
+
+### Changed
+
+- Increased response capture limit to 24,000 characters and joined all assistant message blocks from the latest turn across auto-reply, manual **To Chat** / **Attach**, and `claude_session` (`get` / `wait`).
+- Updated `claude_open`, `claude_ask`, `claude_session`, and `SKILL.md` guidance to prefer asynchronous `claude_open` (with `mode: "plan"` for read-only reviews) for multi-file or long-running tasks.
+
 ## [0.2.0] - 2026-11-27
 
 ### Changed
