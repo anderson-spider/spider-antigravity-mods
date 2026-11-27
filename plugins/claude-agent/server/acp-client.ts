@@ -1,6 +1,6 @@
 // Decoupled JSON-RPC 2.0 over stdio client for ACP subprocesses (claude-agent-acp).
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createInterface } from 'node:readline'
+import { createInterface, type Interface } from 'node:readline'
 import { redactSecrets } from './redact.ts'
 
 export type AcpClientDeps = {
@@ -59,6 +59,8 @@ export class AcpRpcError extends Error {
 
 export class AcpClient {
   private readonly child: ChildProcessWithoutNullStreams
+  private readonly stdoutRl: Interface
+  private readonly stderrRl: Interface
   private readonly defaultTimeoutMs: number
   private readonly pending = new Map<number, PendingRequest>()
   private readonly stderrLines: string[] = []
@@ -83,11 +85,13 @@ export class AcpClient {
       this.deps.onLog?.(`acp stdin error: ${redactSecrets(err.message)}`)
     })
 
-    createInterface({ input: this.child.stdout }).on('line', line => {
+    this.stdoutRl = createInterface({ input: this.child.stdout })
+    this.stdoutRl.on('line', line => {
       this.handleStdoutLine(line)
     })
 
-    createInterface({ input: this.child.stderr }).on('line', line => {
+    this.stderrRl = createInterface({ input: this.child.stderr })
+    this.stderrRl.on('line', line => {
       const masked = redactSecrets(line)
       this.stderrLines.push(masked)
       if (this.stderrLines.length > 50) this.stderrLines.shift()
@@ -159,25 +163,31 @@ export class AcpClient {
     try {
       this.child.stdin.end()
     } catch {}
-    if (this.closed) return
-    await new Promise<void>(resolve => {
-      const killTimer = setTimeout(() => {
+    if (!this.closed) {
+      await new Promise<void>(resolve => {
+        const killTimer = setTimeout(() => {
+          try {
+            this.child.kill('SIGKILL')
+          } catch {}
+          resolve()
+        }, 1_500)
+        this.child.once('exit', () => {
+          clearTimeout(killTimer)
+          resolve()
+        })
         try {
-          this.child.kill('SIGKILL')
-        } catch {}
-        resolve()
-      }, 1_500)
-      this.child.once('exit', () => {
-        clearTimeout(killTimer)
-        resolve()
+          this.child.kill('SIGTERM')
+        } catch {
+          clearTimeout(killTimer)
+          resolve()
+        }
       })
-      try {
-        this.child.kill('SIGTERM')
-      } catch {
-        clearTimeout(killTimer)
-        resolve()
-      }
-    })
+    }
+    this.stdoutRl.close()
+    this.stderrRl.close()
+    this.child.stdout.destroy()
+    this.child.stderr.destroy()
+    this.child.stdin.destroy()
   }
 
   private writeMessage(payload: Record<string, unknown>): void {

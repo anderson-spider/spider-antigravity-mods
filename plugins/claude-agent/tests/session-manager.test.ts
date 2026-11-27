@@ -117,10 +117,13 @@ test('claude_open with prompt dispatches async turn and supports reconnect + ses
 
   const openRes = await manager.handleOpenTool({ prompt: 'Summarize project', cwd: dir, mode: 'plan' }, [dir])
   assert.ok(openRes.text.includes('Started asynchronous Claude Agent turn'))
-  const sc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean } }
+  const sc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean; pendingChatReplyId?: string } }
   const sessionId = sc.activeSession?.sessionId
   assert.ok(sessionId)
-  assert.equal(sc.activeSession?.replyToChat, true)
+  assert.ok(
+    sc.activeSession?.replyToChat || sc.activeSession?.pendingChatReplyId,
+    'expected active auto-reply flag or queued pendingChatReplyId for fast turn',
+  )
 
   // Wait briefly for fake turn to complete, then reconnect and load session
   await new Promise(r => setTimeout(r, 150))
@@ -909,6 +912,7 @@ test('claude_open auto-reply queues pendingReplies with atomic claim/release/ack
   // Start long-poll on session B before dispatching async turn on session A
   const pollStart = Date.now()
   const pollBPromise = manager.pollEvents(sessionB.sessionId, sessionB.latestSeq, 5_000, 'aux-view-1')
+  await new Promise(r => setTimeout(r, 20))
 
   // Dispatch async turn on session A with default replyToChat=true
   const openRes = await manager.handleOpenTool({ prompt: 'Review MR async', cwd: dir, mode: 'plan' }, [dir])
@@ -987,7 +991,9 @@ test('claude_session wait returns progress without cancelling turn and clears pe
   })
 
   const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] deep review', cwd: dir, mode: 'plan' }, [dir])
-  const sessionId = (openRes.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId!
+  const openSc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean } }
+  const sessionId = openSc.activeSession?.sessionId!
+  assert.equal(openSc.activeSession?.replyToChat, true)
 
   // Short wait window times out WITHOUT cancelling the active turn
   const midWait = await manager.handleSessionTool({ action: 'wait', sessionId, timeoutSeconds: 0.08 })
