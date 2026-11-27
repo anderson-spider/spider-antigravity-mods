@@ -8,6 +8,9 @@ import { ArrowDownIcon, FileIcon, ShieldIcon } from './Icons.tsx'
 
 type ChatThreadProps = {
   session: SessionSnapshot
+  hasEarlierItems?: boolean
+  loadingEarlier?: boolean
+  onLoadEarlier?: () => void
   onOpenFile: (absPath: string) => void
   onOpenLink: (url: string) => void
   onResolvePermission: (requestId: string, outcome: 'selected' | 'cancelled', optionId?: string) => void
@@ -89,11 +92,18 @@ function PromptDispatch({ item }: { item: TimelineItem }) {
 }
 
 function ThoughtBlock({ item }: { item: TimelineItem }) {
-  const [expanded, setExpanded] = useState(Boolean(item.streaming))
+  const isStreaming = Boolean(item.streaming)
+  const [expanded, setExpanded] = useState(isStreaming)
+  const prevStreamingRef = useRef(isStreaming)
 
   useEffect(() => {
-    if (item.streaming) setExpanded(true)
-  }, [item.streaming])
+    if (isStreaming && !prevStreamingRef.current) {
+      setExpanded(true)
+    } else if (!isStreaming && prevStreamingRef.current) {
+      setExpanded(false)
+    }
+    prevStreamingRef.current = isStreaming
+  }, [isStreaming])
 
   return (
     <details
@@ -102,7 +112,7 @@ function ThoughtBlock({ item }: { item: TimelineItem }) {
       onToggle={e => setExpanded(e.currentTarget.open)}
     >
       <summary className="thought-summary">
-        <span>{item.streaming ? 'Thinking…' : 'Thought process'}</span>
+        <span>{isStreaming ? 'Thinking…' : 'Thought process'}</span>
       </summary>
       {item.text && <div className="thought-body">{item.text}</div>}
     </details>
@@ -367,6 +377,9 @@ function PermissionCard({
 
 export function ChatThread({
   session,
+  hasEarlierItems,
+  loadingEarlier,
+  onLoadEarlier,
   onOpenFile,
   onOpenLink,
   onResolvePermission,
@@ -374,6 +387,7 @@ export function ChatThread({
 }: ChatThreadProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const stickBottomRef = useRef(true)
+  const preserveScrollRef = useRef<{ prevHeight: number; prevTop: number } | null>(null)
   const [showJump, setShowJump] = useState(false)
 
   const entries = useMemo(() => buildTimelineEntries(session.items), [session.items])
@@ -389,10 +403,27 @@ export function ChatThread({
 
   useEffect(() => {
     const el = scrollRef.current
-    if (!el || !stickBottomRef.current) return
+    if (!el) return
+    if (preserveScrollRef.current) {
+      const { prevHeight, prevTop } = preserveScrollRef.current
+      preserveScrollRef.current = null
+      el.scrollTop = prevTop + Math.max(0, el.scrollHeight - prevHeight)
+      return
+    }
+    if (!stickBottomRef.current) return
     el.scrollTop = el.scrollHeight
     setShowJump(false)
   }, [session.items, session.pendingPermissions, session.status])
+
+  const handleLoadEarlierClick = () => {
+    if (!onLoadEarlier) return
+    const el = scrollRef.current
+    if (el) {
+      stickBottomRef.current = false
+      preserveScrollRef.current = { prevHeight: el.scrollHeight, prevTop: el.scrollTop }
+    }
+    onLoadEarlier()
+  }
 
   const scrollToLatest = () => {
     const el = scrollRef.current
@@ -417,6 +448,18 @@ export function ChatThread({
           </div>
         ) : (
           <div className="thread-flow">
+            {hasEarlierItems && onLoadEarlier && (
+              <div className="load-earlier-row">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  disabled={loadingEarlier}
+                  onClick={handleLoadEarlierClick}
+                >
+                  {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+                </button>
+              </div>
+            )}
             {entries.map(entry => {
               if (entry.kind === 'tool_group') {
                 return (

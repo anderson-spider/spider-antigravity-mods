@@ -447,6 +447,17 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   flex-shrink: 0;
 }
 
+.perm-alert-bar {
+  background: color-mix(in srgb, var(--fg-warning) 16%, transparent);
+  color: var(--fg-primary);
+}
+
+.load-earlier-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+}
+
 /* Native Accordion Disclosure Chevron & Progressive Details Animation */
 .archived-summary,
 .plan-banner-summary,
@@ -1120,6 +1131,13 @@ details[open] > .tool-subrow-summary::before {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+
+.options-popover-footer {
+  padding: 8px 10px;
+  border-top: 1px solid var(--bd-primary);
+  display: flex;
+  justify-content: flex-end;
 }
 
 .option-field { display: flex; flex-direction: column; gap: 4px; }

@@ -1,9 +1,10 @@
 import { formatUsage } from '../lib/triggers.ts'
-import type { SessionSnapshot } from '../types.ts'
+import type { SessionSnapshot, UiPreferences } from '../types.ts'
 import { ArrowUpRightIcon, ChevronDownIcon, SlidersIcon, StopIcon } from './Icons.tsx'
 
 type SessionControlBarProps = {
   session: SessionSnapshot
+  preferences?: UiPreferences
   busy: boolean
   canMessage: boolean
   canUpdateContext: boolean
@@ -11,6 +12,7 @@ type SessionControlBarProps = {
   onSetMode: (modeId: string) => void
   onSetModel: (modelId: string) => void
   onSetConfig: (configId: string, value: string) => void
+  onSaveDefaults: (modeId: string, modelId?: string) => void
   onAttachContext: () => void
   onSendToHostChat: () => void
 }
@@ -19,6 +21,7 @@ const POPOVER_ID = 'session-options-popover'
 
 export function SessionControlBar({
   session,
+  preferences,
   busy,
   canMessage,
   canUpdateContext,
@@ -26,6 +29,7 @@ export function SessionControlBar({
   onSetMode,
   onSetModel,
   onSetConfig,
+  onSaveDefaults,
   onAttachContext,
   onSendToHostChat,
 }: SessionControlBarProps) {
@@ -58,6 +62,9 @@ export function SessionControlBar({
   const isError = session.status === 'error'
   const hasPermissions = session.pendingPermissions.length > 0
   const isBypass = currentModeId === 'bypassPermissions'
+  const isCurrentDefault =
+    preferences?.defaultModeId === currentModeId &&
+    (!currentModelId || preferences?.defaultModelId === currentModelId)
 
   const statusTone = hasPermissions ? 'warn' : isError ? 'error' : isRunning ? 'running' : 'idle'
   const statusLabel = hasPermissions ? 'Approval needed' : isError ? 'Error' : isRunning ? 'Working' : 'Idle'
@@ -162,6 +169,24 @@ export function SessionControlBar({
                 </div>
               )
             })}
+          </div>
+
+          <div className="options-popover-footer">
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              disabled={busy || isBypass || isCurrentDefault}
+              title={
+                isBypass
+                  ? 'bypassPermissions cannot be saved as the global default'
+                  : isCurrentDefault
+                    ? 'Current mode and model are already saved as default'
+                    : 'Save current mode and model as default for new sessions'
+              }
+              onClick={() => onSaveDefaults(currentModeId, currentModelId || undefined)}
+            >
+              {isCurrentDefault ? 'Saved as default' : 'Save as default'}
+            </button>
           </div>
         </div>
 

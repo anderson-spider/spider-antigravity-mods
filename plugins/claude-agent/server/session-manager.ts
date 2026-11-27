@@ -726,6 +726,9 @@ export class SessionManager {
         )
       }
     }
+    if (emitEvents) {
+      this.bumpCatalog()
+    }
     return true
   }
 
@@ -882,7 +885,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.2' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.4.0' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -1645,6 +1648,7 @@ export class SessionManager {
       true,
     )
     this.emitMeta(session)
+    this.bumpCatalog()
     return this.snapshotOf(session)
   }
 
@@ -2447,6 +2451,9 @@ export class SessionManager {
         return { text: 'ok', structuredContent: { files } }
       }
       case 'save_prefs': {
+        if (input.defaultModeId === 'bypassPermissions') {
+          return { text: 'Cannot persist bypassPermissions as the default mode.', isError: true }
+        }
         const data = await this.deps.store.savePreferences({
           ...(input.sidebarWidthPct !== undefined ? { sidebarWidthPct: input.sidebarWidthPct } : {}),
           ...(input.lastCwd !== undefined ? { lastCwd: input.lastCwd } : {}),
@@ -2508,6 +2515,7 @@ export class SessionManager {
       const { resolve: _r, ...publicPerm } = perm
       this.pushEvent(session, { type: 'permission_request', sessionId: session.sessionId, permission: publicPerm }, true)
       this.emitMeta(session)
+      this.bumpCatalog()
     })
 
     return { outcome }
@@ -2528,7 +2536,7 @@ export class SessionManager {
         const chunk = extractTextFromBlock(update.content)
         if (!chunk) return
         const isStreaming = !session.replayingLoad && session.status === 'running'
-        session.activeThoughtId = undefined
+        this.finalizeActiveThought(session)
         let item = session.activeAssistantId
           ? session.items.find(i => i.id === session.activeAssistantId)
           : undefined
@@ -2578,7 +2586,7 @@ export class SessionManager {
         if (!chunk) return
         const isStreaming = !session.replayingLoad && session.status === 'running'
         session.activeAssistantId = undefined
-        session.activeThoughtId = undefined
+        this.finalizeActiveThought(session)
         const last = session.items[session.items.length - 1]
         if (last && last.kind === 'user' && (last.streaming || session.replayingLoad)) {
           last.text = `${last.text ?? ''}${chunk}`
@@ -2598,7 +2606,7 @@ export class SessionManager {
       }
       case 'tool_call': {
         session.activeAssistantId = undefined
-        session.activeThoughtId = undefined
+        this.finalizeActiveThought(session)
         const { locs, diffs, outputTexts } = extractToolDetails(update.content, update.locations, session.cwd)
         for (const l of locs) session.touchedFiles.add(l.path)
 
@@ -2717,6 +2725,17 @@ export class SessionManager {
         this.emitMeta(session)
         return
       }
+    }
+  }
+
+  private finalizeActiveThought(session: InternalSession): void {
+    const thoughtId = session.activeThoughtId
+    session.activeThoughtId = undefined
+    if (!thoughtId) return
+    const item = session.items.find(i => i.id === thoughtId)
+    if (item && item.streaming) {
+      item.streaming = false
+      this.pushEvent(session, { type: 'timeline_upsert', sessionId: session.sessionId, item: { ...item } }, false)
     }
   }
 
