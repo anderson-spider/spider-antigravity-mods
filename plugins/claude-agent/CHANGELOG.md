@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0] - 2026-11-27
+
+### Changed
+
+- Default new sessions to permission mode `auto` (when supported, falling back to `default`; `claude_ask` remains strictly read-only `plan`) and model `opus` (resolved against the ACP agent's advertised model catalog, falling back gracefully to the agent's default model when Opus is unavailable).
+- Apply model selection before permission mode during session setup and `claude_open` so ACP agents that gate `auto` mode on model capabilities activate `auto` cleanly without falling back.
+- Reapply preserved/default model and mode settings when `session/load` falls back to `session/new`, avoid false alias matches against `opusplan` or `default`, and render model config options in `SessionControlBar` even when advertised only via `configOptions`.
+
 ## [0.1.0] - 2026-11-27
 
 ### Added

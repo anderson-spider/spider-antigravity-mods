@@ -90,3 +90,31 @@ test('store persists archivedAt and keeps active sessions ahead of archived sess
   assert.equal(reloaded.sessions[1]!.sessionId, 'sess-archived')
   assert.equal(reloaded.sessions[1]!.archivedAt, '2026-01-03T01:00:00.000Z')
 })
+
+test('store defaults to auto mode and opus model and fills missing preference fields on existing state', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-store-defaults-'))
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const fresh = await createStore(dir).load()
+  assert.equal(fresh.preferences.defaultModeId, 'auto')
+  assert.equal(fresh.preferences.defaultModelId, 'opus')
+
+  // Legacy state file without defaultModelId should inherit opus default
+  await writeFile(
+    join(dir, 'claude-agent-state.json'),
+    JSON.stringify({ version: 1, preferences: { sidebarWidthPct: 30, defaultModeId: 'auto' }, recentCwds: [], sessions: [] }),
+    'utf8',
+  )
+  const migrated = await createStore(dir).load()
+  assert.equal(migrated.preferences.sidebarWidthPct, 30)
+  assert.equal(migrated.preferences.defaultModeId, 'auto')
+  assert.equal(migrated.preferences.defaultModelId, 'opus')
+
+  // Explicit override persists
+  await createStore(dir).savePreferences({ defaultModeId: 'acceptEdits', defaultModelId: 'sonnet' })
+  const updated = await createStore(dir).load()
+  assert.equal(updated.preferences.defaultModeId, 'acceptEdits')
+  assert.equal(updated.preferences.defaultModelId, 'sonnet')
+})
