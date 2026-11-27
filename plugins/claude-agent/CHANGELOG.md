@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-11-27
+
+### Added
+
+- Auto-collapse `ThoughtBlock` disclosures as soon as thinking completes (`streaming: true -> false`), finalizing active thoughts on the server immediately when Claude transitions to a tool call or message chunk while still letting users expand them manually.
+- Cross-session pending permission alert bar (`.perm-alert-bar`) in the panel header whenever another session is waiting for approval (`pendingPermissionCount > 0`), backed by live `catalogVersion` bumps on permission request, resolution, and cancellation.
+- **Load earlier messages** button at the top of long threads when bootstrap truncates history (`truncatedItems: true`), fetching the full session transcript via `claude_ui_session(action: "get")` while preserving scroll position.
+- **Save as default** action in the Session Options popover to persist the current mode and model via `claude_ui_fs(action: "save_prefs")`, blocking `bypassPermissions` as a persisted default in both the UI and server.
+
 ## [0.3.2] - 2026-11-27
 
 ### Fixed
