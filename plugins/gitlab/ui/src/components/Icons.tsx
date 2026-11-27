@@ -21,16 +21,20 @@ export function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
 
 export function CloseIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   )
 }
 
-export function ChevronIcon({ collapsed = false }: { collapsed?: boolean }) {
-  const style: CSSProperties = { transform: collapsed ? 'rotate(-90deg)' : undefined, transition: 'transform 120ms ease' }
+export function ChevronIcon({ collapsed = false, size = 14 }: { collapsed?: boolean; size?: number }) {
+  const style: CSSProperties = {
+    transform: collapsed ? 'rotate(-90deg)' : undefined,
+    transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+    flexShrink: 0,
+  }
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} aria-hidden="true">
       <path d="m6 9 6 6 6-6" />
     </svg>
   )
@@ -38,7 +42,7 @@ export function ChevronIcon({ collapsed = false }: { collapsed?: boolean }) {
 
 export function BackIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m15 18-6-6 6-6" />
     </svg>
   )
@@ -46,7 +50,7 @@ export function BackIcon() {
 
 export function ExternalLinkIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
       <polyline points="15 3 21 3 21 9" />
       <line x1="10" y1="14" x2="21" y2="3" />
@@ -54,9 +58,13 @@ export function ExternalLinkIcon() {
   )
 }
 
-export function MaximizeIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+export function MaximizeIcon({ active = false }: { active?: boolean }) {
+  return active ? (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />
+    </svg>
+  ) : (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
     </svg>
   )
@@ -64,7 +72,7 @@ export function MaximizeIcon() {
 
 export function BookmarkIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
     </svg>
   )
@@ -72,7 +80,7 @@ export function BookmarkIcon() {
 
 export function EyeIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
     </svg>
@@ -81,7 +89,7 @@ export function EyeIcon() {
 
 export function PenIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
     </svg>
@@ -90,23 +98,23 @@ export function PenIcon() {
 
 export function SparkleIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
     </svg>
   )
 }
 
-export function FolderIcon() {
+export function FolderIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
     </svg>
   )
 }
 
-export function GitBranchIcon() {
+export function GitBranchIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <line x1="6" y1="3" x2="6" y2="15" />
       <circle cx="18" cy="6" r="3" />
       <circle cx="6" cy="18" r="3" />
@@ -117,9 +125,64 @@ export function GitBranchIcon() {
 
 export function CopyIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
       <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  )
+}
+
+export function MoreHorizontalIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function SidebarIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+    </svg>
+  )
+}
+
+export function WrapTextIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
+      <polyline points="16 16 14 18 16 20" />
+      <line x1="3" y1="18" x2="10" y2="18" />
+    </svg>
+  )
+}
+
+export function ChevronsUpDownIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m7 15 5 5 5-5" />
+      <path d="m7 9 5-5 5 5" />
+    </svg>
+  )
+}
+
+export function CommentIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+export function CheckIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5" />
     </svg>
   )
 }
@@ -233,7 +296,7 @@ export function PipelineGlyph({ status, withLabel = false }: { status?: string; 
     )
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color, flexShrink: 0 }} title={`Pipeline: ${label}`}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color, flexShrink: 0, fontWeight: withLabel ? 500 : undefined }} title={`Pipeline: ${label}`}>
       {icon}
       {withLabel ? <span>{label}</span> : null}
     </span>
@@ -257,7 +320,7 @@ export function Avatar({ username, size = 16 }: { username: string; size?: numbe
     <span
       className="avatar"
       title={`@${username}`}
-      style={{ width: size, height: size, fontSize: Math.max(9, Math.floor(size * 0.56)), background: bg }}
+      style={{ width: size, height: size, fontSize: Math.max(8, Math.floor(size * 0.54)), background: bg }}
     >
       {initials}
     </span>
@@ -270,8 +333,8 @@ export function LabelBadge({ name, color }: { name: string; color?: string }) {
     <span
       className="label-chip"
       style={{
-        borderColor: `${safe}55`,
-        background: `${safe}1a`,
+        borderColor: `${safe}4d`,
+        background: `${safe}16`,
         color: 'var(--fg-primary)',
       }}
       title={name}

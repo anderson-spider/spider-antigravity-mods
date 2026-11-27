@@ -20,7 +20,19 @@ import type {
 } from '../types.ts'
 import { CodeDiffTab } from './CodeDiffTab.tsx'
 import { DiscussionsTab } from './DiscussionsTab.tsx'
-import { Avatar, BackIcon, CloseIcon, CopyIcon, ExternalLinkIcon, GitBranchIcon, MaximizeIcon, PipelineGlyph, SparkleIcon } from './Icons.tsx'
+import {
+  Avatar,
+  BackIcon,
+  CheckIcon,
+  CloseIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  GitBranchIcon,
+  MaximizeIcon,
+  MoreHorizontalIcon,
+  PipelineGlyph,
+  SparkleIcon,
+} from './Icons.tsx'
 import { MergeModal } from './MergeModal.tsx'
 import { MrListColumn } from './MrListColumn.tsx'
 import { SummaryTab } from './SummaryTab.tsx'
@@ -34,7 +46,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'gitlab-mr-dashboard', version: '0.5.1' },
+    appInfo: { name: 'gitlab-mr-dashboard', version: '0.5.2' },
     capabilities: {},
     onAppCreated: (instance) => {
       instance.ontoolresult = (result) => {
@@ -90,7 +102,7 @@ export function App() {
   const [diffMode, setDiffMode] = useState<DiffMode>('unified')
   const [showFileIndex, setShowFileIndex] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [listWidthPct, setListWidthPct] = useState(40)
+  const [listWidthPct, setListWidthPct] = useState(34)
   const [activeViewId, setActiveViewId] = useState<string | null>(null)
 
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
@@ -99,6 +111,37 @@ export function App() {
   const [registeredRepos, setRegisteredRepos] = useState<ActiveRepo[]>([])
   const [usedFallbackMine, setUsedFallbackMine] = useState(false)
   const [pendingForceRemove, setPendingForceRemove] = useState<{ key: string; message: string } | null>(null)
+
+  // Header popovers
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false)
+  const [worktreeMenuOpen, setWorktreeMenuOpen] = useState(false)
+  const moreActionsRef = useRef<HTMLDivElement | null>(null)
+  const worktreeMenuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!moreActionsOpen && !worktreeMenuOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (moreActionsOpen && moreActionsRef.current && !moreActionsRef.current.contains(target)) {
+        setMoreActionsOpen(false)
+      }
+      if (worktreeMenuOpen && worktreeMenuRef.current && !worktreeMenuRef.current.contains(target)) {
+        setWorktreeMenuOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMoreActionsOpen(false)
+        setWorktreeMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [moreActionsOpen, worktreeMenuOpen])
 
   // List state
   const [mrs, setMrs] = useState<MrListItem[]>([])
@@ -111,6 +154,7 @@ export function App() {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('summary')
+  const [jumpTarget, setJumpTarget] = useState<{ path: string; seq: number } | null>(null)
   const [maximized, setMaximized] = useState(false)
   const [narrowShowDetail, setNarrowShowDetail] = useState(false)
   const [detailsById, setDetailsById] = useState<Record<string, MrDetail>>({})
@@ -239,13 +283,11 @@ export function App() {
     [bridge, configuredHosts.length, stateFilter, workspace, workspaceScoped, hostOrProject],
   )
 
-  // Fetch list whenever connection/bootstrap/scope/state changes
   useEffect(() => {
     if (!isConnected || configuredHosts.length === 0) return
     void fetchList()
   }, [isConnected, configuredHosts.length, fetchList])
 
-  // 60s visibility-aware auto-refresh timer
   useEffect(() => {
     if (!autoRefresh || !isConnected || configuredHosts.length === 0) return
     const id = setInterval(() => {
@@ -334,6 +376,9 @@ export function App() {
 
   useEffect(() => {
     setPendingForceRemove(null)
+    setMoreActionsOpen(false)
+    setWorktreeMenuOpen(false)
+    setJumpTarget(null)
   }, [activeTabId])
 
   useEffect(() => {
@@ -437,7 +482,7 @@ export function App() {
     const onMove = (ev: MouseEvent) => {
       const rect = shellRef.current?.getBoundingClientRect()
       if (!rect || rect.width <= 0) return
-      const pct = Math.min(64, Math.max(24, Math.round(((ev.clientX - rect.left) / rect.width) * 100)))
+      const pct = Math.min(60, Math.max(22, Math.round(((ev.clientX - rect.left) / rect.width) * 100)))
       latestPct = pct
       setListWidthPct(pct)
     }
@@ -493,6 +538,12 @@ export function App() {
     }
   }
 
+  const copyWithToast = (text: string, label: string) => {
+    void copyText(text).then((copied) => {
+      pushToast(copied ? label : 'Could not copy to clipboard', text, copied ? 'default' : 'error')
+    })
+  }
+
   const handleCheckoutWorktree = async () => {
     if (!bridge || !activeTab) return
     setActionBusy(true)
@@ -544,10 +595,12 @@ export function App() {
     if (res.data?.needsForce && !res.data.removed) {
       const msg = res.data.message || 'Worktree has uncommitted or unpushed changes. Click again to force remove.'
       setPendingForceRemove({ key, message: msg })
+      setWorktreeMenuOpen(true)
       pushToast('Confirm force removal', msg, 'warning')
       return
     }
     setPendingForceRemove(null)
+    setWorktreeMenuOpen(false)
     const warnings = res.data?.warnings ?? []
     pushToast('Worktree removed', warnings.join(' ') || undefined, warnings.length > 0 ? 'warning' : 'success')
     await loadDetail(activeTab, true)
@@ -628,6 +681,9 @@ export function App() {
   const unresolvedCount = activeDetail?.discussions.filter((d) => d.resolvable && !d.resolved).length ?? 0
   const iApproved = Boolean(
     activeDetail?.currentUser && activeDetail.approvals?.by.some((u) => u.toLowerCase() === activeDetail.currentUser!.toLowerCase()),
+  )
+  const isForcePending = Boolean(
+    activeTab && activeDetail?.activeWorktree && pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}`,
   )
 
   return (
@@ -736,10 +792,10 @@ export function App() {
 
       {showDetail && activeTab ? (
         <main className="detail-pane">
-          {/* Multi-MR Tab Strip */}
+          {/* Row 1: Multi-MR Tab Strip */}
           <div className="tabstrip">
             {narrow ? (
-              <button className="btn btn-sm" onClick={() => setNarrowShowDetail(false)}>
+              <button type="button" className="btn btn-sm" onClick={() => setNarrowShowDetail(false)}>
                 <BackIcon />
                 List
               </button>
@@ -765,8 +821,9 @@ export function App() {
                     <span className="mono">!{tab.iid}</span>
                     <span className="truncate">{tab.project.split('/').pop()}</span>
                     <button
+                      type="button"
                       className="mr-tab-close"
-                      aria-label="Close tab"
+                      aria-label={`Close !${tab.iid}`}
                       onClick={(e) => {
                         e.stopPropagation()
                         closeTab(tab.id)
@@ -780,11 +837,18 @@ export function App() {
             </div>
 
             {!narrow ? (
-              <div className="row" style={{ gap: 2, paddingLeft: 6, borderLeft: '1px solid var(--bd-primary)', flexShrink: 0 }}>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMaximized((m) => !m)} title="Maximize / restore detail">
-                  <MaximizeIcon />
+              <div className="row-nowrap" style={{ gap: 2, paddingLeft: 6, borderLeft: '1px solid var(--bd-primary)', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => setMaximized((m) => !m)}
+                  title={maximized ? 'Show MR list' : 'Expand detail pane'}
+                  aria-label={maximized ? 'Show MR list' : 'Expand detail pane'}
+                >
+                  <MaximizeIcon active={maximized} />
                 </button>
                 <button
+                  type="button"
                   className="btn btn-ghost btn-icon"
                   onClick={() => {
                     setOpenTabs([])
@@ -792,6 +856,7 @@ export function App() {
                     setMaximized(false)
                   }}
                   title="Close all tabs"
+                  aria-label="Close all tabs"
                 >
                   <CloseIcon />
                 </button>
@@ -806,49 +871,39 @@ export function App() {
             <div className="empty-state">Could not load merge request details.</div>
           ) : (
             <>
-              {/* Header */}
-              <div className="detail-header">
-                <div className="row-between">
-                  <div className="row" style={{ gap: 5, color: 'var(--fg-secondary)', minWidth: 0 }}>
-                    <span className="truncate">{activeDetail.host}</span>
-                    <span>/</span>
-                    <span className="truncate" style={{ color: 'var(--fg-primary)', fontWeight: 500 }}>
-                      {activeDetail.project}
-                    </span>
-                    <span className="mono">!{activeDetail.iid}</span>
+              {/* Row 2: Compact 2-line Detail Header */}
+              <header className="detail-header">
+                <div className="detail-title-row">
+                  <div className="detail-title-wrap">
+                    <h2 className="detail-title">{activeDetail.title}</h2>
                     {activeDetail.draft ? <span className="pill">Draft</span> : null}
                     {activeDetail.state === 'merged' ? <span className="pill pill-info">Merged</span> : null}
+                    {activeDetail.state === 'closed' ? <span className="pill pill-danger">Closed</span> : null}
                     {activeDetail.isProtectedTarget ? <span className="pill pill-warning">Protected target</span> : null}
                   </div>
 
-                  <div className="row" style={{ gap: 5, flexShrink: 0 }}>
+                  {/* Primary Action Cluster + Overflow Menu */}
+                  <div className="row-nowrap" style={{ gap: 5, flexShrink: 0 }}>
                     {activeDetail.state === 'opened' ? (
                       <>
                         <button
-                          className="btn btn-sm"
-                          disabled={actionBusy}
-                          title={activeDetail.draft ? 'Mark this MR as ready for review' : 'Convert this MR back to draft'}
-                          onClick={() => void runAction('toggle_draft', { draft: !activeDetail.draft })}
-                        >
-                          {activeDetail.draft ? 'Mark ready' : 'Draft'}
-                        </button>
-                        <button
-                          className="btn btn-sm"
-                          disabled={actionBusy}
-                          title="Rebase this MR's source branch onto its target branch on GitLab"
-                          onClick={() => void runAction('rebase')}
-                        >
-                          Rebase
-                        </button>
-                        <button
+                          type="button"
                           className={`btn btn-sm ${iApproved ? 'btn-success' : ''}`}
                           disabled={actionBusy}
                           title={iApproved ? 'Remove your approval from this MR' : 'Approve this merge request'}
                           onClick={() => void runAction(iApproved ? 'unapprove' : 'approve')}
                         >
-                          {iApproved ? '✓ Approved' : 'Approve'}
+                          {iApproved ? (
+                            <>
+                              <CheckIcon size={12} />
+                              <span>Approved</span>
+                            </>
+                          ) : (
+                            'Approve'
+                          )}
                         </button>
                         <button
+                          type="button"
                           className={`btn btn-sm ${activeDetail.blockers.length === 0 ? 'btn-primary' : ''}`}
                           disabled={actionBusy}
                           title="Open merge options and safety checks"
@@ -856,28 +911,74 @@ export function App() {
                         >
                           Merge…
                         </button>
+
+                        <div ref={moreActionsRef} className="popover-wrap">
+                          <button
+                            type="button"
+                            className={`btn btn-sm btn-icon ${moreActionsOpen ? 'btn-active' : ''}`}
+                            aria-label="More MR actions"
+                            title="More actions (Draft, Rebase)"
+                            onClick={() => {
+                              setWorktreeMenuOpen(false)
+                              setMoreActionsOpen((o) => !o)
+                            }}
+                          >
+                            <MoreHorizontalIcon />
+                          </button>
+
+                          {moreActionsOpen ? (
+                            <div className="popover-menu" style={{ width: 190 }}>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  setMoreActionsOpen(false)
+                                  void runAction('toggle_draft', { draft: !activeDetail.draft })
+                                }}
+                              >
+                                <span>{activeDetail.draft ? 'Mark as ready' : 'Convert to draft'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  setMoreActionsOpen(false)
+                                  void runAction('rebase')
+                                }}
+                              >
+                                <span>Rebase onto {activeDetail.target}</span>
+                              </button>
+                              {caps.canOpenLinks ? (
+                                <>
+                                  <div className="menu-sep" />
+                                  <button
+                                    type="button"
+                                    className="menu-item"
+                                    onClick={() => {
+                                      setMoreActionsOpen(false)
+                                      void bridge?.openLink(activeDetail.url)
+                                    }}
+                                  >
+                                    <span>Open in GitLab</span>
+                                    <ExternalLinkIcon />
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
                       </>
                     ) : null}
-                    <button
-                      className="btn btn-sm"
-                      disabled={actionBusy || !activeDetail.localRepoPath}
-                      title={
-                        activeDetail.localRepoPath
-                          ? activeDetail.activeWorktree
-                            ? `Sync isolated worktree (${activeDetail.activeWorktree.branch}) and copy its path`
-                            : 'Create an isolated git worktree for this MR and copy its path'
-                          : 'Register this repository in Repos to enable local worktree checkout'
-                      }
-                      onClick={() => void handleCheckoutWorktree()}
-                    >
-                      <GitBranchIcon />
-                      {activeDetail.activeWorktree ? 'Sync' : 'Checkout'}
-                    </button>
+
                     {caps.canOpenLinks ? (
                       <button
+                        type="button"
                         className="btn btn-sm btn-icon"
                         onClick={() => void bridge?.openLink(activeDetail.url)}
                         title="Open this MR in GitLab"
+                        aria-label="Open in GitLab"
                       >
                         <ExternalLinkIcon />
                       </button>
@@ -885,156 +986,270 @@ export function App() {
                   </div>
                 </div>
 
-                <h2 className="detail-title">{activeDetail.title}</h2>
-
-                <div className="row-between" style={{ color: 'var(--fg-secondary)' }}>
-                  <div className="row" style={{ gap: 6 }}>
+                {/* Metadata + Branch Flow + Integrated Worktree Control */}
+                <div className="detail-meta-row">
+                  <div className="row" style={{ gap: 6, minWidth: 0 }}>
                     {activeDetail.author ? <Avatar username={activeDetail.author} size={16} /> : null}
-                    <span style={{ color: 'var(--fg-primary)' }}>{activeDetail.authorName ?? activeDetail.author ?? 'unknown'}</span>
-                    <span>·</span>
+                    <span style={{ color: 'var(--fg-primary)', fontWeight: 500 }}>
+                      {activeDetail.authorName ?? activeDetail.author ?? 'unknown'}
+                    </span>
+                    <span className="meta-sep">·</span>
                     <span>updated {formatRelativeTime(activeDetail.updatedAt)}</span>
+                    <span className="meta-sep">·</span>
+                    <span className="mono" title={`${activeDetail.host}/${activeDetail.project}!${activeDetail.iid}`}>
+                      {activeDetail.project.split('/').pop()}!{activeDetail.iid}
+                    </span>
+                    <button
+                      type="button"
+                      className="branch-flow"
+                      title={`Click to copy source branch: ${activeDetail.source}\nMerging ${activeDetail.source} into ${activeDetail.target}`}
+                      onClick={() => copyWithToast(activeDetail.source, 'Copied branch name')}
+                    >
+                      <span className="truncate" style={{ maxWidth: 165, color: 'var(--fg-primary)' }}>
+                        {activeDetail.source}
+                      </span>
+                      <span style={{ opacity: 0.65 }}>→</span>
+                      <span className="truncate" style={{ maxWidth: 110 }}>
+                        {activeDetail.target}
+                      </span>
+                    </button>
                   </div>
-                  <div className="row mono" style={{ gap: 5 }}>
-                    <span className="pill truncate" style={{ maxWidth: 140 }}>
-                      {activeDetail.target}
-                    </span>
-                    <span>←</span>
-                    <span className="pill truncate" style={{ maxWidth: 170 }}>
-                      {activeDetail.source}
-                    </span>
+
+                  {/* Unified Worktree Control (replaces separate permanent worktree bar + duplicate Sync button) */}
+                  <div className="row-nowrap" style={{ gap: 6, flexShrink: 0 }}>
+                    {activeDetail.activeWorktree ? (
+                      <div ref={worktreeMenuRef} className="popover-wrap">
+                        <div className="worktree-chip-group">
+                          <button
+                            type="button"
+                            className="worktree-chip-btn"
+                            title={`Active local worktree:\n${activeDetail.activeWorktree.path}\nClick to sync or remove`}
+                            onClick={() => {
+                              setMoreActionsOpen(false)
+                              setWorktreeMenuOpen((o) => !o)
+                            }}
+                          >
+                            <GitBranchIcon size={12} />
+                            <span className="mono truncate" style={{ maxWidth: 140 }}>
+                              {activeDetail.activeWorktree.branch}
+                            </span>
+                            <span style={{ opacity: 0.7 }}>▾</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="worktree-copy-btn"
+                            title="Copy worktree path"
+                            aria-label="Copy worktree path"
+                            onClick={() => copyWithToast(activeDetail.activeWorktree!.path, 'Copied worktree path')}
+                          >
+                            <CopyIcon />
+                          </button>
+                        </div>
+
+                        {worktreeMenuOpen ? (
+                          <div className="popover-menu" style={{ width: 320 }}>
+                            <div className="card-header" style={{ padding: '7px 10px', fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)' }}>
+                              <span>Local review worktree</span>
+                              <span className="mono" style={{ color: 'var(--fg-info)' }}>{activeDetail.activeWorktree.branch}</span>
+                            </div>
+                            <div
+                              className="mono"
+                              style={{
+                                padding: '8px 10px',
+                                fontSize: 'var(--text-xs)',
+                                color: 'var(--fg-secondary)',
+                                wordBreak: 'break-all',
+                                background: 'var(--bg-secondary)',
+                                borderBottom: '1px solid var(--bd-primary)',
+                                userSelect: 'text',
+                              }}
+                            >
+                              {activeDetail.activeWorktree.path}
+                            </div>
+                            {isForcePending ? (
+                              <div
+                                style={{
+                                  padding: '7px 10px',
+                                  fontSize: 'var(--text-xs)',
+                                  color: 'var(--fg-warning)',
+                                  background: 'color-mix(in srgb, var(--fg-warning) 10%, var(--bg-primary))',
+                                  borderBottom: '1px solid var(--bd-primary)',
+                                }}
+                              >
+                                {pendingForceRemove?.message}
+                              </div>
+                            ) : null}
+                            <div style={{ padding: 4 }}>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                onClick={() => {
+                                  copyWithToast(activeDetail.activeWorktree!.path, 'Copied worktree path')
+                                  setWorktreeMenuOpen(false)
+                                }}
+                              >
+                                <span>Copy worktree path</span>
+                                <CopyIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                disabled={actionBusy}
+                                onClick={() => {
+                                  setWorktreeMenuOpen(false)
+                                  void handleCheckoutWorktree()
+                                }}
+                              >
+                                <span>Sync with latest MR commit</span>
+                              </button>
+                              <div className="menu-sep" />
+                              <button
+                                type="button"
+                                className="menu-item menu-item-danger"
+                                disabled={actionBusy}
+                                onClick={() => void handleRemoveWorktree(activeDetail.activeWorktree!.path)}
+                              >
+                                <span>{isForcePending ? 'Force remove worktree?' : 'Remove worktree'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-xs"
+                        disabled={actionBusy || !activeDetail.localRepoPath}
+                        title={
+                          activeDetail.localRepoPath
+                            ? 'Create an isolated git worktree for this MR and copy its path'
+                            : 'Register this repository in Repos to enable local worktree checkout'
+                        }
+                        onClick={() => void handleCheckoutWorktree()}
+                      >
+                        <GitBranchIcon size={12} />
+                        <span>Checkout worktree</span>
+                      </button>
+                    )}
                   </div>
                 </div>
-              </div>
+              </header>
 
-              {/* Active Local Worktree Strip */}
-              {activeDetail.activeWorktree ? (
-                <div className="worktree-bar">
-                  <div className="row" style={{ gap: 6, minWidth: 0, flex: 1 }}>
-                    <span className="pill pill-info mono" style={{ flexShrink: 0 }}>
-                      <GitBranchIcon />
-                      {activeDetail.activeWorktree.branch}
-                    </span>
-                    <span className="mono truncate" style={{ color: 'var(--fg-secondary)' }} title={activeDetail.activeWorktree.path}>
-                      {activeDetail.activeWorktree.path}
-                    </span>
-                  </div>
-                  <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+              {/* Row 3: Unified Sub-tabs + Pipeline Status + Agent Handoff Actions */}
+              <div className="detail-tabs-bar">
+                <div className="underline-tabs" role="tablist" aria-label="Merge request sections">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === 'summary'}
+                    className={`underline-tab ${detailTab === 'summary' ? 'active' : ''}`}
+                    onClick={() => setDetailTab('summary')}
+                  >
+                    Summary
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === 'discussions'}
+                    className={`underline-tab ${detailTab === 'discussions' ? 'active' : ''}`}
+                    onClick={() => setDetailTab('discussions')}
+                  >
+                    Discussions
+                    {unresolvedCount > 0 ? <span className="tab-count tab-count-warn">{unresolvedCount}</span> : null}
+                    {activeDetail.drafts.length > 0 ? (
+                      <span className="tab-count tab-count-info">{activeDetail.drafts.length} draft</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === 'code'}
+                    className={`underline-tab ${detailTab === 'code' ? 'active' : ''}`}
+                    onClick={() => setDetailTab('code')}
+                  >
+                    Code
+                    {activeDiff ? <span className="tab-count">{activeDiff.length}</span> : null}
+                  </button>
+                </div>
+
+                <div className="agent-actions">
+                  {activeDetail.pipeline?.status ? (
                     <button
-                      className="btn btn-sm"
-                      title="Copy worktree path to clipboard"
+                      type="button"
+                      className="pipeline-link-btn"
+                      title="Jump to pipeline jobs in Summary"
                       onClick={() => {
-                        const wtPath = activeDetail.activeWorktree!.path
-                        void copyText(wtPath).then((copied) => {
-                          pushToast(copied ? 'Copied worktree path' : 'Could not copy worktree path', wtPath, copied ? 'default' : 'error')
+                        setDetailTab('summary')
+                        requestAnimationFrame(() => {
+                          document.getElementById('summary-pipeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                         })
                       }}
                     >
-                      <CopyIcon />
-                      Copy
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      disabled={actionBusy}
-                      title="Fast-forward this worktree to the latest MR commit"
-                      onClick={() => void handleCheckoutWorktree()}
-                    >
-                      Sync
-                    </button>
-                    <button
-                      className={`btn btn-sm ${pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}` ? 'btn-danger' : ''}`}
-                      disabled={actionBusy}
-                      title={
-                        pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}`
-                          ? pendingForceRemove.message
-                          : 'Remove this isolated review worktree'
-                      }
-                      onClick={() => void handleRemoveWorktree(activeDetail.activeWorktree!.path)}
-                    >
-                      {pendingForceRemove?.key === `${activeTab.id}:${activeDetail.activeWorktree.path}` ? 'Force remove?' : 'Remove'}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Agent Handoff Bar (strictly gated on host capabilities -> shown in aux_pane, hidden in global) */}
-              {caps.canMessage || caps.canUpdateContext ? (
-                <div className="agent-bar">
-                  <span className="row" style={{ gap: 4, color: 'var(--fg-secondary)', fontWeight: 500 }}>
-                    <SparkleIcon />
-                    Agent:
-                  </span>
-                  <button
-                    className="btn btn-sm"
-                    disabled={handoffBusy}
-                    title={
-                      caps.canMessage
-                        ? 'Start a new agent conversation to review this MR and save findings as draft notes'
-                        : 'Start a new agent conversation to review this MR if supported, or attach the prompt to chat context and copy it'
-                    }
-                    onClick={() => void handoffToAgent('review')}
-                  >
-                    Review MR
-                  </button>
-                  {activeDetail.pipeline?.status?.toLowerCase() === 'failed' ? (
-                    <button
-                      className="btn btn-sm btn-danger"
-                      disabled={handoffBusy}
-                      title={
-                        caps.canMessage
-                          ? 'Start a new agent conversation to inspect failing CI jobs and help fix the pipeline'
-                          : 'Start a new agent conversation to inspect failing CI jobs if supported, or attach the prompt to chat context and copy it'
-                      }
-                      onClick={() => void handoffToAgent('fix-ci')}
-                    >
-                      Fix failing pipeline
+                      <PipelineGlyph status={activeDetail.pipeline.status} withLabel />
                     </button>
                   ) : null}
-                  {unresolvedCount > 0 ? (
-                    <button
-                      className="btn btn-sm"
-                      disabled={handoffBusy}
-                      title={
-                        caps.canMessage
-                          ? 'Start a new agent conversation to inspect and address unresolved review threads'
-                          : 'Start a new agent conversation to inspect and address unresolved review threads if supported, or attach the prompt to chat context and copy it'
-                      }
-                      onClick={() => void handoffToAgent('threads')}
-                    >
-                      Address {unresolvedCount} thread{unresolvedCount === 1 ? '' : 's'}
-                    </button>
-                  ) : null}
-                  {caps.canUpdateContext ? (
-                    <button
-                      className="btn btn-sm"
-                      style={{ marginLeft: 'auto' }}
-                      disabled={handoffBusy}
-                      title="Attach this MR's summary to your next chat message without sending"
-                      onClick={() => void handoffToAgent('attach')}
-                    >
-                      Attach context
-                    </button>
+
+                  {caps.canMessage || caps.canUpdateContext ? (
+                    <>
+                      {activeDetail.pipeline?.status ? <span className="bar-divider" /> : null}
+                      <button
+                        type="button"
+                        className="btn btn-xs"
+                        disabled={handoffBusy}
+                        title={
+                          caps.canMessage
+                            ? 'Start a new agent conversation to review this MR and save findings as draft notes'
+                            : 'Start a new agent conversation to review this MR if supported, or attach the prompt to chat context and copy it'
+                        }
+                        onClick={() => void handoffToAgent('review')}
+                      >
+                        <SparkleIcon />
+                        <span>Review MR</span>
+                      </button>
+                      {activeDetail.pipeline?.status?.toLowerCase() === 'failed' ? (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-danger"
+                          disabled={handoffBusy}
+                          title={
+                            caps.canMessage
+                              ? 'Start a new agent conversation to inspect failing CI jobs and help fix the pipeline'
+                              : 'Start a new agent conversation to inspect failing CI jobs if supported, or attach the prompt to chat context and copy it'
+                          }
+                          onClick={() => void handoffToAgent('fix-ci')}
+                        >
+                          Fix pipeline
+                        </button>
+                      ) : null}
+                      {unresolvedCount > 0 ? (
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          disabled={handoffBusy}
+                          title={
+                            caps.canMessage
+                              ? 'Start a new agent conversation to inspect and address unresolved review threads'
+                              : 'Start a new agent conversation to inspect and address unresolved review threads if supported, or attach the prompt to chat context and copy it'
+                          }
+                          onClick={() => void handoffToAgent('threads')}
+                        >
+                          Address {unresolvedCount}
+                        </button>
+                      ) : null}
+                      {caps.canUpdateContext ? (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-ghost"
+                          disabled={handoffBusy}
+                          title="Attach this MR's summary to your next chat message without sending"
+                          onClick={() => void handoffToAgent('attach')}
+                        >
+                          Attach
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
-              ) : null}
-
-              {/* Segmented Sub-tabs */}
-              <div className="detail-tabs-bar">
-                <div className="seg-group">
-                  <button className={`seg-btn ${detailTab === 'summary' ? 'active' : ''}`} onClick={() => setDetailTab('summary')}>
-                    Summary
-                  </button>
-                  <button className={`seg-btn ${detailTab === 'discussions' ? 'active' : ''}`} onClick={() => setDetailTab('discussions')}>
-                    Discussions
-                    {unresolvedCount > 0 ? <span className="pill pill-warning mono">{unresolvedCount}</span> : null}
-                    {activeDetail.drafts.length > 0 ? <span className="pill pill-info mono">{activeDetail.drafts.length} draft</span> : null}
-                  </button>
-                  <button className={`seg-btn ${detailTab === 'code' ? 'active' : ''}`} onClick={() => setDetailTab('code')}>
-                    Code
-                    {activeDiff ? <span className="mono" style={{ color: 'var(--fg-tertiary)' }}>{activeDiff.length}</span> : null}
-                  </button>
-                </div>
-
-                <PipelineGlyph status={activeDetail.pipeline?.status} withLabel />
               </div>
 
               {/* Active Detail Tab */}
@@ -1043,6 +1258,7 @@ export function App() {
                   key={activeTab.id}
                   detail={activeDetail}
                   busy={actionBusy}
+                  onCopyText={copyWithToast}
                   onOpenLink={(url) => void bridge?.openLink(url)}
                   onRunAction={runAction}
                   onLoadJobLog={loadJobLog}
@@ -1055,7 +1271,7 @@ export function App() {
                   onOpenLink={(url) => void bridge?.openLink(url)}
                   onJumpToFile={(path) => {
                     setDetailTab('code')
-                    setTimeout(() => document.getElementById(`diff-file-${path}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
+                    setJumpTarget((prev) => ({ path, seq: (prev?.seq ?? 0) + 1 }))
                   }}
                   onRunAction={runAction}
                 />
@@ -1070,6 +1286,7 @@ export function App() {
                   showFileIndex={showFileIndex}
                   viewedPaths={activeViewedPaths}
                   busy={actionBusy}
+                  jumpTarget={jumpTarget}
                   onChangeDiffMode={(mode) => {
                     setDiffMode(mode)
                     persistPrefs({ diffMode: mode })
@@ -1080,6 +1297,7 @@ export function App() {
                     persistPrefs({ showFileIndex: next })
                   }}
                   onSetFileViewed={handleSetFileViewed}
+                  onCopyText={copyWithToast}
                   onOpenLink={(url) => void bridge?.openLink(url)}
                   onRunAction={runAction}
                 />
@@ -1089,7 +1307,7 @@ export function App() {
         </main>
       ) : null}
 
-      {/* Guarded Merge Modal */}
+      {/* Guarded Merge Modal (native <dialog>) */}
       {mergeModalOpen && activeDetail ? (
         <MergeModal
           detail={activeDetail}
@@ -1102,7 +1320,7 @@ export function App() {
       ) : null}
 
       {/* Toast Stack */}
-      <div className="toast-stack">
+      <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1119,7 +1337,7 @@ export function App() {
             }}
           >
             <div style={{ fontWeight: 500 }}>{t.title}</div>
-            {t.detail ? <div style={{ color: 'var(--fg-secondary)', marginTop: 2 }}>{t.detail}</div> : null}
+            {t.detail ? <div style={{ color: 'var(--fg-secondary)', marginTop: 2, fontSize: 'var(--text-xs)' }}>{t.detail}</div> : null}
           </div>
         ))}
       </div>
