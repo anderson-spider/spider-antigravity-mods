@@ -4,7 +4,7 @@ import type { Reply } from './session-manager.ts'
 import { SPECS, type ToolSpec } from './tools.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.3.1'
+export const SERVER_VERSION = '0.3.2'
 
 type Id = string | number
 type Message = {

@@ -26,7 +26,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.3.1' },
+    appInfo: { name: 'claude-agent-ui', version: '0.3.2' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -575,9 +575,9 @@ export function App() {
             {activeSession ? (
               <div className="session-header-info">
                 <h1 className="pane-title truncate">{activeSession.title}</h1>
-                <span className="session-cwd-chip mono truncate" title={activeSession.cwd}>
+                <span className="session-cwd-chip mono" title={activeSession.cwd}>
                   <FolderIcon size={11} />
-                  {basenameOf(activeSession.cwd)}
+                  <span className="truncate">{basenameOf(activeSession.cwd)}</span>
                 </span>
               </div>
             ) : (
