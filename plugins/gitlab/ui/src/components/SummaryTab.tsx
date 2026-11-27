@@ -1,18 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toggleMarkdownCheckbox } from '../lib/markdown.ts'
 import type { MrDetail, PipelineJob } from '../types.ts'
-import { Avatar, ExternalLinkIcon, LabelBadge, PipelineGlyph } from './Icons.tsx'
+import { Avatar, CheckIcon, CopyIcon, ExternalLinkIcon, LabelBadge, PipelineGlyph } from './Icons.tsx'
 import { MarkdownView } from './MarkdownView.tsx'
 
 export function SummaryTab({
   detail,
   busy,
+  onCopyText,
   onOpenLink,
   onRunAction,
   onLoadJobLog,
 }: {
   detail: MrDetail
   busy: boolean
+  onCopyText?: (text: string, label: string) => void
   onOpenLink: (url: string) => void
   onRunAction: (action: string, extra?: Record<string, unknown>) => Promise<void>
   onLoadJobLog: (jobId: number, mode: 'errors' | 'tail' | 'full') => Promise<string | undefined>
@@ -24,6 +26,7 @@ export function SummaryTab({
   const [logMode, setLogMode] = useState<'errors' | 'tail' | 'full'>('errors')
   const [logs, setLogs] = useState<Record<string, string>>({})
   const [loadingLogKey, setLoadingLogKey] = useState<string | null>(null)
+  const autoLoadedRef = useRef<number | null>(null)
 
   const ready = detail.blockers.length === 0 && detail.state === 'opened'
 
@@ -38,6 +41,13 @@ export function SummaryTab({
     if (text !== undefined) setLogs((prev) => ({ ...prev, [key]: text }))
   }
 
+  useEffect(() => {
+    if (expandedJobId === null || autoLoadedRef.current === expandedJobId) return
+    autoLoadedRef.current = expandedJobId
+    void fetchLog(expandedJobId, 'errors')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedJobId])
+
   const toggleJob = (job: PipelineJob) => {
     if (expandedJobId === job.id) {
       setExpandedJobId(null)
@@ -47,10 +57,10 @@ export function SummaryTab({
   }
 
   return (
-    <div className="detail-scroll">
-      <div className="stack" style={{ maxWidth: 880 }}>
+    <div className="detail-scroll scroller">
+      <div className="stack" style={{ maxWidth: 920 }}>
         {/* Merge Readiness & Blockers */}
-        <div
+        <section
           className="card card-pad stack"
           style={{
             gap: 10,
@@ -58,7 +68,7 @@ export function SummaryTab({
           }}
         >
           <div className="row-between">
-            <div className="row" style={{ gap: 7 }}>
+            <div className="row" style={{ gap: 8 }}>
               <span
                 style={{
                   width: 8,
@@ -80,9 +90,15 @@ export function SummaryTab({
               </strong>
             </div>
             {detail.sha ? (
-              <span className="mono" style={{ color: 'var(--fg-secondary)' }} title={detail.sha}>
-                SHA {detail.sha.slice(0, 8)}
-              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs mono"
+                title={`Copy commit SHA: ${detail.sha}`}
+                onClick={() => onCopyText?.(detail.sha!, 'Copied commit SHA')}
+              >
+                <span>{detail.sha.slice(0, 8)}</span>
+                <CopyIcon />
+              </button>
             ) : null}
           </div>
 
@@ -97,89 +113,85 @@ export function SummaryTab({
           ) : null}
 
           {detail.rules && detail.rules.length > 0 ? (
-            <div className="rules-grid" style={{ paddingTop: 8, borderTop: '1px solid var(--bd-primary)' }}>
+            <div style={{ paddingTop: 6, borderTop: '1px solid var(--bd-subtle)' }}>
               {detail.rules.map((r) => (
-                <div
-                  key={r.name}
-                  className="row-between"
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 6,
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--bd-primary)',
-                  }}
-                >
+                <div key={r.name} className="rule-row">
                   <span style={{ fontWeight: 500 }}>{r.name}</span>
-                  <span className="mono" style={{ color: r.approved ? 'var(--fg-success)' : 'var(--fg-secondary)' }}>
-                    {r.by.length}/{r.required ?? 0} {r.approved ? '✓' : ''}
+                  <span className="row-nowrap mono" style={{ gap: 5, color: r.approved ? 'var(--fg-success)' : 'var(--fg-secondary)' }}>
+                    <span>
+                      {r.by.length}/{r.required ?? 0}
+                    </span>
+                    {r.approved ? <CheckIcon size={12} /> : null}
                   </span>
                 </div>
               ))}
             </div>
           ) : detail.approvals ? (
-            <div style={{ paddingTop: 6, borderTop: '1px solid var(--bd-primary)', color: 'var(--fg-secondary)' }}>
+            <div style={{ paddingTop: 6, borderTop: '1px solid var(--bd-subtle)', color: 'var(--fg-secondary)', fontSize: 'var(--text-sm)' }}>
               Approvals:{' '}
               <strong style={{ color: detail.approvals.approved ? 'var(--fg-success)' : 'var(--fg-primary)' }}>
                 {detail.approvals.by.length} approved
               </strong>
               {detail.approvals.left ? ` (${detail.approvals.left} left)` : ''}
-              {detail.approvals.by.length > 0 ? ` — ${detail.approvals.by.map((u) => `@${u}`).join(', ')}` : ''}
+              {detail.approvals.by.length > 0 ? ` · ${detail.approvals.by.map((u) => `@${u}`).join(', ')}` : ''}
             </div>
           ) : null}
-        </div>
+        </section>
 
         {/* Reviewers, Assignees, Labels */}
-        <div className="card card-pad meta-grid">
-          <div className="stack" style={{ gap: 4 }}>
-            <span style={{ color: 'var(--fg-secondary)' }}>Reviewers</span>
+        <section className="card meta-strip">
+          <div className="meta-cell">
+            <span className="section-heading">Reviewers</span>
             <div className="row" style={{ gap: 5 }}>
               {detail.reviewers.length > 0 ? (
                 detail.reviewers.map((u) => (
-                  <span key={u} className="pill">
-                    <Avatar username={u} size={14} />
+                  <span key={u} className="row-nowrap" style={{ gap: 5, fontSize: 'var(--text-sm)' }}>
+                    <Avatar username={u} size={16} />
                     <span>{u}</span>
-                    {detail.approvals?.by.includes(u) ? <span style={{ color: 'var(--fg-success)' }}>✓</span> : null}
+                    {detail.approvals?.by.includes(u) ? (
+                      <span style={{ color: 'var(--fg-success)', display: 'inline-flex' }} title="Approved">
+                        <CheckIcon size={12} />
+                      </span>
+                    ) : null}
                   </span>
                 ))
               ) : (
-                <span style={{ color: 'var(--fg-tertiary)' }}>None</span>
+                <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-sm)' }}>None</span>
               )}
             </div>
           </div>
 
-          <div className="stack" style={{ gap: 4 }}>
-            <span style={{ color: 'var(--fg-secondary)' }}>Assignees</span>
-            <div className="row" style={{ gap: 5 }}>
+          <div className="meta-cell">
+            <span className="section-heading">Assignees</span>
+            <div className="row" style={{ gap: 6 }}>
               {detail.assignees.length > 0 ? (
                 detail.assignees.map((u) => (
-                  <span key={u} className="pill">
-                    <Avatar username={u} size={14} />
+                  <span key={u} className="row-nowrap" style={{ gap: 5, fontSize: 'var(--text-sm)' }}>
+                    <Avatar username={u} size={16} />
                     <span>{u}</span>
                   </span>
                 ))
               ) : (
-                <span style={{ color: 'var(--fg-tertiary)' }}>None</span>
+                <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-sm)' }}>None</span>
               )}
             </div>
           </div>
 
-          <div className="stack" style={{ gap: 4 }}>
-            <span style={{ color: 'var(--fg-secondary)' }}>Labels</span>
+          <div className="meta-cell">
+            <span className="section-heading">Labels</span>
             <div className="row" style={{ gap: 4 }}>
               {detail.labels.length > 0 ? (
                 detail.labels.map((l) => <LabelBadge key={l.name} name={l.name} color={l.color} />)
               ) : (
-                <span style={{ color: 'var(--fg-tertiary)' }}>None</span>
+                <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-sm)' }}>None</span>
               )}
             </div>
           </div>
-        </div>
+        </section>
 
         {/* Description */}
-        <div className="card card-pad stack" style={{ gap: 8 }}>
-          <div style={{ color: 'var(--fg-secondary)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Description
-          </div>
+        <section className="card card-pad stack" style={{ gap: 8 }}>
+          <h3 className="section-heading">Description</h3>
           <MarkdownView
             source={detail.description}
             onOpenLink={onOpenLink}
@@ -188,17 +200,17 @@ export function SummaryTab({
               void onRunAction('update_description', { description: next })
             }}
           />
-        </div>
+        </section>
 
         {/* Pipeline & Jobs + Inline Log Viewer */}
-        <div className="card">
+        <section id="summary-pipeline" className="card">
           <div className="card-header">
             <div className="row" style={{ gap: 8 }}>
               {detail.pipeline ? (
                 <>
                   <PipelineGlyph status={detail.pipeline.status} />
                   <strong>Pipeline #{detail.pipeline.id}</strong>
-                  <span className="pill">{detail.pipeline.status}</span>
+                  <span style={{ color: 'var(--fg-secondary)', fontSize: 'var(--text-sm)' }}>{detail.pipeline.status}</span>
                 </>
               ) : (
                 <strong>Pipeline</strong>
@@ -208,6 +220,7 @@ export function SummaryTab({
               {detail.pipeline ? (
                 <>
                   <button
+                    type="button"
                     className="btn btn-sm"
                     disabled={busy}
                     onClick={() => void onRunAction('retry_pipeline', { pipelineId: detail.pipeline!.id })}
@@ -216,6 +229,7 @@ export function SummaryTab({
                   </button>
                   {detail.pipeline.status === 'running' || detail.pipeline.status === 'pending' ? (
                     <button
+                      type="button"
                       className="btn btn-sm btn-danger"
                       disabled={busy}
                       onClick={() => void onRunAction('cancel_pipeline', { pipelineId: detail.pipeline!.id })}
@@ -224,13 +238,13 @@ export function SummaryTab({
                     </button>
                   ) : null}
                   {detail.pipeline.url ? (
-                    <button className="btn btn-sm btn-icon" onClick={() => onOpenLink(detail.pipeline!.url!)} title="Open pipeline in GitLab">
+                    <button type="button" className="btn btn-sm btn-icon" onClick={() => onOpenLink(detail.pipeline!.url!)} title="Open pipeline in GitLab">
                       <ExternalLinkIcon />
                     </button>
                   ) : null}
                 </>
               ) : (
-                <button className="btn btn-sm" disabled={busy} onClick={() => void onRunAction('run_pipeline')}>
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void onRunAction('run_pipeline')}>
                   Run pipeline
                 </button>
               )}
@@ -238,11 +252,11 @@ export function SummaryTab({
           </div>
 
           {!detail.pipeline ? (
-            <div className="card-pad" style={{ color: 'var(--fg-secondary)' }}>
+            <div className="card-pad" style={{ color: 'var(--fg-secondary)', fontSize: 'var(--text-sm)' }}>
               No pipeline recorded for this merge request yet.
             </div>
           ) : detail.pipeline.jobs.length === 0 ? (
-            <div className="card-pad" style={{ color: 'var(--fg-secondary)' }}>
+            <div className="card-pad" style={{ color: 'var(--fg-secondary)', fontSize: 'var(--text-sm)' }}>
               No jobs found for pipeline #{detail.pipeline.id}.
             </div>
           ) : (
@@ -256,37 +270,40 @@ export function SummaryTab({
                   <div key={job.id}>
                     <div className="job-row">
                       <button
+                        type="button"
                         className="btn btn-ghost"
                         style={{ flex: 1, justifyContent: 'flex-start', padding: '2px 4px', minWidth: 0 }}
                         onClick={() => toggleJob(job)}
                       >
                         <PipelineGlyph status={job.status} />
-                        <span className="pill mono">{job.stage}</span>
+                        <span className="job-stage">{job.stage}</span>
                         <span className="truncate" style={{ fontWeight: 500, color: 'var(--fg-primary)' }}>
                           {job.name}
                         </span>
-                        {job.allowFailure ? <span className="pill">allow failure</span> : null}
-                        <span className="mono" style={{ marginLeft: 'auto', color: 'var(--fg-tertiary)' }}>
+                        {job.allowFailure ? (
+                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>allow failure</span>
+                        ) : null}
+                        <span className="mono" style={{ marginLeft: 'auto', color: 'var(--fg-tertiary)', fontSize: 'var(--text-xs)' }}>
                           {job.seconds !== undefined ? `${job.seconds}s` : '—'}
                         </span>
                       </button>
 
-                      <div className="row" style={{ gap: 4, flexShrink: 0 }}>
-                        <button className="btn btn-sm" onClick={() => toggleJob(job)}>
+                      <div className="row-nowrap" style={{ gap: 4, flexShrink: 0 }}>
+                        <button type="button" className={`btn btn-xs ${isExpanded ? 'btn-active' : ''}`} onClick={() => toggleJob(job)}>
                           {isExpanded ? 'Hide log' : 'Log'}
                         </button>
                         {job.status === 'failed' || job.status === 'canceled' ? (
-                          <button className="btn btn-sm" disabled={busy} onClick={() => void onRunAction('retry_job', { jobId: job.id })}>
+                          <button type="button" className="btn btn-xs" disabled={busy} onClick={() => void onRunAction('retry_job', { jobId: job.id })}>
                             Retry
                           </button>
                         ) : null}
                         {job.status === 'manual' ? (
-                          <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void onRunAction('play_job', { jobId: job.id })}>
+                          <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => void onRunAction('play_job', { jobId: job.id })}>
                             Play
                           </button>
                         ) : null}
                         {job.status === 'running' || job.status === 'pending' ? (
-                          <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => void onRunAction('cancel_job', { jobId: job.id })}>
+                          <button type="button" className="btn btn-xs btn-danger" disabled={busy} onClick={() => void onRunAction('cancel_job', { jobId: job.id })}>
                             Cancel
                           </button>
                         ) : null}
@@ -296,22 +313,36 @@ export function SummaryTab({
                     {isExpanded ? (
                       <div className="log-box">
                         <div className="row-between">
-                          <span className="mono" style={{ color: 'var(--fg-secondary)' }}>
+                          <span className="mono" style={{ color: 'var(--fg-secondary)', fontSize: 'var(--text-xs)' }}>
                             Job #{job.id} · {job.name}
                           </span>
-                          <div className="seg-group">
-                            {(['errors', 'tail', 'full'] as const).map((m) => (
+                          <div className="row" style={{ gap: 6 }}>
+                            {logText && onCopyText ? (
                               <button
-                                key={m}
-                                className={`seg-btn ${logMode === m ? 'active' : ''}`}
-                                onClick={() => void fetchLog(job.id, m)}
+                                type="button"
+                                className="btn btn-xs"
+                                onClick={() => onCopyText(logText, 'Copied job log')}
+                                title="Copy visible log excerpt"
                               >
-                                {m[0]!.toUpperCase() + m.slice(1)}
+                                <CopyIcon />
+                                Copy log
                               </button>
-                            ))}
+                            ) : null}
+                            <div className="seg-group">
+                              {(['errors', 'tail', 'full'] as const).map((m) => (
+                                <button
+                                  type="button"
+                                  key={m}
+                                  className={`seg-btn ${logMode === m ? 'active' : ''}`}
+                                  onClick={() => void fetchLog(job.id, m)}
+                                >
+                                  {m[0]!.toUpperCase() + m.slice(1)}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                        <pre className="log-pre">{isLoading ? 'Loading job log…' : logText ?? 'Click a mode above to load the log.'}</pre>
+                        <pre className="log-pre scroller">{isLoading ? 'Loading job log…' : logText ?? 'Select a mode above to load the log.'}</pre>
                       </div>
                     ) : null}
                   </div>
@@ -320,7 +351,9 @@ export function SummaryTab({
 
               {detail.pipeline.downstream.length > 0 ? (
                 <div className="card-pad" style={{ borderTop: '1px solid var(--bd-primary)' }}>
-                  <div style={{ color: 'var(--fg-secondary)', marginBottom: 6, fontWeight: 500 }}>Downstream pipelines</div>
+                  <div className="section-heading" style={{ marginBottom: 6 }}>
+                    Downstream pipelines
+                  </div>
                   <div className="row" style={{ gap: 6 }}>
                     {detail.pipeline.downstream.map((d) => (
                       <span key={`${d.stage}-${d.name}`} className="pill">
@@ -334,7 +367,7 @@ export function SummaryTab({
               ) : null}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   )

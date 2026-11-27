@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 - 2026-11-27
+
+- Fix collapsed/clipped diff cards in the **Code** tab caused by flex shrinking on `overflow: hidden` cards inside `.diff-scroll`: switch file cards to `flex-shrink: 0` with `overflow: clip`, add sticky file headers, defer off-screen file cards (`content-visibility: auto`), and pin inline review threads inside the visible horizontal viewport when long lines scroll.
+- Replace the flat Changed Files list with a path-compressed collapsible directory tree (`buildDiffFileTree`), quick file filter, per-file comment indicators, both `+add` / `-del` stats, split muted directory + bold filename headers, soft line-wrap toggle, Collapse/Expand all controls, and full line-comment support on both sides of Split diffs.
+- Streamline detail-pane vertical chrome by consolidating the header, branch flow (`source → target` with click-to-copy), Worktree popover chip (removing the duplicate `Sync` button and permanent path banner), secondary MR action overflow menu (`Draft`, `Rebase`), and unified underline sub-tabs + pipeline jump + Agent Handoff bar.
+- Redesign the MR sidebar with a symmetrical 2×2 filter grid, `/` search shortcut, Reset filters button, smart redundant project-name hiding when viewing a single repository, cleaner 2-to-3 line MR row hierarchy with left accent selection bar, and container-query responsive stacking on narrow panes.
+- Migrate Merge confirmation and Save View modals to native `<dialog>` elements (`showModal()`, `closedby="any"` with pointer fallback, `::backdrop` scroll containment), standardize thin scrollbars (`scrollbar-color` / `scrollbar-width` with WebKit fallback), auto-load error logs for initially expanded failed CI jobs with a Copy log action, and support `Cmd/Ctrl+Enter` comment submission.
+
 ## 0.5.1 - 2026-11-26
 
 - Fix missing Agent Handoff action buttons (`Review MR`, `Fix failing pipeline`, `Address N threads`) in hosts that advertise `updateModelContext` without `message`: render the buttons whenever `message` or `updateModelContext` is available, probe `ui/message` once with a 5s timeout (caching supported/rejected state), and fall back gracefully to attaching the prompt to chat context and/or copying it to the clipboard.

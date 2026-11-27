@@ -41,46 +41,44 @@ export function DiscussionsTab({
   }
 
   return (
-    <div className="detail-scroll">
-      <div className="stack" style={{ maxWidth: 880 }}>
+    <div className="detail-scroll scroller">
+      <div className="stack" style={{ maxWidth: 920 }}>
         {/* Pending private draft notes */}
         {detail.drafts.length > 0 ? (
-          <div
-            className="card card-pad stack"
+          <section
+            className="card"
             style={{
-              gap: 10,
               borderColor: 'color-mix(in srgb, var(--fg-info) 45%, transparent)',
               background: 'color-mix(in srgb, var(--fg-info) 6%, var(--bg-secondary))',
             }}
           >
-            <div className="row-between">
-              <div className="row" style={{ gap: 6 }}>
+            <div className="card-header" style={{ background: 'color-mix(in srgb, var(--fg-info) 10%, var(--bg-secondary))' }}>
+              <div className="row" style={{ gap: 7 }}>
                 <span className="pill pill-info">Draft review</span>
                 <strong>
                   {detail.drafts.length} private draft note{detail.drafts.length === 1 ? '' : 's'}
                 </strong>
               </div>
-              <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void onRunAction('publish_all_drafts')}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void onRunAction('publish_all_drafts')}>
                 Publish all drafts
               </button>
             </div>
-            <div className="stack" style={{ gap: 6 }}>
-              {detail.drafts.map((dr) => (
+            <div>
+              {detail.drafts.map((dr, idx) => (
                 <div
                   key={dr.id}
-                  className="row-between"
+                  className="row-between card-pad"
                   style={{
-                    padding: '8px 10px',
-                    borderRadius: 6,
                     background: 'var(--bg-primary)',
-                    border: '1px solid var(--bd-primary)',
+                    borderTop: idx > 0 ? '1px solid var(--bd-subtle)' : undefined,
                     alignItems: 'flex-start',
                   }}
                 >
                   <div className="stack" style={{ gap: 4, minWidth: 0, flex: 1 }}>
                     {dr.at?.path ? (
                       <button
-                        className="btn btn-ghost btn-sm mono"
+                        type="button"
+                        className="btn btn-ghost btn-xs mono"
                         style={{ padding: 0, justifyContent: 'flex-start', color: 'var(--fg-info)' }}
                         onClick={() => onJumpToFile(dr.at!.path)}
                       >
@@ -90,22 +88,22 @@ export function DiscussionsTab({
                     ) : null}
                     <MarkdownView source={dr.body} onOpenLink={onOpenLink} />
                   </div>
-                  <button className="btn btn-sm" disabled={busy} onClick={() => void onRunAction('publish_draft', { noteId: dr.id })}>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => void onRunAction('publish_draft', { noteId: dr.id })}>
                     Publish
                   </button>
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         ) : null}
 
         {/* Filter bar */}
         <div className="row-between">
-          <div className="seg-group">
-            <button className={`seg-btn ${filter === 'unresolved' ? 'active' : ''}`} onClick={() => setFilter('unresolved')}>
+          <div className="seg-group" role="group" aria-label="Filter discussions">
+            <button type="button" className={`seg-btn ${filter === 'unresolved' ? 'active' : ''}`} onClick={() => setFilter('unresolved')}>
               Unresolved ({unresolvedCount})
             </button>
-            <button className={`seg-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+            <button type="button" className={`seg-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
               All ({detail.discussions.length})
             </button>
           </div>
@@ -113,25 +111,27 @@ export function DiscussionsTab({
 
         {/* Threads */}
         {visible.length === 0 ? (
-          <div className="card card-pad" style={{ textAlign: 'center', color: 'var(--fg-secondary)', padding: 24 }}>
+          <div className="card card-pad" style={{ textAlign: 'center', color: 'var(--fg-secondary)', padding: 28 }}>
             {filter === 'unresolved' ? 'No unresolved discussions.' : 'No discussions on this merge request yet.'}
           </div>
         ) : (
           visible.map((th) => (
-            <div key={th.id} className="card">
+            <article key={th.id} className="card">
               <div className="card-header">
                 <div className="row" style={{ gap: 8, minWidth: 0 }}>
                   {th.at?.path ? (
                     <button
-                      className="btn btn-ghost btn-sm mono truncate"
-                      style={{ padding: 0, color: 'var(--fg-info)', maxWidth: 420 }}
+                      type="button"
+                      className="btn btn-ghost btn-xs mono truncate"
+                      style={{ padding: 0, color: 'var(--fg-info)', maxWidth: 460 }}
                       onClick={() => onJumpToFile(th.at!.path)}
+                      title={`Jump to ${th.at.path} in Code tab`}
                     >
                       {th.at.path}
                       {th.at.line ? `:${th.at.line}` : th.at.oldLine ? `:L${th.at.oldLine}` : ''}
                     </button>
                   ) : (
-                    <span style={{ color: 'var(--fg-secondary)' }}>General discussion</span>
+                    <span style={{ color: 'var(--fg-secondary)', fontSize: 'var(--text-sm)', fontWeight: 500 }}>General discussion</span>
                   )}
                   {th.resolvable ? (
                     <span className={`pill ${th.resolved ? 'pill-success' : 'pill-warning'}`}>
@@ -141,7 +141,8 @@ export function DiscussionsTab({
                 </div>
                 {th.resolvable ? (
                   <button
-                    className="btn btn-sm"
+                    type="button"
+                    className="btn btn-xs"
                     disabled={busy}
                     onClick={() => void onRunAction(th.resolved ? 'unresolve' : 'resolve', { discussionId: th.id })}
                   >
@@ -157,34 +158,45 @@ export function DiscussionsTab({
                     className="card-pad stack"
                     style={{
                       gap: 5,
-                      borderTop: idx > 0 ? '1px solid var(--bd-primary)' : undefined,
+                      borderTop: idx > 0 ? '1px solid var(--bd-subtle)' : undefined,
                       background: 'var(--bg-primary)',
                     }}
                   >
                     <div className="row" style={{ gap: 6 }}>
-                      <Avatar username={n.author} size={16} />
+                      <Avatar username={n.author} size={18} />
                       <strong>{n.author}</strong>
-                      <span style={{ color: 'var(--fg-tertiary)' }}>{formatRelativeTime(n.createdAt)}</span>
+                      <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-xs)' }}>{formatRelativeTime(n.createdAt)}</span>
                     </div>
-                    <div style={{ paddingLeft: 22 }}>
+                    <div style={{ paddingLeft: 24 }}>
                       <MarkdownView source={n.body} onOpenLink={onOpenLink} />
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="card-pad" style={{ borderTop: '1px solid var(--bd-primary)' }}>
+              <div className="card-pad" style={{ borderTop: '1px solid var(--bd-subtle)' }}>
                 {replyingId === th.id ? (
                   <div className="stack" style={{ gap: 8 }}>
                     <textarea
                       className="textarea"
                       rows={2}
-                      placeholder="Write a reply…"
+                      autoFocus
+                      placeholder="Write a reply… (Cmd/Ctrl+Enter to post)"
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && replyText.trim() && !busy) {
+                          e.preventDefault()
+                          void submitReply(th.id, false)
+                        } else if (e.key === 'Escape') {
+                          setReplyingId(null)
+                          setReplyText('')
+                        }
+                      }}
                     />
                     <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                       <button
+                        type="button"
                         className="btn btn-sm"
                         onClick={() => {
                           setReplyingId(null)
@@ -193,18 +205,19 @@ export function DiscussionsTab({
                       >
                         Cancel
                       </button>
-                      <button className="btn btn-sm" disabled={busy || !replyText.trim()} onClick={() => void submitReply(th.id, true)}>
+                      <button type="button" className="btn btn-sm" disabled={busy || !replyText.trim()} onClick={() => void submitReply(th.id, true)}>
                         Save draft
                       </button>
-                      <button className="btn btn-sm btn-primary" disabled={busy || !replyText.trim()} onClick={() => void submitReply(th.id, false)}>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={busy || !replyText.trim()} onClick={() => void submitReply(th.id, false)}>
                         Reply
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button
+                    type="button"
                     className="btn btn-ghost btn-sm"
-                    style={{ padding: 0 }}
+                    style={{ padding: '2px 4px' }}
                     onClick={() => {
                       setReplyingId(th.id)
                       setReplyText('')
@@ -214,29 +227,35 @@ export function DiscussionsTab({
                   </button>
                 )}
               </div>
-            </div>
+            </article>
           ))
         )}
 
         {/* New general comment */}
-        <div className="card card-pad stack" style={{ gap: 8 }}>
-          <strong>New comment</strong>
+        <section className="card card-pad stack" style={{ gap: 8 }}>
+          <h3 className="section-heading">New comment</h3>
           <textarea
             className="textarea"
             rows={3}
-            placeholder="Leave a general review comment (Markdown supported)…"
+            placeholder="Leave a general review comment (Markdown supported · Cmd/Ctrl+Enter to post)…"
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && newComment.trim() && !busy) {
+                e.preventDefault()
+                void submitComment(false)
+              }
+            }}
           />
           <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-            <button className="btn" disabled={busy || !newComment.trim()} onClick={() => void submitComment(true)}>
+            <button type="button" className="btn btn-sm" disabled={busy || !newComment.trim()} onClick={() => void submitComment(true)}>
               Save as draft
             </button>
-            <button className="btn btn-primary" disabled={busy || !newComment.trim()} onClick={() => void submitComment(false)}>
+            <button type="button" className="btn btn-sm btn-primary" disabled={busy || !newComment.trim()} onClick={() => void submitComment(false)}>
               Post comment
             </button>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   )
