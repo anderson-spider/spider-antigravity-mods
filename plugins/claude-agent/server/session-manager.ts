@@ -1422,14 +1422,14 @@ export class SessionManager {
         this.finalizeStreamingItems(session)
         session.status = 'idle'
         session.updatedAt = nowIso()
-        await this.deps.store
-          .upsertSession(toPersisted(session))
-          .catch(err => this.deps.log?.(`claude-agent: store persist failed: ${err instanceof Error ? err.message : String(err)}`))
-        if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         const stopReason = wasCancelling ? 'cancelled' : result?.stopReason ?? 'end_turn'
         if (shouldReplyToChat && stopReason !== 'cancelled') {
           this.queuePendingChatReply(session, 'completed')
         }
+        await this.deps.store
+          .upsertSession(toPersisted(session))
+          .catch(err => this.deps.log?.(`claude-agent: store persist failed: ${err instanceof Error ? err.message : String(err)}`))
+        if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         this.emitMeta(session)
         this.pushEvent(
           session,
@@ -1477,15 +1477,15 @@ export class SessionManager {
         session.status = 'error'
         session.updatedAt = nowIso()
         this.appendSystemItem(session, 'error', msg)
+        if (shouldReplyToChat) {
+          this.queuePendingChatReply(session, 'error', msg)
+        }
         await this.deps.store
           .upsertSession(toPersisted(session))
           .catch(persistErr =>
             this.deps.log?.(`claude-agent: store persist failed: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`),
           )
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
-        if (shouldReplyToChat) {
-          this.queuePendingChatReply(session, 'error', msg)
-        }
         this.emitMeta(session)
         this.pushEvent(
           session,

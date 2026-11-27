@@ -106,13 +106,10 @@ test('claude_ask enforces plan mode and auto-declines permission prompts without
 
 test('claude_open with prompt dispatches async turn and supports reconnect + session/load', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-open-'))
-  t.after(async () => {
-    await rm(dir, { recursive: true, force: true })
-  })
-
   const manager = createTestManager(dir, dir)
   t.after(async () => {
     await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
   })
 
   const openRes = await manager.handleOpenTool({ prompt: 'Summarize project', cwd: dir, mode: 'plan' }, [dir])
