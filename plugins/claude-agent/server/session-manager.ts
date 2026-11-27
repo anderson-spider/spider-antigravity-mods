@@ -882,7 +882,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.1' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.3.2' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },

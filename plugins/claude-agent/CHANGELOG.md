@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.2] - 2026-11-27
+
+### Fixed
+
+- Fixed header workspace chip (`.session-cwd-chip`) clipping and missing folder icon by keeping `flex-shrink: 0` on the icon, moving `.truncate` to an inner text span so ellipsis renders cleanly, and widening `max-width` (`240px` / `140px` on narrow panes).
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed
