@@ -4,7 +4,7 @@ Hardened, zero-dependency MCP plugin for Google Antigravity providing parallel m
 
 ## Tools
 
-The `batch-tools` MCP server exposes four tools with water-filling inline output budgeting (`<= 8,800` UTF-8 bytes by default so responses stay inline):
+The `batch-tools` MCP server exposes four eager tools (paired with a lean `rules/AGENTS.md` routing rule and `skills/batch-tools/SKILL.md`) with water-filling inline output budgeting (`<= 8,800` UTF-8 bytes by default so responses stay inline):
 
 - **`batch_search`**: Run up to 20 parallel `text`, `regex`, `glob`, or `fuzzy` queries in one tool call using `rg` (`shell: false`, `--no-config`, `--no-follow`, `--max-filesize 2M`) with deterministic pure-Node fallback when `rg` is unavailable.
 - **`quick_outline`**: Extract structural symbol line-range outlines for up to 40 files in one call across TypeScript/JavaScript, Python, Go, Rust, C/C++/Java/Kotlin/C#, HTML/Vue/Svelte, CSS, Markdown, JSON, and YAML.

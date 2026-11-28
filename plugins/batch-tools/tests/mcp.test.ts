@@ -240,7 +240,7 @@ describe('MCP stdio E2E (server/main.ts)', () => {
         serverInfo: { name: string; version: string }
       }
       assert.equal(initResult.serverInfo.name, 'batch-tools')
-      assert.equal(initResult.serverInfo.version, '0.1.1')
+      assert.equal(initResult.serverInfo.version, '0.1.2')
       assert.ok(initResult.capabilities.tools)
       assert.ok(initResult.capabilities.resources)
       client.notify('notifications/initialized')
