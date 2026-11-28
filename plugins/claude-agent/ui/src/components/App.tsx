@@ -27,7 +27,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.4.0' },
+    appInfo: { name: 'claude-agent-ui', version: '0.5.0' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -455,16 +455,17 @@ export function App() {
     if (res.ok && res.data?.session) updateSessionSnapshot(res.data.session)
   }
 
-  const handleSaveDefaults = async (modeId: string, modelId?: string) => {
+  const handleSaveDefaults = async (modeId: string, modelId?: string, effort?: string) => {
     if (!bridge) return
     const res = await bridge.callTool<{ preferences: UiPreferences }>('claude_ui_fs', {
       action: 'save_prefs',
       defaultModeId: modeId,
       ...(modelId ? { defaultModelId: modelId } : {}),
+      ...(effort ? { defaultEffort: effort } : {}),
     })
     if (res.ok && res.data?.preferences) {
       setPreferences(res.data.preferences)
-      pushToast('Default mode & model saved', undefined, 'success')
+      pushToast('Default session options saved', undefined, 'success')
     } else if (!res.ok) {
       pushToast('Could not save defaults', res.text, 'error')
     }
@@ -758,7 +759,7 @@ export function App() {
               onSetMode={modeId => void handleSetMode(modeId)}
               onSetModel={modelId => void handleSetModel(modelId)}
               onSetConfig={(cfgId, val) => void handleSetConfig(cfgId, val)}
-              onSaveDefaults={(modeId, modelId) => void handleSaveDefaults(modeId, modelId)}
+              onSaveDefaults={(modeId, modelId, effort) => void handleSaveDefaults(modeId, modelId, effort)}
               onAttachContext={() => void handleAttachContext()}
               onSendToHostChat={() => void handleSendToHostChat()}
             />

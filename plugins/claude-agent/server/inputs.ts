@@ -1,7 +1,7 @@
 // Tool input interfaces validated against JSON Schemas at compile time via SchemaFor<T>.
 
-export type OpenMode = 'default' | 'auto' | 'acceptEdits' | 'plan'
-export type AllMode = OpenMode | 'bypassPermissions'
+export type OpenMode = 'auto' | 'bypassPermissions'
+export type AllMode = OpenMode
 
 export type ToolInputs = {
   claude_open: {
@@ -10,6 +10,7 @@ export type ToolInputs = {
     prompt?: string
     mode?: OpenMode
     model?: string
+    effort?: string
     replyToChat?: boolean
   }
   claude_ask: {
@@ -17,6 +18,7 @@ export type ToolInputs = {
     cwd?: string
     sessionId?: string
     model?: string
+    effort?: string
     timeoutSeconds?: number
   }
   claude_session: {
@@ -86,5 +88,6 @@ export type ToolInputs = {
     lastCwd?: string
     defaultModeId?: string
     defaultModelId?: string
+    defaultEffort?: string
   }
 }

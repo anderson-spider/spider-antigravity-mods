@@ -6,6 +6,7 @@ type SessionRecord = {
   cwd: string
   modeId: string
   modelId: string
+  effort: string
   activeTurn?: { cancelled: boolean }
 }
 
@@ -42,6 +43,48 @@ function makeModes(currentModeId: string) {
       { id: 'bypassPermissions', name: 'Bypass Permissions' },
     ],
   }
+}
+
+function makeConfigOptions(rec: SessionRecord): Record<string, unknown>[] {
+  const effortOptions =
+    process.env.FAKE_ACP_NO_HIGH_EFFORT === '1'
+      ? [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+        ]
+      : [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'max', name: 'Max' },
+        ]
+  const configOptions: Record<string, unknown>[] = [
+    {
+      id: 'thought_level',
+      name: 'Thinking',
+      category: 'thought_level',
+      type: 'select',
+      currentValue: rec.effort,
+      options: effortOptions,
+    },
+  ]
+  if (process.env.FAKE_ACP_MODE_CONFIG === '1') {
+    configOptions.push({
+      id: 'permission_mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue: rec.modeId,
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'auto', name: 'Auto' },
+        { value: 'acceptEdits', name: 'Accept Edits' },
+        { value: 'plan', name: 'Plan' },
+        { value: 'bypassPermissions', name: 'Bypass Permissions' },
+      ],
+    })
+  }
+  return configOptions
 }
 
 function makeModels(currentModelId: string) {
@@ -415,36 +458,9 @@ createInterface({ input: process.stdin }).on('line', line => {
         cwd,
         modeId: 'default',
         modelId: 'claude-sonnet-4-5',
+        effort: 'medium',
       }
       sessions.set(sessionId, rec)
-      const configOptions: Record<string, unknown>[] = [
-        {
-          id: 'thought_level',
-          name: 'Thinking',
-          category: 'thought_level',
-          type: 'select',
-          currentValue: 'medium',
-          options: [
-            { value: 'low', name: 'Low' },
-            { value: 'medium', name: 'Medium' },
-          ],
-        },
-      ]
-      if (process.env.FAKE_ACP_MODE_CONFIG === '1') {
-        configOptions.push({
-          id: 'permission_mode',
-          name: 'Mode',
-          category: 'mode',
-          type: 'select',
-          currentValue: rec.modeId,
-          options: [
-            { value: 'default', name: 'Default' },
-            { value: 'auto', name: 'Auto' },
-            { value: 'acceptEdits', name: 'Accept Edits' },
-            { value: 'plan', name: 'Plan' },
-          ],
-        })
-      }
       write({
         jsonrpc: '2.0',
         id,
@@ -452,7 +468,7 @@ createInterface({ input: process.stdin }).on('line', line => {
           sessionId,
           modes: makeModes(rec.modeId),
           models: makeModels(rec.modelId),
-          configOptions,
+          configOptions: makeConfigOptions(rec),
         },
       })
       return
@@ -470,6 +486,7 @@ createInterface({ input: process.stdin }).on('line', line => {
           cwd: String(params.cwd || process.cwd()),
           modeId: 'default',
           modelId: 'claude-sonnet-4-5',
+          effort: 'medium',
         }
         sessions.set(sessionId, rec)
       }
@@ -531,8 +548,8 @@ createInterface({ input: process.stdin }).on('line', line => {
       }
       const nextMode = String(params.modeId ?? 'default')
       const finishSetMode = () => {
-        if (process.env.FAKE_ACP_REJECT_PLAN === '1' && nextMode === 'plan') {
-          write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'plan mode disabled in test' } })
+        if (process.env.FAKE_ACP_REJECT_AUTO === '1' && nextMode === 'auto') {
+          write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'auto mode disabled in test' } })
           return
         }
         if (process.env.FAKE_ACP_AUTO_REQUIRES_OPUS === '1' && nextMode === 'auto' && !rec.modelId.includes('opus')) {
@@ -564,9 +581,20 @@ createInterface({ input: process.stdin }).on('line', line => {
       const rec = sessions.get(String(params.sessionId ?? ''))
       const configId = String(params.configId ?? '')
       const value = String(params.value ?? '')
+      if (rec && configId === 'thought_level') {
+        rec.effort = value
+        write({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            configOptions: makeConfigOptions(rec),
+          },
+        })
+        return
+      }
       if (rec && configId === 'permission_mode') {
-        if (process.env.FAKE_ACP_REJECT_PLAN === '1' && value === 'plan') {
-          write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'plan mode disabled in test' } })
+        if (process.env.FAKE_ACP_REJECT_AUTO === '1' && value === 'auto') {
+          write({ jsonrpc: '2.0', id, error: { code: -32602, message: 'auto mode disabled in test' } })
           return
         }
         rec.modeId =
@@ -577,21 +605,7 @@ createInterface({ input: process.stdin }).on('line', line => {
           jsonrpc: '2.0',
           id,
           result: {
-            configOptions: [
-              {
-                id: 'permission_mode',
-                name: 'Mode',
-                category: 'mode',
-                type: 'select',
-                currentValue: rec.modeId,
-                options: [
-                  { value: 'default', name: 'Default' },
-                  { value: 'auto', name: 'Auto' },
-                  { value: 'acceptEdits', name: 'Accept Edits' },
-                  { value: 'plan', name: 'Plan' },
-                ],
-              },
-            ],
+            configOptions: makeConfigOptions(rec),
           },
         })
         return

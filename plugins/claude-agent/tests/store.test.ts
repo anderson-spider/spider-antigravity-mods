@@ -12,7 +12,7 @@ test('store persists sessions, preferences, recent cwds atomically with 0600 mod
   })
 
   const store = createStore(dir)
-  await store.savePreferences({ sidebarWidthPct: 35, defaultModeId: 'plan' })
+  await store.savePreferences({ sidebarWidthPct: 35, defaultModeId: 'plan', defaultEffort: 'max' })
   await store.recordCwd('/tmp/proj-a')
   await store.recordCwd('/tmp/proj-b')
   await store.upsertSession({
@@ -38,7 +38,8 @@ test('store persists sessions, preferences, recent cwds atomically with 0600 mod
   // Reload from disk via a fresh store instance
   const reloaded = await createStore(dir).load()
   assert.equal(reloaded.preferences.sidebarWidthPct, 35)
-  assert.equal(reloaded.preferences.defaultModeId, 'plan')
+  assert.equal(reloaded.preferences.defaultModeId, 'auto')
+  assert.equal(reloaded.preferences.defaultEffort, 'max')
   assert.deepEqual(reloaded.recentCwds, ['/tmp/proj-b', '/tmp/proj-a'])
   assert.equal(reloaded.sessions.length, 1)
   assert.equal(reloaded.sessions[0]!.sessionId, 'sess-1')
@@ -91,7 +92,7 @@ test('store persists archivedAt and keeps active sessions ahead of archived sess
   assert.equal(reloaded.sessions[1]!.archivedAt, '2026-01-03T01:00:00.000Z')
 })
 
-test('store defaults to auto mode and opus model and fills missing preference fields on existing state', async t => {
+test('store defaults to auto mode, opus model, and high effort, and sanitizes legacy preference fields on existing state', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-store-defaults-'))
   t.after(async () => {
     await rm(dir, { recursive: true, force: true })
@@ -100,21 +101,24 @@ test('store defaults to auto mode and opus model and fills missing preference fi
   const fresh = await createStore(dir).load()
   assert.equal(fresh.preferences.defaultModeId, 'auto')
   assert.equal(fresh.preferences.defaultModelId, 'opus')
+  assert.equal(fresh.preferences.defaultEffort, 'high')
 
-  // Legacy state file without defaultModelId should inherit opus default
+  // Legacy state file with removed plan mode and missing model/effort should migrate cleanly
   await writeFile(
     join(dir, 'claude-agent-state.json'),
-    JSON.stringify({ version: 1, preferences: { sidebarWidthPct: 30, defaultModeId: 'auto' }, recentCwds: [], sessions: [] }),
+    JSON.stringify({ version: 1, preferences: { sidebarWidthPct: 30, defaultModeId: 'plan' }, recentCwds: [], sessions: [] }),
     'utf8',
   )
   const migrated = await createStore(dir).load()
   assert.equal(migrated.preferences.sidebarWidthPct, 30)
   assert.equal(migrated.preferences.defaultModeId, 'auto')
   assert.equal(migrated.preferences.defaultModelId, 'opus')
+  assert.equal(migrated.preferences.defaultEffort, 'high')
 
-  // Explicit override persists
-  await createStore(dir).savePreferences({ defaultModeId: 'acceptEdits', defaultModelId: 'sonnet' })
+  // Explicit overrides persist (while disallowed defaultModeId clamps to auto)
+  await createStore(dir).savePreferences({ defaultModeId: 'acceptEdits', defaultModelId: 'sonnet', defaultEffort: 'low' })
   const updated = await createStore(dir).load()
-  assert.equal(updated.preferences.defaultModeId, 'acceptEdits')
+  assert.equal(updated.preferences.defaultModeId, 'auto')
   assert.equal(updated.preferences.defaultModelId, 'sonnet')
+  assert.equal(updated.preferences.defaultEffort, 'low')
 })

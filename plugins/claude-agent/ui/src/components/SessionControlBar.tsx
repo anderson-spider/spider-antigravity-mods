@@ -12,12 +12,17 @@ type SessionControlBarProps = {
   onSetMode: (modeId: string) => void
   onSetModel: (modelId: string) => void
   onSetConfig: (configId: string, value: string) => void
-  onSaveDefaults: (modeId: string, modelId?: string) => void
+  onSaveDefaults: (modeId: string, modelId?: string, effort?: string) => void
   onAttachContext: () => void
   onSendToHostChat: () => void
 }
 
 const POPOVER_ID = 'session-options-popover'
+const ALLOWED_MODE_IDS = new Set(['auto', 'bypassPermissions'])
+const FALLBACK_MODES = [
+  { id: 'auto', name: 'Auto' },
+  { id: 'bypassPermissions', name: 'Bypass Permissions' },
+]
 
 export function SessionControlBar({
   session,
@@ -33,17 +38,13 @@ export function SessionControlBar({
   onAttachContext,
   onSendToHostChat,
 }: SessionControlBarProps) {
-  const modes =
-    session.availableModes.length > 0
-      ? session.availableModes
-      : [
-          { id: 'auto', name: 'Auto' },
-          { id: 'default', name: 'Default' },
-          { id: 'acceptEdits', name: 'Accept Edits' },
-          { id: 'plan', name: 'Plan (Read-Only)' },
-        ]
+  const filteredModes = session.availableModes.filter(m => ALLOWED_MODE_IDS.has(m.id))
+  const modes = filteredModes.length > 0 ? filteredModes : FALLBACK_MODES
 
-  const currentModeId = session.modeId ?? modes.find(m => m.id === 'auto')?.id ?? modes[0]?.id ?? 'auto'
+  const currentModeId =
+    session.modeId && ALLOWED_MODE_IDS.has(session.modeId)
+      ? session.modeId
+      : modes.find(m => m.id === 'auto')?.id ?? modes[0]?.id ?? 'auto'
   const currentModeLabel = modes.find(m => m.id === currentModeId)?.name ?? currentModeId
   const modelConfigOpt = session.configOptions.find(c => c.category === 'model')
   const models =
@@ -56,6 +57,15 @@ export function SessionControlBar({
         : []
   const currentModelId = session.modelId ?? models[0]?.modelId ?? ''
   const currentModelLabel = models.find(m => m.modelId === currentModelId)?.name ?? (currentModelId || undefined)
+  const effortConfigOpt = session.configOptions.find(
+    c => c.category === 'thought_level' || c.id === 'effort' || c.id === 'thought_level',
+  )
+  const currentEffort = effortConfigOpt?.currentValue
+  const currentEffortLabel = effortConfigOpt
+    ? effortConfigOpt.options
+        .flatMap(opt => ('group' in opt ? opt.options : [opt]))
+        .find(opt => opt.value === currentEffort)?.name ?? currentEffort
+    : undefined
   const extraConfigs = session.configOptions.filter(c => c.category !== 'mode' && c.category !== 'model')
 
   const isRunning = session.status === 'running'
@@ -64,7 +74,8 @@ export function SessionControlBar({
   const isBypass = currentModeId === 'bypassPermissions'
   const isCurrentDefault =
     preferences?.defaultModeId === currentModeId &&
-    (!currentModelId || preferences?.defaultModelId === currentModelId)
+    (!currentModelId || preferences?.defaultModelId === currentModelId) &&
+    (!currentEffort || preferences?.defaultEffort === currentEffort)
 
   const statusTone = hasPermissions ? 'warn' : isError ? 'error' : isRunning ? 'running' : 'idle'
   const statusLabel = hasPermissions ? 'Approval needed' : isError ? 'Error' : isRunning ? 'Working' : 'Idle'
@@ -100,7 +111,12 @@ export function SessionControlBar({
         >
           <SlidersIcon size={12} />
           <span className="truncate">{currentModeLabel}</span>
-          {currentModelLabel && <span className="control-model-hint truncate">· {currentModelLabel}</span>}
+          {currentModelLabel && (
+            <span className="control-model-hint truncate">
+              · {currentModelLabel}
+              {currentEffortLabel && currentEffort !== 'default' ? ` (${currentEffortLabel})` : ''}
+            </span>
+          )}
           <ChevronDownIcon size={11} />
         </button>
 
@@ -180,10 +196,10 @@ export function SessionControlBar({
                 isBypass
                   ? 'bypassPermissions cannot be saved as the global default'
                   : isCurrentDefault
-                    ? 'Current mode and model are already saved as default'
-                    : 'Save current mode and model as default for new sessions'
+                    ? 'Current mode, model, and effort are already saved as default'
+                    : 'Save current mode, model, and effort as default for new sessions'
               }
-              onClick={() => onSaveDefaults(currentModeId, currentModelId || undefined)}
+              onClick={() => onSaveDefaults(currentModeId, currentModelId || undefined, currentEffort || undefined)}
             >
               {isCurrentDefault ? 'Saved as default' : 'Save as default'}
             </button>
