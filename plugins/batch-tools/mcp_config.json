@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "batch-tools": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/server/main.ts"
+      ],
+      "tools": {
+        "batch_search": {
+          "eager": true
+        },
+        "quick_outline": {
+          "eager": true
+        },
+        "read_slices": {
+          "eager": true
+        },
+        "apply_edits": {
+          "eager": true
+        }
+      }
+    }
+  }
+}

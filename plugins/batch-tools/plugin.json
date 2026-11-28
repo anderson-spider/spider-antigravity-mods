@@ -1,0 +1,29 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "batch-tools",
+  "displayName": "Batch Tools",
+  "version": "0.1.0",
+  "description": "Hardened, zero-dependency batch search (ripgrep with Node fallback), multi-file symbol outlines and line slices, and atomic multi-file edits with strict workspace confinement and inline byte budgeting.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "anderson-spider",
+    "url": "https://github.com/anderson-spider"
+  },
+  "homepage": "https://github.com/anderson-spider/spider-antigravity-mods/tree/main/plugins/batch-tools",
+  "repository": "https://github.com/anderson-spider/spider-antigravity-mods",
+  "license": "MIT",
+  "keywords": [
+    "batch",
+    "ripgrep",
+    "search",
+    "outline",
+    "edits",
+    "mcp",
+    "security"
+  ],
+  "suggestedPrompts": [
+    "Search across the workspace for all usages of a symbol and related config keys in one batch",
+    "Outline the main server modules and inspect the key handler line ranges",
+    "Preview an atomic multi-file refactor with dryRun before applying it"
+  ]
+}
