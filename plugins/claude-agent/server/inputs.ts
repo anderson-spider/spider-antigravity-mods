@@ -59,7 +59,9 @@ export type ToolInputs = {
     value?: string
     methodId?: string
     replyId?: string
+    replyToken?: string
     clientId?: string
+    error?: string
   }
   claude_ui_prompt: {
     action: 'send' | 'cancel'
@@ -79,6 +81,9 @@ export type ToolInputs = {
     afterCatalogVersion?: number
     waitMs?: number
     clientId?: string
+    canMessage?: boolean
+    replyTokens?: readonly string[]
+    workspaceRoots?: readonly string[]
   }
   claude_ui_fs: {
     action: 'list_dirs' | 'search_files' | 'save_prefs'

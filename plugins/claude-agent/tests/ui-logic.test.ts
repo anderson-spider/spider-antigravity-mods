@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { redactSecrets } from '../server/redact.ts'
 import { computeLineDiff } from '../ui/src/lib/diff.ts'
+import { AUTO_REPLY_BACKOFF_MS, MAX_AUTO_REPLY_ATTEMPTS, ReplyDeliveryTracker } from '../ui/src/lib/reply-delivery.ts'
 import {
   applyPollEvents,
   buildTimelineEntries,
@@ -180,4 +181,47 @@ test('extractLatestTurnResponse joins all assistant blocks from the latest turn 
     { id: 'a3', kind: 'assistant', text: 'Final review report.', timestamp: ts },
   ]
   assert.equal(extractLatestTurnResponse(items), 'Checking files...\n\nFinal review report.')
+})
+
+test('ReplyDeliveryTracker backs off transient sendMessage failures, prevents duplicates, and recovers on focus retry', () => {
+  const tracker = new ReplyDeliveryTracker()
+  const replyId = 'reply-1'
+  const t0 = 1_000_000
+
+  assert.equal(tracker.canAttempt(replyId, t0), true)
+  tracker.markStart(replyId)
+  assert.equal(tracker.canAttempt(replyId, t0), false, 'in-flight reply must not be double-dispatched')
+
+  // First transient failure schedules backoff instead of permanently giving up
+  const fail1 = tracker.markFailed(replyId, 'Host busy', t0)
+  tracker.markFinish(replyId)
+  assert.equal(fail1.exhausted, false)
+  assert.equal(fail1.retryInMs, AUTO_REPLY_BACKOFF_MS[0])
+  assert.equal(tracker.canAttempt(replyId, t0 + 500), false)
+  assert.equal(tracker.canAttempt(replyId, t0 + AUTO_REPLY_BACKOFF_MS[0]), true)
+
+  // Exhaust remaining attempts
+  let now = t0 + AUTO_REPLY_BACKOFF_MS[0]
+  for (let i = 1; i < MAX_AUTO_REPLY_ATTEMPTS; i++) {
+    const out = tracker.markFailed(replyId, `Error #${i + 1}`, now)
+    if (i < MAX_AUTO_REPLY_ATTEMPTS - 1) {
+      assert.equal(out.exhausted, false)
+      now += out.retryInMs!
+    } else {
+      assert.equal(out.exhausted, true)
+      assert.equal(out.retryInMs, null)
+    }
+  }
+  assert.equal(tracker.canAttempt(replyId, now + 60_000), false)
+  assert.ok(tracker.getExhaustedFailure(replyId)?.lastError?.includes('Error #'))
+
+  // Focus/visibility recovery grants a fresh attempt
+  tracker.resetForRetry()
+  assert.equal(tracker.canAttempt(replyId, now + 60_001), true)
+
+  // Once delivered, reply can never be re-sent even after resetForRetry()
+  tracker.markDelivered(replyId)
+  assert.equal(tracker.isDelivered(replyId), true)
+  tracker.resetForRetry()
+  assert.equal(tracker.canAttempt(replyId, now + 120_000), false)
 })

@@ -1,10 +1,12 @@
 // Concurrency-capped MCP App bridge: Antigravity enforces <= 4 in-flight `tools/call` requests per view.
-// We reserve 1 dedicated slot for `claude_ui_poll` and 3 slots for interactive user actions so polling never starves clicks.
+// We enforce total (interactive + poll) <= 4 while always reserving 1 slot for `claude_ui_poll` so polling never starves clicks or exceeds the host cap.
 import type { App } from '@modelcontextprotocol/ext-apps'
 import { z } from 'zod'
 import { pathToFileUri } from './lib/triggers.ts'
 
-const MAX_INTERACTIVE_IN_FLIGHT = 3
+const MAX_TOTAL_IN_FLIGHT = 4
+const RESERVED_POLL_SLOTS = 1
+const MAX_INTERACTIVE_IN_FLIGHT = MAX_TOTAL_IN_FLIGHT - RESERVED_POLL_SLOTS
 const ToggleAuxPaneResult = z.object({ isError: z.boolean().optional() }).passthrough()
 
 export type ToolCallResponse<T = Record<string, unknown>> = {
@@ -16,6 +18,7 @@ export type ToolCallResponse<T = Record<string, unknown>> = {
 export type SendMessageResult = {
   ok: boolean
   conversationId?: string
+  error?: string
 }
 
 export class ServerBridge {
@@ -47,19 +50,34 @@ export class ServerBridge {
     }
   }
 
+  private canAcquireInteractive(): boolean {
+    return (
+      this.interactiveActive < MAX_INTERACTIVE_IN_FLIGHT &&
+      this.interactiveActive + this.pollInFlightCount < MAX_TOTAL_IN_FLIGHT
+    )
+  }
+
+  private drainInteractiveQueue(): void {
+    while (this.interactiveQueue.length > 0 && this.canAcquireInteractive()) {
+      const next = this.interactiveQueue.shift()
+      if (next) {
+        this.interactiveActive++
+        next()
+      }
+    }
+  }
+
   private async acquireInteractive(): Promise<void> {
-    if (this.interactiveActive < MAX_INTERACTIVE_IN_FLIGHT) {
+    if (this.canAcquireInteractive()) {
       this.interactiveActive++
       return
     }
     await new Promise<void>(resolve => this.interactiveQueue.push(resolve))
-    this.interactiveActive++
   }
 
   private releaseInteractive(): void {
     this.interactiveActive = Math.max(0, this.interactiveActive - 1)
-    const next = this.interactiveQueue.shift()
-    if (next) next()
+    this.drainInteractiveQueue()
   }
 
   async callTool<T = Record<string, unknown>>(name: string, args: Record<string, unknown> = {}): Promise<ToolCallResponse<T>> {
@@ -90,9 +108,14 @@ export class ServerBridge {
     afterSeq?: number
     afterCatalogVersion?: number
     waitMs?: number
+    replyTokens?: readonly string[]
+    workspaceRoots?: readonly string[]
   }): Promise<ToolCallResponse<T>> {
     const pollKey = args.sessionId ?? '__catalog__'
-    if (this.pollInFlightCount > 0 && (this.activePollSessionId === pollKey || this.pollInFlightCount >= 2)) {
+    if (
+      (this.pollInFlightCount > 0 && (this.activePollSessionId === pollKey || this.pollInFlightCount >= 2)) ||
+      this.interactiveActive + this.pollInFlightCount >= MAX_TOTAL_IN_FLIGHT
+    ) {
       return { ok: false, text: 'Poll already active' }
     }
     this.pollInFlightCount++
@@ -100,7 +123,11 @@ export class ServerBridge {
     try {
       const result = await this.app.callServerTool({
         name: 'claude_ui_poll',
-        arguments: { ...args, clientId: this.clientId },
+        arguments: {
+          ...args,
+          clientId: this.clientId,
+          canMessage: this.capabilities.canMessage,
+        },
       })
       const text = (result.content ?? [])
         .filter((c): c is { type: 'text'; text: string } => c.type === 'text' && typeof c.text === 'string')
@@ -119,6 +146,7 @@ export class ServerBridge {
     } finally {
       this.pollInFlightCount = Math.max(0, this.pollInFlightCount - 1)
       if (this.pollInFlightCount === 0) this.activePollSessionId = null
+      this.drainInteractiveQueue()
     }
   }
 
@@ -139,7 +167,9 @@ export class ServerBridge {
   }
 
   async sendMessage(text: string, opts?: { target?: 'new' }): Promise<SendMessageResult> {
-    if (!this.capabilities.canMessage) return { ok: false }
+    if (!this.capabilities.canMessage) {
+      return { ok: false, error: 'Host does not advertise ui/message capability on this view.' }
+    }
     try {
       const payload: Record<string, unknown> = {
         role: 'user',
@@ -149,15 +179,21 @@ export class ServerBridge {
         payload._meta = { 'com.google.antigravity/message': { target: 'new' } }
       }
       const res = await this.app.sendMessage(payload as Parameters<App['sendMessage']>[0])
-      if (res?.isError) return { ok: false }
+      if (res?.isError) {
+        const detail =
+          typeof (res as { message?: unknown }).message === 'string'
+            ? ((res as { message?: string }).message as string)
+            : 'Host rejected ui/message (isError: true).'
+        return { ok: false, error: detail }
+      }
       const meta = (res as { _meta?: Record<string, unknown> } | undefined)?._meta?.['com.google.antigravity/message']
       const conversationId =
         meta && typeof meta === 'object' && typeof (meta as Record<string, unknown>).conversationId === 'string'
           ? ((meta as Record<string, unknown>).conversationId as string)
           : undefined
       return { ok: true, ...(conversationId ? { conversationId } : {}) }
-    } catch {
-      return { ok: false }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 

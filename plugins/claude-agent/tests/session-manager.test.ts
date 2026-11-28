@@ -14,7 +14,13 @@ function createTestManager(
   dataDir: string,
   defaultCwd: string,
   extraEnv: Record<string, string> = {},
-  extraDeps: { autoArchiveIdleMs?: number; cancelTimeoutMs?: number; minAskTimeoutMs?: number; minWaitTimeoutMs?: number } = {},
+  extraDeps: {
+    autoArchiveIdleMs?: number
+    cancelTimeoutMs?: number
+    minAskTimeoutMs?: number
+    minWaitTimeoutMs?: number
+    replyOwnerGraceMs?: number
+  } = {},
 ): SessionManager {
   return new SessionManager({
     store: createStore(dataDir),
@@ -1220,4 +1226,143 @@ test('save_prefs rejects bypassPermissions and removed modes as default and appl
   assert.equal(nextSession.modeId, 'auto')
   assert.equal(nextSession.modelId, 'claude-sonnet-4-5')
   assert.equal(nextSession.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'low')
+})
+
+test('auto-reply scopes delivery to the owning view via replyToken, isolates other workspaces and global views, and wakes promptly on release', async t => {
+  const dirA = await mkdtemp(join(tmpdir(), 'claude-agent-scope-a-'))
+  const dirB = await mkdtemp(join(tmpdir(), 'claude-agent-scope-b-'))
+  const manager = createTestManager(dirA, dirA, {}, { replyOwnerGraceMs: 80 })
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dirA, { recursive: true, force: true })
+    await rm(dirB, { recursive: true, force: true })
+  })
+
+  // Start an async turn in dirA
+  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] Scoped review', cwd: dirA }, [dirA])
+  assert.equal(openRes.isError, undefined)
+  const sc = openRes.structuredContent as { activeSession?: { sessionId: string; latestSeq: number }; ownedReplyToken?: string; catalogVersion: number }
+  const sessionAId = sc.activeSession?.sessionId
+  const tokenA = sc.ownedReplyToken
+  assert.ok(sessionAId)
+  assert.ok(tokenA, 'expected ownedReplyToken on claude_open with replyToChat=true')
+
+  // Register three views while the turn is running:
+  // 1. owner aux_pane in dirA with tokenA (polling in a loop across streaming chunks until turn_finished)
+  // 2. unrelated aux_pane in dirB without tokenA
+  // 3. global sidebar view (canMessage: false)
+  const pollOwnerUntilDone = (async () => {
+    let seq = sc.activeSession!.latestSeq
+    let cat = sc.catalogVersion
+    for (let i = 0; i < 20; i++) {
+      const res = await manager.pollEvents(sessionAId, seq, 5_000, 'aux-owner', cat, {
+        canMessage: true,
+        replyTokens: [tokenA!],
+        workspaceRoots: [dirA],
+      })
+      seq = res.latestSeq
+      cat = res.catalogVersion
+      if (res.pendingReplies?.some(r => r.sessionId === sessionAId)) {
+        return res
+      }
+    }
+    return undefined
+  })()
+  const pollOtherPromise = manager.pollEvents(undefined, 0, 1_500, 'aux-other-workspace', sc.catalogVersion, {
+    canMessage: true,
+    workspaceRoots: [dirB],
+  })
+  const pollGlobalPromise = manager.pollEvents(undefined, 0, 1_500, 'global-view', sc.catalogVersion, {
+    canMessage: false,
+    workspaceRoots: [dirA],
+  })
+
+  // Wait for turn to finish
+  const pollOwner = await pollOwnerUntilDone
+  const ownerPending = pollOwner?.pendingReplies?.find(r => r.sessionId === sessionAId)
+  assert.ok(ownerPending, 'owning aux_pane must receive pendingReplies immediately')
+
+  // Other workspace and global view must NOT receive pendingReplies for sessionA
+  const [pollOther, pollGlobal] = await Promise.all([pollOtherPromise, pollGlobalPromise])
+  assert.equal(pollOther.pendingReplies?.some(r => r.sessionId === sessionAId) ?? false, false, 'other workspace must not see reply')
+  assert.equal(pollGlobal.pendingReplies?.some(r => r.sessionId === sessionAId) ?? false, false, 'global view (canMessage: false) must not see reply')
+
+  // Unrelated client must be denied claim_reply while owner is alive
+  const hijackAttempt = (
+    await manager.handleUiSession(
+      { action: 'claim_reply', sessionId: sessionAId!, replyId: ownerPending!.replyId, clientId: 'aux-other-workspace' },
+      [dirB],
+    )
+  ).structuredContent as { claimed: boolean }
+  assert.equal(hijackAttempt.claimed, false)
+
+  // Owner claims, fails transiently, and releases with error reason -> must wake immediately without busy-looping owner
+  const claim1 = (
+    await manager.handleUiSession(
+      {
+        action: 'claim_reply',
+        sessionId: sessionAId!,
+        replyId: ownerPending!.replyId,
+        clientId: 'aux-owner',
+        replyToken: tokenA!,
+      },
+      [dirA],
+    )
+  ).structuredContent as { claimed: boolean; text?: string }
+  assert.equal(claim1.claimed, true)
+
+  const relRes = await manager.handleUiSession(
+    {
+      action: 'release_reply',
+      sessionId: sessionAId!,
+      replyId: ownerPending!.replyId,
+      clientId: 'aux-owner',
+      error: 'Host busy',
+    },
+    [dirA],
+  )
+  assert.equal((relRes.structuredContent as { released: boolean }).released, true)
+
+  // Manual "To Chat" ack_reply without an active claim must clear pendingChatReply cleanly
+  const ackRes = await manager.handleUiSession(
+    {
+      action: 'ack_reply',
+      sessionId: sessionAId!,
+      replyId: ownerPending!.replyId,
+      clientId: 'aux-owner',
+    },
+    [dirA],
+  )
+  assert.equal((ackRes.structuredContent as { acked: boolean }).acked, true)
+  const boot = await manager.getBootstrap({ workspaceRoots: [dirA] })
+  assert.equal(boot.pendingReplies, undefined)
+})
+
+test('auto-reply falls back after owner grace window when already-open pane did not receive ontoolresult and returns immediately on pollEvents', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-fallback-'))
+  const manager = createTestManager(dir, dir, {}, { replyOwnerGraceMs: 60 })
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // Two compatible panes in the same workspace, neither announcing the replyToken (simulating host not resending ontoolresult)
+  const openRes = await manager.handleOpenTool({ prompt: 'Quick check', cwd: dir }, [dir])
+  const sc = openRes.structuredContent as { activeSession?: { sessionId: string; latestSeq: number }; catalogVersion: number }
+  const sessionId = sc.activeSession!.sessionId
+
+  // Wait for fast turn to finish
+  await manager.handleSessionTool({ action: 'list' })
+  await new Promise(r => setTimeout(r, 150))
+
+  // Register two panes in dir: pane-viewer is viewing sessionId, pane-other is on catalog
+  await manager.pollEvents(undefined, 0, 0, 'pane-other', sc.catalogVersion, { canMessage: true, workspaceRoots: [dir] })
+  const t0 = Date.now()
+  const viewerPoll = await manager.pollEvents(sessionId, 9999, 3_000, 'pane-viewer', sc.catalogVersion, {
+    canMessage: true,
+    workspaceRoots: [dir],
+  })
+  // Even with waitMs=3000, an unnotified pendingReply must return immediately instead of sleeping
+  assert.ok(Date.now() - t0 < 1_000, 'pollEvents must return immediately for unnotified pending reply')
+  assert.ok(viewerPoll.pendingReplies?.some(r => r.sessionId === sessionId), 'pane viewing the session should receive fallback pendingReply')
 })

@@ -163,6 +163,7 @@ export type BootstrapPayload = {
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
   pendingReplies?: PendingChatReplyRef[]
+  ownedReplyToken?: string
 }
 
 export type PollEvent =
