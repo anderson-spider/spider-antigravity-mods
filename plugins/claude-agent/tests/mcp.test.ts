@@ -115,10 +115,11 @@ test('MCP server exposes entrypoints, app-only visibility, ui:// resource, and e
   assert.ok(init.result.capabilities.resources)
 
   const toolsResp = (await request('tools/list', {}, 2)) as {
-    result: { tools: { name: string; _meta?: Record<string, unknown> }[] }
+    result: { tools: { name: string; inputSchema?: { properties?: { mode?: { enum?: string[] } } }; _meta?: Record<string, unknown> }[] }
   }
   const openTool = toolsResp.result.tools.find(tool => tool.name === 'claude_open')
   assert.ok(openTool?._meta?.['com.google.antigravity/ui'])
+  assert.deepEqual(openTool?.inputSchema?.properties?.mode?.enum, ['auto', 'bypassPermissions'])
   const uiTools = toolsResp.result.tools.filter(tool => tool.name.startsWith('claude_ui_'))
   assert.equal(uiTools.length, 6)
   for (const uiTool of uiTools) {
@@ -139,7 +140,7 @@ test('MCP server exposes entrypoints, app-only visibility, ui:// resource, and e
     result: { content: { text: string }[]; isError?: boolean }
   }
   assert.equal(askResp.result.isError, undefined)
-  assert.ok(askResp.result.content[0]!.text.includes('Echo (plan): hello from mcp'))
+  assert.ok(askResp.result.content[0]!.text.includes('Echo (auto): hello from mcp'))
 })
 
 test('MCP server handles invalid actions and malformed tool replies without crashing', async t => {

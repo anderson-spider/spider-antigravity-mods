@@ -3,6 +3,7 @@ export type UiPreferences = {
   lastCwd?: string
   defaultModeId?: string
   defaultModelId?: string
+  defaultEffort?: string
 }
 
 export type PersistedUsage = {

@@ -7,6 +7,7 @@ export type UiPreferences = {
   lastCwd?: string
   defaultModeId?: string
   defaultModelId?: string
+  defaultEffort?: string
 }
 
 export type PersistedUsage = {
@@ -40,6 +41,7 @@ export type PersistedSession = {
   archivedAt?: string
   modeId?: string
   modelId?: string
+  effort?: string
   usage?: PersistedUsage
   touchedFiles: string[]
   items: PersistedTimelineItem[]
@@ -65,10 +67,13 @@ const MAX_SESSIONS = 100
 const MAX_ITEMS_PER_SESSION = 300
 const MAX_TEXT_CHARS = 32_000
 
+const ALLOWED_DEFAULT_MODES = new Set(['auto'])
+
 const DEFAULT_PREFERENCES: UiPreferences = {
   sidebarWidthPct: 28,
   defaultModeId: 'auto',
   defaultModelId: 'opus',
+  defaultEffort: 'high',
 }
 
 export function defaultStoreData(): StoreData {
@@ -93,18 +98,25 @@ function clipText(value: unknown, maxLen = MAX_TEXT_CHARS): string | undefined {
 
 function sanitizePreferences(raw: unknown, base: UiPreferences = DEFAULT_PREFERENCES): UiPreferences {
   const obj = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const rawMode = typeof obj.defaultModeId === 'string' ? obj.defaultModeId.trim() : ''
+  const defaultModeId = ALLOWED_DEFAULT_MODES.has(rawMode)
+    ? rawMode
+    : base.defaultModeId && ALLOWED_DEFAULT_MODES.has(base.defaultModeId)
+      ? base.defaultModeId
+      : DEFAULT_PREFERENCES.defaultModeId
   return {
     sidebarWidthPct: clampWidth(obj.sidebarWidthPct, base.sidebarWidthPct),
     ...(typeof obj.lastCwd === 'string' && obj.lastCwd.trim() ? { lastCwd: obj.lastCwd.trim() } : base.lastCwd ? { lastCwd: base.lastCwd } : {}),
-    ...(typeof obj.defaultModeId === 'string' && obj.defaultModeId.trim()
-      ? { defaultModeId: obj.defaultModeId.trim() }
-      : base.defaultModeId
-        ? { defaultModeId: base.defaultModeId }
-        : {}),
+    ...(defaultModeId ? { defaultModeId } : {}),
     ...(typeof obj.defaultModelId === 'string' && obj.defaultModelId.trim()
       ? { defaultModelId: obj.defaultModelId.trim() }
       : base.defaultModelId
         ? { defaultModelId: base.defaultModelId }
+        : {}),
+    ...(typeof obj.defaultEffort === 'string' && obj.defaultEffort.trim()
+      ? { defaultEffort: obj.defaultEffort.trim() }
+      : base.defaultEffort
+        ? { defaultEffort: base.defaultEffort }
         : {}),
   }
 }
@@ -187,6 +199,7 @@ function sanitizeSession(raw: unknown): PersistedSession | undefined {
     ...(typeof obj.archivedAt === 'string' && obj.archivedAt.trim() ? { archivedAt: obj.archivedAt.trim() } : {}),
     ...(typeof obj.modeId === 'string' ? { modeId: obj.modeId } : {}),
     ...(typeof obj.modelId === 'string' ? { modelId: obj.modelId } : {}),
+    ...(typeof obj.effort === 'string' && obj.effort.trim() ? { effort: obj.effort.trim() } : {}),
     ...(usage ? { usage } : {}),
     touchedFiles,
     items,

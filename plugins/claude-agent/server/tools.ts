@@ -25,7 +25,7 @@ export type ToolSpec = {
   _meta?: Record<string, unknown>
 }
 
-const OPEN_MODES = allOf<'default' | 'auto' | 'acceptEdits' | 'plan'>()('default', 'auto', 'acceptEdits', 'plan')
+const OPEN_MODES = allOf<Inputs['claude_open']['mode']>()('auto', 'bypassPermissions')
 const SESSION_ACTIONS = allOf<Inputs['claude_session']['action']>()('list', 'get', 'wait', 'cancel')
 const UI_SESSION_ACTIONS = allOf<Inputs['claude_ui_session']['action']>()(
   'connect',
@@ -65,8 +65,9 @@ export const SPECS: readonly ToolSpec[] = [
         cwd: { type: 'string', description: 'Workspace directory path. Default: current Antigravity workspace root.' },
         sessionId: { type: 'string', description: 'Existing session ID to focus or continue.' },
         prompt: { type: 'string', description: 'Optional task prompt to dispatch asynchronously to Claude.' },
-        mode: { type: 'string', enum: OPEN_MODES, description: 'Initial permission mode (default, auto, acceptEdits, or plan). Defaults to auto when supported.' },
+        mode: { type: 'string', enum: OPEN_MODES, description: 'Initial permission mode (auto or bypassPermissions). Defaults to auto.' },
         model: { type: 'string', description: 'Optional model ID override. Defaults to opus when supported.' },
+        effort: { type: 'string', description: 'Optional reasoning effort override (e.g. low, medium, high, max). Defaults to high when supported.' },
         replyToChat: {
           type: 'boolean',
           description: 'When prompt is provided, automatically deliver Claude\'s final response back to this Antigravity chat via the open side pane when the turn completes (default true).',
@@ -78,11 +79,11 @@ export const SPECS: readonly ToolSpec[] = [
   },
   {
     name: 'claude_ask',
-    title: 'Ask Claude (Read-Only)',
+    title: 'Ask Claude',
     description:
-      'Synchronously consult Claude Code in read-only `plan` mode for quick questions or short second opinions ' +
-      '(auto-declines write/execute prompts; subject to timeout). For thorough MR/PR reviews or multi-file analyses ' +
-      'that may take over a minute, prefer asynchronous `claude_open` with `mode: "plan"` and `replyToChat: true`.',
+      'Synchronously consult Claude Code in `auto` mode for quick questions or short second opinions ' +
+      '(auto-declines interactive permission prompts so it never hangs; defaults to `opus` with `high` effort; subject to timeout). ' +
+      'For thorough MR/PR reviews or multi-file analyses that may take over a minute, prefer asynchronous `claude_open` with `replyToChat: true`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,6 +91,7 @@ export const SPECS: readonly ToolSpec[] = [
         cwd: { type: 'string', description: 'Workspace directory path. Default: current workspace root.' },
         sessionId: { type: 'string', description: 'Optional existing session ID to reuse.' },
         model: { type: 'string', description: 'Optional model ID override. Defaults to opus when supported.' },
+        effort: { type: 'string', description: 'Optional reasoning effort override (e.g. low, medium, high, max). Defaults to high when supported.' },
         timeoutSeconds: { type: 'integer', description: 'Timeout in seconds (10-300, default 120).' },
       },
       required: ['prompt'],
@@ -208,6 +210,7 @@ export const SPECS: readonly ToolSpec[] = [
         lastCwd: { type: 'string' },
         defaultModeId: { type: 'string' },
         defaultModelId: { type: 'string' },
+        defaultEffort: { type: 'string' },
       },
       required: ['action'],
     } satisfies SchemaFor<Inputs['claude_ui_fs']>,

@@ -51,7 +51,8 @@ const DEFAULT_AUTO_ARCHIVE_IDLE_MS = 7 * 24 * 60 * 60 * 1_000
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 5_000
 const DEFAULT_MODE_ID = 'auto'
 const DEFAULT_MODEL_ID = 'opus'
-const ALLOWED_OPEN_MODES = new Set(['default', 'auto', 'acceptEdits', 'plan'])
+const DEFAULT_EFFORT_LEVEL = 'high'
+const ALLOWED_MODES = new Set(['auto', 'bypassPermissions'])
 
 export type TimelineItem = PersistedTimelineItem & {
   streaming?: boolean
@@ -206,6 +207,7 @@ type InternalSession = {
   modeId?: string
   availableModes: AcpModeOption[]
   modelId?: string
+  effort?: string
   availableModels: AcpModelOption[]
   configOptions: AcpConfigOption[]
   availableCommands: AcpAvailableCommand[]
@@ -411,6 +413,7 @@ function toPersisted(session: InternalSession): PersistedSession {
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
     ...(session.modeId ? { modeId: session.modeId } : {}),
     ...(session.modelId ? { modelId: session.modelId } : {}),
+    ...(session.effort ? { effort: session.effort } : {}),
     ...(session.usage ? { usage: session.usage } : {}),
     touchedFiles: [...session.touchedFiles],
     items: session.items.map(({ streaming: _streaming, ...rest }) => rest),
@@ -521,7 +524,50 @@ function matchModelId(session: InternalSession, requested: string): ModelMatch {
   return { resolvedId: trimmed, matched: false, hasCatalog }
 }
 
+function filterAllowedModes(modes: readonly AcpModeOption[] | null | undefined): AcpModeOption[] {
+  if (!Array.isArray(modes)) return []
+  return modes.filter(m => ALLOWED_MODES.has(m.id))
+}
+
+function filterConfigOptions(options: readonly AcpConfigOption[] | null | undefined): AcpConfigOption[] {
+  if (!Array.isArray(options)) return []
+  return options.map(opt => {
+    if (opt.category !== 'mode') return opt
+    const filteredOptions: AcpConfigOption['options'] = []
+    for (const entry of opt.options) {
+      if ('group' in entry) {
+        const kept = entry.options.filter((v: { value: string }) => ALLOWED_MODES.has(v.value))
+        if (kept.length > 0) filteredOptions.push({ ...entry, options: kept })
+      } else if (ALLOWED_MODES.has(entry.value)) {
+        filteredOptions.push(entry)
+      }
+    }
+    return { ...opt, options: filteredOptions }
+  })
+}
+
+function isEffortConfigOption(opt: AcpConfigOption): boolean {
+  return opt.category === 'thought_level' || opt.id === 'effort' || opt.id === 'thought_level'
+}
+
+function findEffortConfigOption(options: readonly AcpConfigOption[]): AcpConfigOption | undefined {
+  return options.find(isEffortConfigOption)
+}
+
+function matchConfigOptionValue(opt: AcpConfigOption, requested: string): string | undefined {
+  const trimmed = requested.trim()
+  if (!trimmed) return undefined
+  const needle = trimmed.toLowerCase()
+  const values = opt.options.flatMap(o => ('group' in o ? o.options : [o]))
+  const exactVal = values.find(v => v.value === trimmed) ?? values.find(v => v.value.toLowerCase() === needle)
+  if (exactVal) return exactVal.value
+  const exactName = values.find(v => v.name.toLowerCase() === needle)
+  if (exactName) return exactName.value
+  return undefined
+}
+
 function isModeSupported(session: InternalSession, modeId: string): boolean {
+  if (!ALLOWED_MODES.has(modeId)) return false
   if (session.availableModes.length > 0) {
     return session.availableModes.some(m => m.id === modeId)
   }
@@ -609,6 +655,7 @@ export class SessionManager {
         modeId: saved.modeId,
         availableModes: [],
         modelId: saved.modelId,
+        effort: saved.effort,
         availableModels: [],
         configOptions: [],
         availableCommands: [],
@@ -885,7 +932,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.4.0' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.5.0' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -953,7 +1000,12 @@ export class SessionManager {
     }
   }
 
-  async createSession(opts: { cwd?: string; modeId?: string; modelId?: string; strictMode?: boolean; focus?: boolean } = {}): Promise<SessionSnapshot> {
+  async createSession(
+    opts: { cwd?: string; modeId?: string; modelId?: string; effort?: string; strictMode?: boolean; focus?: boolean } = {},
+  ): Promise<SessionSnapshot> {
+    if (opts.modeId !== undefined && !ALLOWED_MODES.has(opts.modeId)) {
+      throw new Error(`Invalid mode: ${opts.modeId}. Allowed: auto, bypassPermissions.`)
+    }
     await this.ensureHydrated()
     const client = await this.ensureConnected()
     const resolved = await resolveDirectory(opts.cwd, await this.pickFallbackCwd())
@@ -979,6 +1031,7 @@ export class SessionManager {
       throw enriched
     }
 
+    const filteredConfigOptions = filterConfigOptions(created.configOptions)
     const ts = nowIso()
     const session: InternalSession = {
       sessionId: created.sessionId,
@@ -989,10 +1042,11 @@ export class SessionManager {
       status: 'idle',
       loadedInProcess: true,
       modeId: created.modes?.currentModeId,
-      availableModes: created.modes?.availableModes ?? [],
+      availableModes: filterAllowedModes(created.modes?.availableModes),
       modelId: created.models?.currentModelId,
+      effort: findEffortConfigOption(filteredConfigOptions)?.currentValue,
       availableModels: created.models?.availableModels ?? [],
-      configOptions: created.configOptions ?? [],
+      configOptions: filteredConfigOptions,
       availableCommands: [],
       plan: [],
       touchedFiles: new Set(),
@@ -1017,8 +1071,8 @@ export class SessionManager {
 
     const storeData = await this.deps.store.load()
 
-    // Apply model before mode: claude-agent-acp checks currentModelInfo.supportsAutoMode
-    // when activating `auto`, so switching to Opus first avoids a premature fallback.
+    // Apply model before effort and mode: claude-agent-acp updates supported effort levels
+    // and checks currentModelInfo.supportsAutoMode when activating `auto`, so switching to Opus first avoids fallbacks.
     const desiredModel = opts.modelId ?? storeData.preferences.defaultModelId ?? DEFAULT_MODEL_ID
     if (desiredModel) {
       const match = matchModelId(session, desiredModel)
@@ -1026,6 +1080,11 @@ export class SessionManager {
       if ((opts.modelId || modelSupported) && match.resolvedId !== session.modelId) {
         await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
       }
+    }
+
+    const desiredEffort = opts.effort ?? storeData.preferences.defaultEffort ?? DEFAULT_EFFORT_LEVEL
+    if (desiredEffort) {
+      await this.applySessionEffort(session, desiredEffort)
     }
 
     const desiredMode = opts.modeId ?? storeData.preferences.defaultModeId ?? DEFAULT_MODE_ID
@@ -1092,14 +1151,18 @@ export class SessionManager {
           existing.loadedInProcess = true
           if (res.modes) {
             existing.modeId = res.modes.currentModeId
-            existing.availableModes = res.modes.availableModes
+            existing.availableModes = filterAllowedModes(res.modes.availableModes)
           }
           if (res.models) {
             existing.modelId = res.models.currentModelId
             existing.availableModels = res.models.availableModels
           }
           if (res.configOptions) {
-            existing.configOptions = res.configOptions
+            existing.configOptions = filterConfigOptions(res.configOptions)
+            existing.effort = findEffortConfigOption(existing.configOptions)?.currentValue ?? existing.effort
+          }
+          if (existing.modeId && !ALLOWED_MODES.has(existing.modeId) && isModeSupported(existing, DEFAULT_MODE_ID)) {
+            await this.setSessionMode(existing.sessionId, DEFAULT_MODE_ID).catch(() => undefined)
           }
           this.emitMeta(existing)
           await this.deps.store.upsertSession(toPersisted(existing))
@@ -1130,14 +1193,16 @@ export class SessionManager {
       const oldId = existing.sessionId
       const prevModeId = existing.modeId
       const prevModelId = existing.modelId
+      const prevEffort = existing.effort
       this.sessions.delete(oldId)
       existing.sessionId = fresh.sessionId
       existing.loadedInProcess = true
       existing.modeId = fresh.modes?.currentModeId ?? existing.modeId
-      existing.availableModes = fresh.modes?.availableModes ?? existing.availableModes
+      existing.availableModes = fresh.modes ? filterAllowedModes(fresh.modes.availableModes) : existing.availableModes
       existing.modelId = fresh.models?.currentModelId ?? existing.modelId
       existing.availableModels = fresh.models?.availableModels ?? existing.availableModels
-      existing.configOptions = fresh.configOptions ?? existing.configOptions
+      existing.configOptions = fresh.configOptions ? filterConfigOptions(fresh.configOptions) : existing.configOptions
+      existing.effort = findEffortConfigOption(existing.configOptions)?.currentValue ?? existing.effort
       this.appendSystemItem(
         existing,
         'status',
@@ -1154,9 +1219,15 @@ export class SessionManager {
           await this.setSessionModel(existing.sessionId, match.resolvedId).catch(() => undefined)
         }
       }
+      const desiredEffort = prevEffort ?? storeData.preferences.defaultEffort ?? DEFAULT_EFFORT_LEVEL
+      if (desiredEffort) {
+        await this.applySessionEffort(existing, desiredEffort)
+      }
       const desiredMode = existing.readOnlyLock
-        ? 'plan'
-        : prevModeId ?? storeData.preferences.defaultModeId ?? DEFAULT_MODE_ID
+        ? DEFAULT_MODE_ID
+        : prevModeId && ALLOWED_MODES.has(prevModeId)
+          ? prevModeId
+          : storeData.preferences.defaultModeId ?? DEFAULT_MODE_ID
       if (desiredMode && desiredMode !== existing.modeId && isModeSupported(existing, desiredMode)) {
         await this.setSessionMode(existing.sessionId, desiredMode).catch(() => undefined)
       }
@@ -1175,10 +1246,21 @@ export class SessionManager {
     }
   }
 
+  private async applySessionEffort(session: InternalSession, desiredEffort: string): Promise<void> {
+    const effortOpt = findEffortConfigOption(session.configOptions)
+    if (!effortOpt) return
+    const matched = matchConfigOptionValue(effortOpt, desiredEffort)
+    if (!matched || matched === effortOpt.currentValue) return
+    await this.setSessionConfigOption(session.sessionId, effortOpt.id, matched).catch(() => undefined)
+  }
+
   async setSessionMode(sessionId: string, modeId: string): Promise<SessionSnapshot> {
+    if (!ALLOWED_MODES.has(modeId)) {
+      throw new Error(`Invalid mode: ${modeId}. Allowed: auto, bypassPermissions.`)
+    }
     const session = await this.ensureSessionLoaded(sessionId)
-    if (session.readOnlyLock && modeId !== 'plan') {
-      throw new Error('Cannot change mode while a read-only claude_ask turn is in progress.')
+    if (session.readOnlyLock && modeId !== DEFAULT_MODE_ID) {
+      throw new Error('Cannot change mode while a claude_ask turn is in progress.')
     }
     const client = await this.ensureConnected()
     const prevModeId = session.modeId
@@ -1193,7 +1275,9 @@ export class SessionManager {
           value: modeId,
         })
         if (Array.isArray(res?.configOptions)) {
-          session.configOptions = res.configOptions
+          session.configOptions = filterConfigOptions(res.configOptions)
+          const updatedEffortOpt = findEffortConfigOption(session.configOptions)
+          if (updatedEffortOpt) session.effort = updatedEffortOpt.currentValue
           const updatedModeOpt = session.configOptions.find(c => c.category === 'mode')
           if (!updatedModeOpt) {
             appliedViaConfig = true
@@ -1238,9 +1322,11 @@ export class SessionManager {
           value: resolvedId,
         })
         if (Array.isArray(res?.configOptions)) {
-          session.configOptions = res.configOptions
+          session.configOptions = filterConfigOptions(res.configOptions)
           const updatedModeOpt = session.configOptions.find(c => c.category === 'mode')
           if (updatedModeOpt) session.modeId = updatedModeOpt.currentValue
+          const updatedEffortOpt = findEffortConfigOption(session.configOptions)
+          if (updatedEffortOpt) session.effort = updatedEffortOpt.currentValue
           const updatedModelOpt = session.configOptions.find(c => c.category === 'model')
           if (!updatedModelOpt) {
             appliedViaConfig = true
@@ -1271,12 +1357,13 @@ export class SessionManager {
 
   async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<SessionSnapshot> {
     const session = await this.ensureSessionLoaded(sessionId)
-    if (session.readOnlyLock) {
-      const opt = session.configOptions.find(c => c.id === configId)
-      const isModeConfig = opt?.category === 'mode' || (!opt && /mode/i.test(configId))
-      if (isModeConfig && value !== 'plan') {
-        throw new Error('Cannot change mode while a read-only claude_ask turn is in progress.')
-      }
+    const opt = session.configOptions.find(c => c.id === configId)
+    const isModeConfig = opt?.category === 'mode' || (!opt && /mode/i.test(configId))
+    if (isModeConfig && !ALLOWED_MODES.has(value)) {
+      throw new Error(`Invalid mode: ${value}. Allowed: auto, bypassPermissions.`)
+    }
+    if (session.readOnlyLock && isModeConfig && value !== DEFAULT_MODE_ID) {
+      throw new Error('Cannot change mode while a claude_ask turn is in progress.')
     }
     const client = await this.ensureConnected()
     const res = await client.request<{ configOptions?: AcpConfigOption[] }>('session/set_config_option', {
@@ -1285,11 +1372,21 @@ export class SessionManager {
       value,
     })
     if (Array.isArray(res?.configOptions)) {
-      session.configOptions = res.configOptions
+      session.configOptions = filterConfigOptions(res.configOptions)
       const modeOpt = session.configOptions.find(c => c.category === 'mode')
       if (modeOpt) session.modeId = modeOpt.currentValue
       const modelOpt = session.configOptions.find(c => c.category === 'model')
       if (modelOpt) session.modelId = modelOpt.currentValue
+      const effortOpt = findEffortConfigOption(session.configOptions)
+      if (effortOpt) session.effort = effortOpt.currentValue
+    } else {
+      session.configOptions = session.configOptions.map(c =>
+        c.id === configId ? { ...c, currentValue: value } : c,
+      )
+      const updatedOpt = session.configOptions.find(c => c.id === configId)
+      if (updatedOpt?.category === 'mode') session.modeId = value
+      if (updatedOpt?.category === 'model') session.modelId = value
+      if (updatedOpt && isEffortConfigOption(updatedOpt)) session.effort = value
     }
     session.updatedAt = nowIso()
     this.emitMeta(session)
@@ -1852,9 +1949,9 @@ export class SessionManager {
   // --- Model-facing tool implementations ---
 
   async handleOpenTool(input: ToolInputs['claude_open'], workspaceRoots: readonly string[]): Promise<Reply> {
-    if (input.mode !== undefined && !ALLOWED_OPEN_MODES.has(input.mode)) {
+    if (input.mode !== undefined && !ALLOWED_MODES.has(input.mode)) {
       return {
-        text: `Invalid mode for claude_open: ${String(input.mode)}. Allowed: default, auto, acceptEdits, plan.`,
+        text: `Invalid mode for claude_open: ${String(input.mode)}. Allowed: auto, bypassPermissions.`,
         isError: true,
       }
     }
@@ -1878,6 +1975,7 @@ export class SessionManager {
             cwd: input.cwd ?? workspaceRoots[0],
             modeId: input.mode,
             modelId: input.model,
+            effort: input.effort,
             strictMode: Boolean(input.mode),
             focus: true,
           })
@@ -1907,6 +2005,9 @@ export class SessionManager {
         if (match.resolvedId !== session.modelId) {
           await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
         }
+      }
+      if (input.effort) {
+        await this.applySessionEffort(session, input.effort)
       }
       if (input.mode && input.mode !== session.modeId) {
         try {
@@ -1983,14 +2084,15 @@ export class SessionManager {
       try {
         const created = await this.createSession({
           cwd: input.cwd ?? workspaceRoots[0],
-          modeId: 'plan',
+          modeId: DEFAULT_MODE_ID,
           modelId: input.model,
+          effort: input.effort,
           strictMode: true,
         })
         session = this.sessions.get(created.sessionId)!
       } catch (err) {
         return {
-          text: `claude_ask aborted: could not switch session into read-only "plan" mode (${redactSecrets(err instanceof Error ? err.message : String(err))}).`,
+          text: `claude_ask aborted: could not switch session into "${DEFAULT_MODE_ID}" mode (${redactSecrets(err instanceof Error ? err.message : String(err))}).`,
           isError: true,
         }
       }
@@ -1998,7 +2100,7 @@ export class SessionManager {
 
     if (session.status === 'running' || session.readOnlyLock) {
       return {
-        text: `Session ${session.sessionId} already has an active turn. Use a different sessionId or omit it to start a fresh read-only session.`,
+        text: `Session ${session.sessionId} already has an active turn. Use a different sessionId or omit it to start a fresh session.`,
         isError: true,
       }
     }
@@ -2018,30 +2120,33 @@ export class SessionManager {
     let cancelPromise: Promise<unknown> | undefined
 
     try {
-      if (session.modeId !== 'plan') {
-        try {
-          await this.setSessionMode(session.sessionId, 'plan')
-        } catch {
-          // Checked below (fail closed).
-        }
-      }
-      if (session.modeId !== 'plan') {
-        if (!reusedExisting) {
-          await this.deleteSession(session.sessionId).catch(() => undefined)
-        }
-        return {
-          text: 'claude_ask aborted: could not switch session into read-only "plan" mode.',
-          isError: true,
-        }
-      }
       if (input.model) {
         const match = matchModelId(session, input.model)
         if (match.resolvedId !== session.modelId) {
           await this.setSessionModel(session.sessionId, match.resolvedId).catch(() => undefined)
         }
       }
+      if (input.effort) {
+        await this.applySessionEffort(session, input.effort)
+      }
+      if (session.modeId !== DEFAULT_MODE_ID) {
+        try {
+          await this.setSessionMode(session.sessionId, DEFAULT_MODE_ID)
+        } catch {
+          // Checked below (fail closed).
+        }
+      }
+      if (session.modeId !== DEFAULT_MODE_ID) {
+        if (!reusedExisting) {
+          await this.deleteSession(session.sessionId).catch(() => undefined)
+        }
+        return {
+          text: `claude_ask aborted: could not switch session into "${DEFAULT_MODE_ID}" mode.`,
+          isError: true,
+        }
+      }
 
-      heartbeat = setInterval(() => progress('Waiting on Claude Agent (read-only)…'), 10_000)
+      heartbeat = setInterval(() => progress('Waiting on Claude Agent…'), 10_000)
 
       const startIndex = session.items.length
       await this.startPrompt(session.sessionId, promptText, [], { allowReadOnlyLock: true })
@@ -2266,6 +2371,9 @@ export class SessionManager {
         return { text: 'Authenticated', structuredContent: { diagnostics } }
       }
       case 'create': {
+        if (input.modeId !== undefined && !ALLOWED_MODES.has(input.modeId)) {
+          return { text: `Invalid mode: ${input.modeId}. Allowed: auto, bypassPermissions.`, isError: true }
+        }
         const session = await this.createSession({
           cwd: input.cwd ?? workspaceRoots[0],
           modeId: input.modeId,
@@ -2454,11 +2562,15 @@ export class SessionManager {
         if (input.defaultModeId === 'bypassPermissions') {
           return { text: 'Cannot persist bypassPermissions as the default mode.', isError: true }
         }
+        if (input.defaultModeId !== undefined && input.defaultModeId !== DEFAULT_MODE_ID) {
+          return { text: `Invalid default mode: ${input.defaultModeId}. Allowed: auto.`, isError: true }
+        }
         const data = await this.deps.store.savePreferences({
           ...(input.sidebarWidthPct !== undefined ? { sidebarWidthPct: input.sidebarWidthPct } : {}),
           ...(input.lastCwd !== undefined ? { lastCwd: input.lastCwd } : {}),
           ...(input.defaultModeId !== undefined ? { defaultModeId: input.defaultModeId } : {}),
           ...(input.defaultModelId !== undefined ? { defaultModelId: input.defaultModelId } : {}),
+          ...(input.defaultEffort !== undefined ? { defaultEffort: input.defaultEffort } : {}),
         })
         return { text: 'saved', structuredContent: { preferences: data.preferences } }
       }
@@ -2693,11 +2805,13 @@ export class SessionManager {
       }
       case 'config_option_update': {
         if (Array.isArray(update.configOptions)) {
-          session.configOptions = update.configOptions
+          session.configOptions = filterConfigOptions(update.configOptions)
           const modeOpt = session.configOptions.find(c => c.category === 'mode')
           if (modeOpt) session.modeId = modeOpt.currentValue
           const modelOpt = session.configOptions.find(c => c.category === 'model')
           if (modelOpt) session.modelId = modelOpt.currentValue
+          const effortOpt = findEffortConfigOption(session.configOptions)
+          if (effortOpt) session.effort = effortOpt.currentValue
           this.emitMeta(session)
         }
         return

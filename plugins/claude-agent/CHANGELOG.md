@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] - 2026-11-28
+
+### Changed
+
+- Removed `plan`, `default`, and `acceptEdits` permission modes across the server, MCP tools, and UI so only `auto` and `bypassPermissions` remain available (filtering ACP-advertised mode lists and migrating legacy persisted defaults to `auto`).
+- Default new sessions to `auto` mode, `opus` model, and `high` reasoning effort (when advertised via ACP `thought_level` / `effort` config options), and added optional `effort` overrides on `claude_open` and `claude_ask` plus `defaultEffort` persistence in **Save as default**.
+- Switched `claude_ask` from `plan` mode to `auto` mode while preserving its turn lock and automatic permission-prompt declination so synchronous consultations never hang.
+- Allowed explicit `mode: "bypassPermissions"` on `claude_open` while keeping `bypassPermissions` blocked from being saved as the global default.
+
 ## [0.4.0] - 2026-11-27
 
 ### Added

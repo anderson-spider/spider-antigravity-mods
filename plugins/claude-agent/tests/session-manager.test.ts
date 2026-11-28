@@ -46,8 +46,14 @@ test('SessionManager handles streaming, interactive permissions, touched files, 
   assert.equal(created.cwd, dir)
   assert.equal(created.modeId, 'auto')
   assert.equal(created.modelId, 'claude-opus-4-1')
-  assert.equal(created.availableModes.length, 5)
-  assert.ok(created.availableModes.some(m => m.id === 'auto'))
+  assert.deepEqual(
+    created.availableModes.map(m => m.id),
+    ['auto', 'bypassPermissions'],
+  )
+  assert.equal(
+    created.configOptions.find(c => c.category === 'thought_level')?.currentValue,
+    'high',
+  )
 
   await manager.startPrompt(created.sessionId, '[trigger:permission] please edit')
 
@@ -83,7 +89,7 @@ test('SessionManager handles streaming, interactive permissions, touched files, 
   assert.ok(snap.session.touchedFiles.some(f => f.endsWith('src/app.ts')))
 })
 
-test('claude_ask enforces plan mode and auto-declines permission prompts without hanging', async t => {
+test('claude_ask enforces auto mode and auto-declines permission prompts without hanging', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-ask-'))
   t.after(async () => {
     await rm(dir, { recursive: true, force: true })
@@ -112,7 +118,7 @@ test('claude_open with prompt dispatches async turn and supports reconnect + ses
     await rm(dir, { recursive: true, force: true })
   })
 
-  const openRes = await manager.handleOpenTool({ prompt: 'Summarize project', cwd: dir, mode: 'plan' }, [dir])
+  const openRes = await manager.handleOpenTool({ prompt: 'Summarize project', cwd: dir, mode: 'auto' }, [dir])
   assert.ok(openRes.text.includes('Started asynchronous Claude Agent turn'))
   const sc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean; pendingChatReplyId?: string } }
   const sessionId = sc.activeSession?.sessionId
@@ -205,39 +211,74 @@ test('claude_open supports auto mode', async t => {
   await new Promise(r => setTimeout(r, 150))
 })
 
-test('claude_open rejects bypassPermissions at runtime', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-bypass-'))
+test('only auto and bypassPermissions modes are allowed across claude_open, setSessionMode, and UI session creation', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-modes-'))
   t.after(async () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  const manager = createTestManager(dir, dir)
+  const manager = createTestManager(dir, dir, { FAKE_ACP_MODE_CONFIG: '1' })
   t.after(async () => {
     await manager.dispose()
   })
 
-  const res = await manager.handleOpenTool(
-    { prompt: 'hi', cwd: dir, mode: 'bypassPermissions' as unknown as 'auto' },
-    [dir],
+  for (const disallowed of ['plan', 'default', 'acceptEdits'] as const) {
+    const res = await manager.handleOpenTool(
+      { prompt: 'hi', cwd: dir, mode: disallowed as unknown as 'auto' },
+      [dir],
+    )
+    assert.equal(res.isError, true, `expected claude_open to reject ${disallowed}`)
+    assert.ok(res.text.includes('Invalid mode'))
+
+    const uiCreate = await manager.handleUiSession({ action: 'create', cwd: dir, modeId: disallowed }, [dir])
+    assert.equal(uiCreate.isError, true, `expected claude_ui_session(create) to reject ${disallowed}`)
+  }
+
+  // bypassPermissions is allowed on claude_open and configOptions mode picker is filtered
+  const bypassRes = await manager.handleOpenTool({ prompt: 'Run bypass', cwd: dir, mode: 'bypassPermissions' }, [dir])
+  assert.equal(bypassRes.isError, undefined)
+  const sc = bypassRes.structuredContent as {
+    activeSession?: {
+      sessionId: string
+      modeId?: string
+      availableModes: { id: string }[]
+      configOptions: { category?: string; options: { value: string }[] }[]
+    }
+  }
+  assert.equal(sc.activeSession?.modeId, 'bypassPermissions')
+  assert.deepEqual(
+    sc.activeSession?.availableModes.map(m => m.id),
+    ['auto', 'bypassPermissions'],
   )
-  assert.equal(res.isError, true)
-  assert.ok(res.text.includes('Invalid mode'))
+  const modeCfg = sc.activeSession?.configOptions.find(c => c.category === 'mode')
+  assert.deepEqual(
+    modeCfg?.options.map(o => o.value),
+    ['auto', 'bypassPermissions'],
+  )
+
+  await assert.rejects(() => manager.setSessionMode(sc.activeSession!.sessionId, 'plan'), /Invalid mode/)
+  await assert.rejects(
+    () => manager.setSessionConfigOption(sc.activeSession!.sessionId, 'permission_mode', 'plan'),
+    /Invalid mode/,
+  )
+
+  await new Promise(r => setTimeout(r, 150))
 })
 
-test('claude_ask fails closed if plan mode cannot be enabled', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-reject-plan-'))
+test('claude_ask fails closed if auto mode cannot be enabled', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-reject-auto-'))
   t.after(async () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  const manager = createTestManager(dir, dir, { FAKE_ACP_REJECT_PLAN: '1' })
+  const manager = createTestManager(dir, dir, { FAKE_ACP_REJECT_AUTO: '1' })
   t.after(async () => {
     await manager.dispose()
   })
 
   const res = await manager.handleAskTool({ prompt: 'review', cwd: dir }, [dir], () => undefined)
   assert.equal(res.isError, true)
-  assert.ok(res.text.includes('plan'))
+  assert.ok(res.text.includes('auto'))
 })
 
 test('cancelTurn followed immediately by startPrompt is not clobbered by old turn', async t => {
@@ -573,27 +614,27 @@ test('unexpected ACP child exit emits exactly one error item and one turn_finish
 
 test('claude_open fails closed when explicit mode cannot be applied', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-open-mode-fail-'))
-  const manager = createTestManager(dir, dir, { FAKE_ACP_REJECT_PLAN: '1' })
+  const manager = createTestManager(dir, dir, { FAKE_ACP_REJECT_AUTO: '1' })
   t.after(async () => {
     await manager.dispose()
     await rm(dir, { recursive: true, force: true })
   })
 
   // New session with explicit rejected mode
-  const resNew = await manager.handleOpenTool({ prompt: 'Do not run', cwd: dir, mode: 'plan' }, [dir])
+  const resNew = await manager.handleOpenTool({ prompt: 'Do not run', cwd: dir, mode: 'auto' }, [dir])
   assert.equal(resNew.isError, true)
-  assert.ok(resNew.text.includes('plan'))
+  assert.ok(resNew.text.includes('auto'))
   const boot = await manager.getBootstrap({ workspaceRoots: [dir] })
   assert.equal(boot.sessions.length, 0, 'failed strict create should not leave an empty session behind')
 
-  // Existing session with explicit rejected mode
-  const existing = await manager.createSession({ cwd: dir })
+  // Existing session (created in bypassPermissions) with explicit rejected auto mode
+  const existing = await manager.createSession({ cwd: dir, modeId: 'bypassPermissions' })
   const resExisting = await manager.handleOpenTool(
-    { sessionId: existing.sessionId, prompt: 'Do not run either', mode: 'plan' },
+    { sessionId: existing.sessionId, prompt: 'Do not run either', mode: 'auto' },
     [dir],
   )
   assert.equal(resExisting.isError, true)
-  assert.ok(resExisting.text.includes('plan'))
+  assert.ok(resExisting.text.includes('auto'))
   const got = (await manager.handleUiSession({ action: 'get', sessionId: existing.sessionId }, [dir])).structuredContent as {
     session: { items: unknown[]; status: string }
   }
@@ -601,7 +642,7 @@ test('claude_open fails closed when explicit mode cannot be applied', async t =>
   assert.equal(got.session.status, 'idle')
 })
 
-test('claude_ask readOnlyLock blocks mode mutation, blocks claude_open mode mutation, and selects reject_once', async t => {
+test('claude_ask lock blocks mode escalation, blocks claude_open mode mutation, restores bypassPermissions, and selects reject_once', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-ro-lock-'))
   const manager = createTestManager(dir, dir)
   t.after(async () => {
@@ -609,12 +650,12 @@ test('claude_ask readOnlyLock blocks mode mutation, blocks claude_open mode muta
     await rm(dir, { recursive: true, force: true })
   })
 
-  // 1) readOnlyLock selects reject_once when offered
+  // 1) lock selects reject_once when offered
   const permReply = await manager.handleAskTool({ prompt: '[trigger:permission] check', cwd: dir }, [dir], () => undefined)
   assert.equal(permReply.isError, undefined)
   assert.ok(permReply.text.includes('selected:reject_once'), `expected selected:reject_once, got: ${permReply.text}`)
 
-  // 2) readOnlyLock falls back to cancelled when no reject_* option is offered
+  // 2) lock falls back to cancelled when no reject_* option is offered
   const noRejectReply = await manager.handleAskTool(
     { prompt: '[trigger:permission_no_reject] check', cwd: dir },
     [dir],
@@ -623,9 +664,9 @@ test('claude_ask readOnlyLock blocks mode mutation, blocks claude_open mode muta
   assert.equal(noRejectReply.isError, undefined)
   assert.ok(noRejectReply.text.includes('cancelled:'), `expected cancelled fallback, got: ${noRejectReply.text}`)
 
-  // 3) While claude_ask is in flight on a reused session, setSessionMode & claude_open cannot mutate mode
-  const existing = await manager.createSession({ cwd: dir })
-  assert.equal(existing.modeId, 'auto')
+  // 3) While claude_ask is in flight on a reused bypassPermissions session, it runs in auto, blocks mutation, and restores bypassPermissions
+  const existing = await manager.createSession({ cwd: dir, modeId: 'bypassPermissions' })
+  assert.equal(existing.modeId, 'bypassPermissions')
   const askPromise = manager.handleAskTool(
     { prompt: '[trigger:slow] long review', cwd: dir, sessionId: existing.sessionId },
     [dir],
@@ -634,26 +675,26 @@ test('claude_ask readOnlyLock blocks mode mutation, blocks claude_open mode muta
   await new Promise(r => setTimeout(r, 80))
 
   await assert.rejects(
-    () => manager.setSessionMode(existing.sessionId, 'auto'),
-    /read-only claude_ask/,
+    () => manager.setSessionMode(existing.sessionId, 'bypassPermissions'),
+    /claude_ask/,
   )
 
   const openWhileBusy = await manager.handleOpenTool(
-    { sessionId: existing.sessionId, prompt: 'hijack', mode: 'acceptEdits' },
+    { sessionId: existing.sessionId, prompt: 'hijack', mode: 'bypassPermissions' },
     [dir],
   )
   assert.equal(openWhileBusy.isError, true)
   const midSnap = (await manager.handleUiSession({ action: 'get', sessionId: existing.sessionId }, [dir])).structuredContent as {
     session: { modeId?: string }
   }
-  assert.equal(midSnap.session.modeId, 'plan', 'mode must stay plan while claude_ask is running')
+  assert.equal(midSnap.session.modeId, 'auto', 'mode must stay auto while claude_ask is running')
 
   const askDone = await askPromise
   assert.equal(askDone.isError, undefined)
   const afterSnap = (await manager.handleUiSession({ action: 'get', sessionId: existing.sessionId }, [dir])).structuredContent as {
     session: { modeId?: string }
   }
-  assert.equal(afterSnap.session.modeId, 'auto', 'mode should be restored to auto after claude_ask finishes')
+  assert.equal(afterSnap.session.modeId, 'bypassPermissions', 'mode should be restored to bypassPermissions after claude_ask finishes')
 })
 
 test('cancelTurn falls back cleanly when agent hangs past cancelTimeoutMs and late chunks stay non-streaming', async t => {
@@ -735,7 +776,7 @@ test('deleting a running session prevents zombie resurrection on disk when cance
   assert.equal(diskData.sessions.length, 0, 'deleted session must remain absent from persisted store')
 })
 
-test('readOnlyLock blocks setSessionConfigOption and protects mode-switch setup window in claude_ask', async t => {
+test('claude_ask lock blocks setSessionConfigOption and protects mode-switch setup window', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-ro-cfg-'))
   const manager = createTestManager(dir, dir, {
     FAKE_ACP_MODE_CONFIG: '1',
@@ -746,8 +787,8 @@ test('readOnlyLock blocks setSessionConfigOption and protects mode-switch setup 
     await rm(dir, { recursive: true, force: true })
   })
 
-  const existing = await manager.createSession({ cwd: dir })
-  assert.equal(existing.modeId, 'auto')
+  const existing = await manager.createSession({ cwd: dir, modeId: 'bypassPermissions' })
+  assert.equal(existing.modeId, 'bypassPermissions')
 
   const askPromise = manager.handleAskTool(
     { prompt: '[trigger:slow] check config lock', cwd: dir, sessionId: existing.sessionId },
@@ -755,22 +796,22 @@ test('readOnlyLock blocks setSessionConfigOption and protects mode-switch setup 
     () => undefined,
   )
 
-  // Attack IMMEDIATELY during the slow setSessionMode('plan') setup window (before startPrompt runs)
+  // Attack IMMEDIATELY during the slow setSessionMode('auto') setup window (before startPrompt runs)
   await new Promise(r => setTimeout(r, 25))
   await assert.rejects(
-    () => manager.setSessionConfigOption(existing.sessionId, 'permission_mode', 'acceptEdits'),
-    /read-only claude_ask/,
+    () => manager.setSessionConfigOption(existing.sessionId, 'permission_mode', 'bypassPermissions'),
+    /claude_ask/,
   )
   await assert.rejects(
-    () => manager.setSessionConfigOption(existing.sessionId, 'mode', 'acceptEdits'),
-    /read-only claude_ask/,
+    () => manager.setSessionConfigOption(existing.sessionId, 'mode', 'bypassPermissions'),
+    /claude_ask/,
   )
   await assert.rejects(
     () => manager.startPrompt(existing.sessionId, 'unauthorized write'),
     /already has a turn in progress/,
   )
   const openDuringSetup = await manager.handleOpenTool(
-    { sessionId: existing.sessionId, prompt: 'hijack during setup', mode: 'acceptEdits' },
+    { sessionId: existing.sessionId, prompt: 'hijack during setup', mode: 'bypassPermissions' },
     [dir],
   )
   assert.equal(openDuringSetup.isError, true)
@@ -779,7 +820,7 @@ test('readOnlyLock blocks setSessionConfigOption and protects mode-switch setup 
   assert.equal(askDone.isError, undefined)
 })
 
-test('claude_open and claude_ask default to opus model (with auto for open, plan for ask) and honor overrides', async t => {
+test('claude_open and claude_ask default to auto mode, opus model, and high effort and honor overrides', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-defaults-'))
   const manager = createTestManager(dir, dir)
   t.after(async () => {
@@ -787,40 +828,52 @@ test('claude_open and claude_ask default to opus model (with auto for open, plan
     await rm(dir, { recursive: true, force: true })
   })
 
-  // claude_open without explicit mode/model defaults to auto + opus
+  // claude_open without explicit mode/model/effort defaults to auto + opus + high
   const openDefault = await manager.handleOpenTool({ prompt: 'Default check', cwd: dir }, [dir])
   assert.equal(openDefault.isError, undefined)
-  const openSc = openDefault.structuredContent as { activeSession?: { modeId?: string; modelId?: string } }
+  const openSc = openDefault.structuredContent as {
+    activeSession?: { modeId?: string; modelId?: string; configOptions: { category?: string; currentValue: string }[] }
+  }
   assert.equal(openSc.activeSession?.modeId, 'auto')
   assert.equal(openSc.activeSession?.modelId, 'claude-opus-4-1')
+  assert.equal(openSc.activeSession?.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'high')
 
   // claude_open explicit overrides win
   const openOverride = await manager.handleOpenTool(
-    { prompt: 'Override check', cwd: dir, mode: 'acceptEdits', model: 'sonnet' },
+    { prompt: 'Override check', cwd: dir, mode: 'bypassPermissions', model: 'sonnet', effort: 'low' },
     [dir],
   )
   assert.equal(openOverride.isError, undefined)
-  const overrideSc = openOverride.structuredContent as { activeSession?: { modeId?: string; modelId?: string } }
-  assert.equal(overrideSc.activeSession?.modeId, 'acceptEdits')
+  const overrideSc = openOverride.structuredContent as {
+    activeSession?: { modeId?: string; modelId?: string; configOptions: { category?: string; currentValue: string }[] }
+  }
+  assert.equal(overrideSc.activeSession?.modeId, 'bypassPermissions')
   assert.equal(overrideSc.activeSession?.modelId, 'claude-sonnet-4-5')
+  assert.equal(overrideSc.activeSession?.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'low')
 
-  // claude_ask stays read-only plan mode and defaults to opus
-  const askDefault = await manager.handleAskTool({ prompt: 'Read-only default check', cwd: dir }, [dir], () => undefined)
+  // claude_ask runs in auto mode and defaults to opus + high effort
+  const askDefault = await manager.handleAskTool({ prompt: 'Default ask check', cwd: dir }, [dir], () => undefined)
   assert.equal(askDefault.isError, undefined)
-  const askDefaultSc = askDefault.structuredContent as { modeId?: string; modelId?: string }
-  assert.equal(askDefaultSc.modeId, 'plan')
+  const askDefaultSc = askDefault.structuredContent as { sessionId: string; modeId?: string; modelId?: string }
+  assert.equal(askDefaultSc.modeId, 'auto')
   assert.equal(askDefaultSc.modelId, 'claude-opus-4-1')
+  const askDefaultSnap = (await manager.handleUiSession({ action: 'get', sessionId: askDefaultSc.sessionId }, [dir]))
+    .structuredContent as { session: { configOptions: { category?: string; currentValue: string }[] } }
+  assert.equal(askDefaultSnap.session.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'high')
 
-  // claude_ask explicit model override wins
+  // claude_ask explicit model and effort overrides win
   const askOverride = await manager.handleAskTool(
-    { prompt: 'Read-only sonnet check', cwd: dir, model: 'sonnet' },
+    { prompt: 'Sonnet ask check', cwd: dir, model: 'sonnet', effort: 'low' },
     [dir],
     () => undefined,
   )
   assert.equal(askOverride.isError, undefined)
-  const askOverrideSc = askOverride.structuredContent as { modeId?: string; modelId?: string }
-  assert.equal(askOverrideSc.modeId, 'plan')
+  const askOverrideSc = askOverride.structuredContent as { sessionId: string; modeId?: string; modelId?: string }
+  assert.equal(askOverrideSc.modeId, 'auto')
   assert.equal(askOverrideSc.modelId, 'claude-sonnet-4-5')
+  const askOverrideSnap = (await manager.handleUiSession({ action: 'get', sessionId: askOverrideSc.sessionId }, [dir]))
+    .structuredContent as { session: { configOptions: { category?: string; currentValue: string }[] } }
+  assert.equal(askOverrideSnap.session.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'low')
 
   await new Promise(r => setTimeout(r, 150))
 })
@@ -862,13 +915,14 @@ test('createSession applies opus before auto, avoids opusplan alias collision, a
   assert.equal(fallback.modeId, 'auto')
 })
 
-test('ensureSessionLoaded fallback to session/new preserves model and mode defaults', async t => {
+test('ensureSessionLoaded fallback to session/new preserves opus, high effort, and migrates legacy plan mode to auto', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-load-fallback-'))
   const store = createStore(dir)
   await store.upsertSession({
     sessionId: 'stale-sess-1',
     title: 'Stale Session',
     cwd: dir,
+    modeId: 'plan',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     touchedFiles: [],
@@ -893,6 +947,7 @@ test('ensureSessionLoaded fallback to session/new preserves model and mode defau
   assert.notEqual(loaded.sessionId, 'stale-sess-1')
   assert.equal(loaded.modelId, 'claude-opus-4-1')
   assert.equal(loaded.modeId, 'auto')
+  assert.equal(loaded.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'high')
 })
 
 test('claude_open auto-reply queues pendingReplies with atomic claim/release/ack and cross-session wakeup', async t => {
@@ -912,7 +967,7 @@ test('claude_open auto-reply queues pendingReplies with atomic claim/release/ack
   await new Promise(r => setTimeout(r, 20))
 
   // Dispatch async turn on session A with default replyToChat=true
-  const openRes = await manager.handleOpenTool({ prompt: 'Review MR async', cwd: dir, mode: 'plan' }, [dir])
+  const openRes = await manager.handleOpenTool({ prompt: 'Review MR async', cwd: dir }, [dir])
   assert.equal(openRes.isError, undefined)
   const sessionAId = (openRes.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId
   assert.ok(sessionAId)
@@ -987,7 +1042,7 @@ test('claude_session wait returns progress without cancelling turn and clears pe
     await rm(dir, { recursive: true, force: true })
   })
 
-  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] deep review', cwd: dir, mode: 'plan' }, [dir])
+  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] deep review', cwd: dir }, [dir])
   const openSc = openRes.structuredContent as { activeSession?: { sessionId: string; replyToChat?: boolean } }
   const sessionId = openSc.activeSession?.sessionId!
   assert.equal(openSc.activeSession?.replyToChat, true)
@@ -1027,7 +1082,7 @@ test('pollEvents pushes live catalog updates and focusSessionId across views inc
   const emptyPollPromise = manager.pollEvents(undefined, 0, 5_000, 'view-empty', boot0.catalogVersion)
   await new Promise(r => setTimeout(r, 20))
 
-  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] live panel sync', cwd: dir, mode: 'plan' }, [dir])
+  const openRes = await manager.handleOpenTool({ prompt: '[trigger:slow] live panel sync', cwd: dir }, [dir])
   const openSc = openRes.structuredContent as { activeSession?: { sessionId: string }; catalogVersion: number }
   const newSessionId = openSc.activeSession?.sessionId!
   assert.ok(newSessionId)
@@ -1049,7 +1104,7 @@ test('pollEvents pushes live catalog updates and focusSessionId across views inc
   const viewOldPoll = manager.pollEvents(newSessionId, settledPoll.latestSeq, 5_000, 'view-aux', settledPoll.catalogVersion)
   await new Promise(r => setTimeout(r, 20))
 
-  const open2 = await manager.handleOpenTool({ prompt: '[trigger:slow] second task', cwd: dir, mode: 'plan' }, [dir])
+  const open2 = await manager.handleOpenTool({ prompt: '[trigger:slow] second task', cwd: dir }, [dir])
   const secondSessionId = (open2.structuredContent as { activeSession?: { sessionId: string } }).activeSession?.sessionId!
   assert.notEqual(secondSessionId, newSessionId)
 
@@ -1127,7 +1182,7 @@ test('permission request/resolve bumps catalogVersion across sessions and finali
   assert.equal(summaryA2?.pendingPermissionCount, 0)
 })
 
-test('save_prefs rejects bypassPermissions as default and applies valid saved defaults to new sessions', async t => {
+test('save_prefs rejects bypassPermissions and removed modes as default and applies valid saved defaults to new sessions', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-agent-save-prefs-'))
   const manager = createTestManager(dir, dir)
   t.after(async () => {
@@ -1135,24 +1190,34 @@ test('save_prefs rejects bypassPermissions as default and applies valid saved de
     await rm(dir, { recursive: true, force: true })
   })
 
-  const rejected = await manager.handleUiFs(
+  const rejectedBypass = await manager.handleUiFs(
     { action: 'save_prefs', defaultModeId: 'bypassPermissions' },
     [dir],
   )
-  assert.equal(rejected.isError, true)
-  assert.ok(rejected.text.includes('bypassPermissions'))
+  assert.equal(rejectedBypass.isError, true)
+  assert.ok(rejectedBypass.text.includes('bypassPermissions'))
+
+  const rejectedPlan = await manager.handleUiFs(
+    { action: 'save_prefs', defaultModeId: 'plan' },
+    [dir],
+  )
+  assert.equal(rejectedPlan.isError, true)
+  assert.ok(rejectedPlan.text.includes('Invalid default mode'))
 
   const saved = await manager.handleUiFs(
-    { action: 'save_prefs', defaultModeId: 'acceptEdits', defaultModelId: 'claude-sonnet-4-5' },
+    { action: 'save_prefs', defaultModeId: 'auto', defaultModelId: 'claude-sonnet-4-5', defaultEffort: 'low' },
     [dir],
   )
   assert.equal(saved.isError, undefined)
-  const savedPrefs = (saved.structuredContent as { preferences: { defaultModeId?: string; defaultModelId?: string } })
-    .preferences
-  assert.equal(savedPrefs.defaultModeId, 'acceptEdits')
+  const savedPrefs = (
+    saved.structuredContent as { preferences: { defaultModeId?: string; defaultModelId?: string; defaultEffort?: string } }
+  ).preferences
+  assert.equal(savedPrefs.defaultModeId, 'auto')
   assert.equal(savedPrefs.defaultModelId, 'claude-sonnet-4-5')
+  assert.equal(savedPrefs.defaultEffort, 'low')
 
   const nextSession = await manager.createSession({ cwd: dir })
-  assert.equal(nextSession.modeId, 'acceptEdits')
+  assert.equal(nextSession.modeId, 'auto')
   assert.equal(nextSession.modelId, 'claude-sonnet-4-5')
+  assert.equal(nextSession.configOptions.find(c => c.category === 'thought_level')?.currentValue, 'low')
 })
