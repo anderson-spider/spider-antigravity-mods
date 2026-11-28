@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-11-28
+
+- Add a lean, language-neutral `rules/AGENTS.md` routing rule so Antigravity automatically prefers `batch_search`, `quick_outline`, `read_slices`, and `apply_edits` for multi-query/multi-file batches (and passes explicit `cwd` on hosts without `roots/list`) while keeping large reads and shell/`git` operations on native tools.
+
 ## 0.1.1 - 2026-11-27
 
 - Fix zero-config compatibility on hosts that do not respond to MCP `roots/list` (such as Antigravity Desktop Hub) by adding a strictly validated Tier 4 per-call project-root jail for explicit absolute `cwd` arguments (requiring a recognized project marker such as `.git` or a standard project manifest, rejecting `/`, `$HOME`, system/credential/config directories, and plugin directories, while keeping `~/.gemini/antigravity/worktrees/*` project checkouts allowed and preserving fail-closed behavior for omitted/relative `cwd` and higher-priority tiers).

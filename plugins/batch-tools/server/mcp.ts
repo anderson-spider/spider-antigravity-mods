@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { redactSecrets } from './redact.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.1.1'
+export const SERVER_VERSION = '0.1.2'
 
 type Id = string | number
 type Message = {
