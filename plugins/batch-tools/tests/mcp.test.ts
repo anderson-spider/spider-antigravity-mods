@@ -240,7 +240,7 @@ describe('MCP stdio E2E (server/main.ts)', () => {
         serverInfo: { name: string; version: string }
       }
       assert.equal(initResult.serverInfo.name, 'batch-tools')
-      assert.equal(initResult.serverInfo.version, '0.1.0')
+      assert.equal(initResult.serverInfo.version, '0.1.1')
       assert.ok(initResult.capabilities.tools)
       assert.ok(initResult.capabilities.resources)
       client.notify('notifications/initialized')
@@ -471,49 +471,86 @@ describe('MCP stdio E2E (server/main.ts)', () => {
     }
   })
 
-  it('fails closed when started in plugin dir or $HOME without MCP roots, and honors BATCH_TOOLS_WORKSPACE_ROOTS & BATCH_TOOLS_ALLOW_EDITS=false', async () => {
+  it('fails closed when started in plugin dir or $HOME without MCP roots, enforces Tier 4 guardrails, and honors BATCH_TOOLS_WORKSPACE_ROOTS & BATCH_TOOLS_ALLOW_EDITS=false', async () => {
     const workspace = await createSampleWorkspace()
+    const nonProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'batch-tools-e2e-plain-'))
+    await fs.writeFile(path.join(nonProjectDir, 'notes.txt'), 'plain scratch\n', 'utf8')
 
-    // Case A: Started in PLUGIN_ROOT with no roots capability -> denied even with explicit cwd.
+    // Case A: Started in PLUGIN_ROOT with no roots capability -> omitted cwd,
+    // non-project cwd, and forbidden cwd ($HOME / PLUGIN_ROOT) are all denied.
     const unsafePluginClient = spawnMcpClient({ cwd: PLUGIN_ROOT })
     try {
       await unsafePluginClient.request('initialize', {
         protocolVersion: '2025-06-18',
         capabilities: {},
       })
-      const denied = getToolText(
+      const deniedOmitted = getToolText(
         await unsafePluginClient.request('tools/call', {
           name: 'batch_search',
           arguments: {
-            cwd: workspace,
             queries: [{ type: 'text', pattern: 'multiply' }],
           },
         }),
       )
-      assert.equal(denied.isError, true)
-      assert.match(denied.text, /Access denied/i)
+      assert.equal(deniedOmitted.isError, true)
+      assert.match(deniedOmitted.text, /Access denied/i)
+
+      const deniedNonProject = getToolText(
+        await unsafePluginClient.request('tools/call', {
+          name: 'batch_search',
+          arguments: {
+            cwd: nonProjectDir,
+            queries: [{ type: 'text', pattern: 'plain' }],
+          },
+        }),
+      )
+      assert.equal(deniedNonProject.isError, true)
+      assert.match(deniedNonProject.text, /not inside a recognized project workspace/i)
+
+      const deniedHomeTarget = getToolText(
+        await unsafePluginClient.request('tools/call', {
+          name: 'quick_outline',
+          arguments: {
+            cwd: os.homedir(),
+            paths: ['foo.ts'],
+          },
+        }),
+      )
+      assert.equal(deniedHomeTarget.isError, true)
+      assert.match(deniedHomeTarget.text, /Access denied/i)
     } finally {
       await unsafePluginClient.close()
     }
 
-    // Case B: Started in $HOME with no roots capability -> denied.
+    // Case B: Started in $HOME with no roots capability -> omitted or relative cwd denied.
     const unsafeHomeClient = spawnMcpClient({ cwd: os.homedir() })
     try {
       await unsafeHomeClient.request('initialize', {
         protocolVersion: '2025-06-18',
         capabilities: {},
       })
-      const denied = getToolText(
+      const deniedOmitted = getToolText(
         await unsafeHomeClient.request('tools/call', {
           name: 'quick_outline',
           arguments: {
-            cwd: workspace,
             paths: ['src/math.ts'],
           },
         }),
       )
-      assert.equal(denied.isError, true)
-      assert.match(denied.text, /Access denied/i)
+      assert.equal(deniedOmitted.isError, true)
+      assert.match(deniedOmitted.text, /Access denied/i)
+
+      const deniedRelative = getToolText(
+        await unsafeHomeClient.request('tools/call', {
+          name: 'quick_outline',
+          arguments: {
+            cwd: 'relative-dir',
+            paths: ['src/math.ts'],
+          },
+        }),
+      )
+      assert.equal(deniedRelative.isError, true)
+      assert.match(deniedRelative.text, /Access denied/i)
     } finally {
       await unsafeHomeClient.close()
     }
@@ -552,7 +589,48 @@ describe('MCP stdio E2E (server/main.ts)', () => {
       assert.match(blockedEdit.text, /BATCH_TOOLS_ALLOW_EDITS=false/)
     } finally {
       await envClient.close()
+    }
+
+    // Case D: Desktop Hub scenario (started in PLUGIN_ROOT with no roots/list):
+    // omitted cwd fails closed, while an explicit absolute project cwd (with .git)
+    // succeeds and remains strictly jailed to that cwd with secret denylist enforced.
+    const desktopClient = spawnMcpClient({ cwd: PLUGIN_ROOT })
+    try {
+      await desktopClient.request('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+      })
+
+      const omittedCwd = getToolText(
+        await desktopClient.request('tools/call', {
+          name: 'quick_outline',
+          arguments: { paths: ['src/math.ts'] },
+        }),
+      )
+      assert.equal(omittedCwd.isError, true)
+      assert.match(omittedCwd.text, /Pass the active project's absolute workspace path in 'cwd'/)
+
+      const explicitOk = getToolText(
+        await desktopClient.request('tools/call', {
+          name: 'quick_outline',
+          arguments: { cwd: workspace, paths: ['src/math.ts'] },
+        }),
+      )
+      assert.equal(explicitOk.isError, false)
+      assert.match(explicitOk.text, /multiply/)
+
+      const explicitSecretBlocked = getToolText(
+        await desktopClient.request('tools/call', {
+          name: 'read_slices',
+          arguments: { cwd: workspace, lineRanges: ['.env:1-5', '../outside.txt:1-5'] },
+        }),
+      )
+      assert.equal(explicitSecretBlocked.isError, true)
+      assert.doesNotMatch(explicitSecretBlocked.text, /TOP_SECRET_MARKER_VALUE/)
+    } finally {
+      await desktopClient.close()
       await fs.rm(workspace, { recursive: true, force: true })
+      await fs.rm(nonProjectDir, { recursive: true, force: true })
     }
   })
 })

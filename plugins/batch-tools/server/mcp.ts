@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { redactSecrets } from './redact.ts'
 
 export const PROTOCOL = '2025-06-18'
-export const SERVER_VERSION = '0.1.0'
+export const SERVER_VERSION = '0.1.1'
 
 type Id = string | number
 type Message = {
@@ -107,29 +107,40 @@ export function createMcpServer(deps: ServerDeps): Server {
   let stale = true
   let epoch = 0
   let next = 0
+  let inFlightRoots: Promise<readonly string[]> | null = null
   const pending = new Map<Id, (message: Message) => void>()
 
   async function folders(): Promise<readonly string[]> {
     if (!rootsSupported || !stale) return cwds
+    if (inFlightRoots) return inFlightRoots
     const askedEpoch = epoch
     const id = `roots-${++next}`
-    const reply = await new Promise<Message | undefined>((resolve) => {
+    const reqPromise = new Promise<Message | undefined>((resolve) => {
       const timer = setTimeout(() => {
         pending.delete(id)
         resolve(undefined)
-      }, deps.rootsTimeoutMs ?? 2_000)
+      }, deps.rootsTimeoutMs ?? 1_000)
       timer.unref()
       pending.set(id, (message) => {
         clearTimeout(timer)
         resolve(message)
       })
       send({ id, method: 'roots/list' })
+    }).then((reply) => {
+      if (askedEpoch === epoch) {
+        if (reply && 'result' in reply) {
+          cwds = foldersOf(reply.result)
+        }
+        // Mark settled even on timeout or JSON-RPC error so subsequent calls do not
+        // re-stall on hosts that advertise capabilities.roots without answering.
+        // notifications/roots/list_changed flips `stale` back to true if roots arrive later.
+        stale = false
+        inFlightRoots = null
+      }
+      return cwds
     })
-    if (reply && 'result' in reply && askedEpoch === epoch) {
-      cwds = foldersOf(reply.result)
-      stale = false
-    }
-    return cwds
+    inFlightRoots = reqPromise
+    return reqPromise
   }
 
   async function call(id: Id, params: Record<string, unknown>): Promise<void> {
@@ -234,6 +245,7 @@ export function createMcpServer(deps: ServerDeps): Server {
       if (method === 'notifications/roots/list_changed') {
         epoch++
         stale = true
+        inFlightRoots = null
         return
       }
       // Other notifications require no response.
