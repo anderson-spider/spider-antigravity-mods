@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1] - 2026-11-28
+
+### Fixed
+
+- Scoped `replyToChat` auto-reply delivery to the owning `aux_pane` via per-turn `ownedReplyToken` and workspace root matching (with a short owner grace window fallback when a host reuses an already-open pane without re-sending `ontoolresult`) so concurrent conversations or `global` views (`canMessage: false`) can never steal or drop pending replies.
+- Replaced one-shot auto-reply failure suppression (`failedReplyIdsRef`) with bounded exponential backoff retries (2s, 5s, 12s, 25s), automatic retry on window `focus` / `visibilitychange` recovery, `ack_reply` retries with local delivery deduplication, manual **To Chat** acknowledgement, surfaced `ui/message` failure reasons, and a persistent **Retry Send** alert banner if all automatic retries fail.
+- Fixed `claude_ui_poll` sleeping up to 12s when unnotified pending replies were ready, woke poll waiters immediately on `release_reply`, batched turn completion (`pendingChatReply` + `emitMeta` + `bumpCatalog` + `turn_finished`) atomically, raised the claim lease to 30s, and enforced the 4-call total in-flight semaphore cap across interactive and polling calls in `ServerBridge`.
+
 ## [0.5.0] - 2026-11-28
 
 ### Changed

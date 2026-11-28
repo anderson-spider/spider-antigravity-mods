@@ -1,6 +1,7 @@
 import { useApp, useHostStyles } from '@modelcontextprotocol/ext-apps/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ServerBridge, type ToolCallResponse } from '../bridge.ts'
+import { ReplyDeliveryTracker } from '../lib/reply-delivery.ts'
 import { applyPollEvents, extractLatestTurnResponse, stripCwdPrefix } from '../lib/timeline.ts'
 import { basenameOf } from '../lib/triggers.ts'
 import type {
@@ -25,9 +26,12 @@ const TOUCHED_FILES_POPOVER_ID = 'touched-files-popover'
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null)
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
+  const ownedReplyTokensRef = useRef(new Set<string>())
+  const sessionReplyTokensRef = useRef(new Map<string, string>())
+  const workspaceRootsRef = useRef<string[]>([])
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.5.0' },
+    appInfo: { name: 'claude-agent-ui', version: '0.5.1' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -41,6 +45,15 @@ export function App() {
         }
         const sc = result.structuredContent as BootstrapPayload | undefined
         if (sc) {
+          if (sc.ownedReplyToken) {
+            ownedReplyTokensRef.current.add(sc.ownedReplyToken)
+            if (sc.activeSession?.sessionId) {
+              sessionReplyTokensRef.current.set(sc.activeSession.sessionId, sc.ownedReplyToken)
+            }
+          }
+          if (Array.isArray(sc.workspaceRoots) && sc.workspaceRoots.length > 0) {
+            workspaceRootsRef.current = sc.workspaceRoots
+          }
           setBootstrapError(null)
           setBootstrap(sc)
         }
@@ -102,55 +115,180 @@ export function App() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }, [])
 
-  const deliveringReplyIdsRef = useRef(new Set<string>())
-  const failedReplyIdsRef = useRef(new Set<string>())
+  const replyTrackerRef = useRef(new ReplyDeliveryTracker())
+  const pendingReplyRefsRef = useRef(new Map<string, PendingChatReplyRef>())
+  const retryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const [failedReplyBanner, setFailedReplyBanner] = useState<{
+    sessionId: string
+    replyId: string
+    error?: string
+  } | null>(null)
+  const activeSessionRef = useRef<SessionSnapshot | null>(null)
+  useEffect(() => {
+    activeSessionRef.current = activeSession
+  }, [activeSession])
+
+  useEffect(() => {
+    return () => {
+      for (const timer of retryTimersRef.current.values()) {
+        clearTimeout(timer)
+      }
+      retryTimersRef.current.clear()
+    }
+  }, [])
+
+  const ackReplyWithRetry = useCallback(
+    async (sessionId: string, replyId: string) => {
+      if (!bridge) return
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const ackRes = await bridge.callTool('claude_ui_session', {
+          action: 'ack_reply',
+          sessionId,
+          replyId,
+          clientId: bridge.id,
+        })
+        if (ackRes.ok) return
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 400))
+        }
+      }
+    },
+    [bridge],
+  )
 
   const deliverPendingReplies = useCallback(
     async (refs: readonly PendingChatReplyRef[] | undefined) => {
       if (!bridge || !refs || refs.length === 0) return
       if (!bridge.capabilities.canMessage) return
+      const tracker = replyTrackerRef.current
       for (const ref of refs) {
-        if (deliveringReplyIdsRef.current.has(ref.replyId) || failedReplyIdsRef.current.has(ref.replyId)) continue
-        deliveringReplyIdsRef.current.add(ref.replyId)
+        if (tracker.isDelivered(ref.replyId)) {
+          pendingReplyRefsRef.current.delete(ref.replyId)
+          continue
+        }
+        pendingReplyRefsRef.current.set(ref.replyId, ref)
+        if (!tracker.canAttempt(ref.replyId)) continue
+
+        const existingTimer = retryTimersRef.current.get(ref.replyId)
+        if (existingTimer) {
+          clearTimeout(existingTimer)
+          retryTimersRef.current.delete(ref.replyId)
+        }
+
+        tracker.markStart(ref.replyId)
         try {
+          const replyToken = sessionReplyTokensRef.current.get(ref.sessionId)
           const claimRes = await bridge.callTool<{ claimed: boolean; text?: string }>('claude_ui_session', {
             action: 'claim_reply',
             sessionId: ref.sessionId,
             replyId: ref.replyId,
             clientId: bridge.id,
+            ...(replyToken ? { replyToken } : {}),
           })
           if (!claimRes.ok || !claimRes.data?.claimed || !claimRes.data.text) continue
 
           const sendRes = await bridge.sendMessage(claimRes.data.text)
           if (sendRes.ok) {
-            await bridge.callTool('claude_ui_session', {
-              action: 'ack_reply',
-              sessionId: ref.sessionId,
-              replyId: ref.replyId,
-              clientId: bridge.id,
-            })
+            tracker.markDelivered(ref.replyId)
+            pendingReplyRefsRef.current.delete(ref.replyId)
+            setFailedReplyBanner(prev => (prev?.replyId === ref.replyId ? null : prev))
+            await ackReplyWithRetry(ref.sessionId, ref.replyId)
             pushToast('Reply delivered to Antigravity chat', undefined, 'success')
           } else {
-            failedReplyIdsRef.current.add(ref.replyId)
+            const outcome = tracker.markFailed(ref.replyId, sendRes.error)
             await bridge.callTool('claude_ui_session', {
               action: 'release_reply',
               sessionId: ref.sessionId,
               replyId: ref.replyId,
               clientId: bridge.id,
+              ...(sendRes.error ? { error: sendRes.error } : {}),
             })
-            pushToast('Auto-reply failed', 'Use "To Chat" to send manually.', 'error')
+            if (!outcome.exhausted && outcome.retryInMs !== null) {
+              if (outcome.attempts === 1) {
+                pushToast('Auto-reply delayed — retrying…', sendRes.error, 'default')
+              }
+              const timer = setTimeout(() => {
+                retryTimersRef.current.delete(ref.replyId)
+                const queued = pendingReplyRefsRef.current.get(ref.replyId)
+                if (queued) {
+                  void deliverPendingReplies([queued])
+                }
+              }, outcome.retryInMs)
+              retryTimersRef.current.set(ref.replyId, timer)
+            } else {
+              setFailedReplyBanner({
+                sessionId: ref.sessionId,
+                replyId: ref.replyId,
+                ...(sendRes.error ? { error: sendRes.error } : {}),
+              })
+              pushToast('Auto-reply failed', sendRes.error || 'Use "To Chat" to send manually.', 'error')
+            }
           }
         } finally {
-          deliveringReplyIdsRef.current.delete(ref.replyId)
+          tracker.markFinish(ref.replyId)
         }
       }
     },
-    [bridge, pushToast],
+    [bridge, pushToast, ackReplyWithRetry],
   )
+
+  useEffect(() => {
+    if (!isConnected || !bridge || !caps.canMessage) return
+    const retryOnActive = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      const candidates = new Map<string, PendingChatReplyRef>()
+      for (const ref of pendingReplyRefsRef.current.values()) {
+        if (!replyTrackerRef.current.isDelivered(ref.replyId)) {
+          candidates.set(ref.replyId, ref)
+        }
+      }
+      const cur = activeSessionRef.current
+      if (cur?.pendingChatReplyId && !replyTrackerRef.current.isDelivered(cur.pendingChatReplyId)) {
+        if (!candidates.has(cur.pendingChatReplyId)) {
+          candidates.set(cur.pendingChatReplyId, {
+            sessionId: cur.sessionId,
+            replyId: cur.pendingChatReplyId,
+            status: cur.status === 'error' ? 'error' : 'completed',
+          })
+        }
+      }
+      if (candidates.size === 0) return
+      replyTrackerRef.current.resetForRetry()
+      void deliverPendingReplies([...candidates.values()])
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') retryOnActive()
+    }
+    window.addEventListener('focus', retryOnActive)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('focus', retryOnActive)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [isConnected, bridge, caps.canMessage, deliverPendingReplies])
+
+  useEffect(() => {
+    if (!failedReplyBanner) return
+    const match = sessions.find(s => s.sessionId === failedReplyBanner.sessionId)
+    if (match && match.pendingChatReplyId !== failedReplyBanner.replyId) {
+      pendingReplyRefsRef.current.delete(failedReplyBanner.replyId)
+      setFailedReplyBanner(null)
+    }
+  }, [sessions, failedReplyBanner])
 
   const catalogVersionRef = useRef(0)
 
   const applyBootstrap = useCallback((payload: BootstrapPayload) => {
+    if (payload.ownedReplyToken) {
+      ownedReplyTokensRef.current.add(payload.ownedReplyToken)
+      if (payload.activeSession?.sessionId) {
+        sessionReplyTokensRef.current.set(payload.activeSession.sessionId, payload.ownedReplyToken)
+      }
+    }
+    if (Array.isArray(payload.workspaceRoots) && payload.workspaceRoots.length > 0) {
+      workspaceRootsRef.current = payload.workspaceRoots
+    }
     setDiagnostics(payload.diagnostics)
     setSessions(payload.sessions ?? [])
     if (payload.preferences) {
@@ -255,6 +393,8 @@ export function App() {
           ...(activeId ? { sessionId: activeId, afterSeq: activeSeqRef.current } : {}),
           afterCatalogVersion: catalogVersionRef.current,
           waitMs: 12_000,
+          ...(ownedReplyTokensRef.current.size > 0 ? { replyTokens: [...ownedReplyTokensRef.current] } : {}),
+          ...(workspaceRootsRef.current.length > 0 ? { workspaceRoots: workspaceRootsRef.current } : {}),
         })
         if (cancelled) break
         if (!res.ok || !res.data) {
@@ -537,7 +677,26 @@ export function App() {
   const handleSendToHostChat = async () => {
     if (!bridge || !activeSession) return
     const res = await bridge.sendMessage(buildSessionSummaryText(activeSession))
-    pushToast(res.ok ? 'Sent summary to Antigravity chat' : 'Could not send to chat', undefined, res.ok ? 'success' : 'error')
+    if (res.ok && activeSession.pendingChatReplyId) {
+      replyTrackerRef.current.markDelivered(activeSession.pendingChatReplyId)
+      pendingReplyRefsRef.current.delete(activeSession.pendingChatReplyId)
+      setFailedReplyBanner(prev => (prev?.replyId === activeSession.pendingChatReplyId ? null : prev))
+      void ackReplyWithRetry(activeSession.sessionId, activeSession.pendingChatReplyId)
+    }
+    pushToast(
+      res.ok ? 'Sent summary to Antigravity chat' : 'Could not send to chat',
+      res.ok ? undefined : res.error,
+      res.ok ? 'success' : 'error',
+    )
+  }
+
+  const handleRetryFailedAutoReply = () => {
+    if (!failedReplyBanner) return
+    const { sessionId, replyId } = failedReplyBanner
+    replyTrackerRef.current.resetForRetry(replyId)
+    setFailedReplyBanner(null)
+    const status = activeSession?.sessionId === sessionId && activeSession.status === 'error' ? 'error' : 'completed'
+    void deliverPendingReplies([{ sessionId, replyId, status }])
   }
 
   const handleReconnect = async () => {
@@ -736,6 +895,17 @@ export function App() {
             </div>
           )
         })()}
+
+        {caps.canMessage && failedReplyBanner && activeSession?.pendingChatReplyId === failedReplyBanner.replyId && (
+          <div className="diag-alert-bar" role="alert">
+            <span className="truncate" title={failedReplyBanner.error}>
+              Auto-reply could not be sent automatically{failedReplyBanner.error ? ` (${failedReplyBanner.error})` : ''}.
+            </span>
+            <button type="button" className="btn btn-sm btn-primary" onClick={handleRetryFailedAutoReply}>
+              Retry Send
+            </button>
+          </div>
+        )}
 
         {activeSession ? (
           <>

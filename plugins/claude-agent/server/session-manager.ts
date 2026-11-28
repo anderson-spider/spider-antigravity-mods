@@ -45,7 +45,9 @@ const DEFAULT_WAIT_TIMEOUT_SECONDS = 25
 const MIN_WAIT_TIMEOUT_MS = 5_000
 const MAX_WAIT_TIMEOUT_SECONDS = 60
 const MAX_CHAT_REPLY_CHARS = 24_000
-const REPLY_CLAIM_LEASE_MS = 15_000
+const REPLY_CLAIM_LEASE_MS = 30_000
+const DEFAULT_REPLY_OWNER_GRACE_MS = 1_500
+const POLL_CLIENT_TTL_MS = 60_000
 const MAX_BOOTSTRAP_ITEMS = 80
 const DEFAULT_AUTO_ARCHIVE_IDLE_MS = 7 * 24 * 60 * 60 * 1_000
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 5_000
@@ -164,6 +166,7 @@ export type BootstrapPayload = {
   activeSession?: SessionSnapshot
   truncatedItems?: boolean
   pendingReplies?: PendingChatReplyRef[]
+  ownedReplyToken?: string
 }
 
 export type Reply = {
@@ -190,9 +193,23 @@ type PendingChatReply = {
   turnGen: number
   status: 'completed' | 'error'
   createdAt: string
+  queuedAtMs: number
   text: string
+  replyToken?: string
+  ownerClientId?: string
   claimedBy?: string
   claimedAt?: number
+  notifiedClients: Set<string>
+  graceTimer?: ReturnType<typeof setTimeout>
+}
+
+type ActivePollClient = {
+  clientId: string
+  canMessage: boolean
+  sessionId?: string
+  replyTokens: Set<string>
+  workspaceRoots: string[]
+  lastSeenAt: number
 }
 
 type InternalSession = {
@@ -219,6 +236,8 @@ type InternalSession = {
   readOnlyLock: boolean
   cancelling: boolean
   activeTurnReplyToChat: boolean
+  activeTurnReplyToken?: string
+  activeTurnOwnerClientId?: string
   activeTurnStartIndex: number
   pendingChatReply?: PendingChatReply
   activeAssistantId?: string
@@ -244,6 +263,7 @@ export type SessionManagerDeps = {
   cancelTimeoutMs?: number
   minAskTimeoutMs?: number
   minWaitTimeoutMs?: number
+  replyOwnerGraceMs?: number
 }
 
 function nowIso(): string {
@@ -588,6 +608,7 @@ export class SessionManager {
   private readonly cancelTimeoutMs: number
   private readonly minAskTimeoutMs: number
   private readonly minWaitTimeoutMs: number
+  private readonly replyOwnerGraceMs: number
   private client: AcpClient | null = null
   private connectingClient: AcpClient | null = null
   private connectPromise: Promise<void> | null = null
@@ -608,6 +629,7 @@ export class SessionManager {
   private focusSessionId: string | undefined
   private focusCatalogVersion = 0
   private readonly catalogWaiters = new Set<PollWaiter>()
+  private readonly activePollClients = new Map<string, ActivePollClient>()
 
   constructor(deps: SessionManagerDeps) {
     this.deps = deps
@@ -615,6 +637,7 @@ export class SessionManager {
     this.cancelTimeoutMs = deps.cancelTimeoutMs ?? DEFAULT_CANCEL_SETTLE_TIMEOUT_MS
     this.minAskTimeoutMs = deps.minAskTimeoutMs ?? MIN_ASK_TIMEOUT_MS
     this.minWaitTimeoutMs = deps.minWaitTimeoutMs ?? MIN_WAIT_TIMEOUT_MS
+    this.replyOwnerGraceMs = deps.replyOwnerGraceMs ?? DEFAULT_REPLY_OWNER_GRACE_MS
     try {
       this.binaryResolution = resolveAcpBinary(deps.binaryDeps)
     } catch (err) {
@@ -747,9 +770,11 @@ export class SessionManager {
     this.disposed = true
     await this.disposeClient()
     for (const session of this.sessions.values()) {
+      this.clearPendingChatReply(session)
       this.flushWaitersNow(session)
     }
     this.flushCatalogWaiters()
+    this.activePollClients.clear()
     // Drain any in-flight store writes before returning so callers can safely clean up dataDir or exit.
     await this.deps.store.load().catch(() => undefined)
   }
@@ -804,6 +829,8 @@ export class SessionManager {
         session.activeTurn = undefined
         session.cancelling = false
         session.activeTurnReplyToChat = false
+        session.activeTurnReplyToken = undefined
+        session.activeTurnOwnerClientId = undefined
       }
       const hadPermissions = this.clearSessionPendingPermissions(session, !this.disposed)
       if (wasRunning) {
@@ -879,12 +906,16 @@ export class SessionManager {
               const wasRunning = session.status === 'running'
               const wasLoaded = session.loadedInProcess
               const shouldReplyToChat = session.activeTurnReplyToChat
+              const replyToken = session.activeTurnReplyToken
+              const ownerClientId = session.activeTurnOwnerClientId
               session.loadedInProcess = false
               if (wasRunning || session.activeTurn) {
                 session.turnGen++
                 session.activeTurn = undefined
                 session.cancelling = false
                 session.activeTurnReplyToChat = false
+                session.activeTurnReplyToken = undefined
+                session.activeTurnOwnerClientId = undefined
               }
               const hadPermissions = this.clearSessionPendingPermissions(session, true)
               if (wasRunning) {
@@ -893,7 +924,11 @@ export class SessionManager {
                 session.updatedAt = nowIso()
                 this.appendSystemItem(session, 'error', this.lastError)
                 if (shouldReplyToChat) {
-                  this.queuePendingChatReply(session, 'error', this.lastError)
+                  this.queuePendingChatReply(session, 'error', this.lastError, {
+                    replyToken,
+                    ownerClientId,
+                    flush: false,
+                  })
                 }
                 this.pushEvent(
                   session,
@@ -906,6 +941,10 @@ export class SessionManager {
                   true,
                 )
                 this.emitMeta(session)
+                this.bumpCatalog()
+                if (shouldReplyToChat) {
+                  this.flushAllSessionWaiters()
+                }
                 void this.deps.store
                   .upsertSession(toPersisted(session))
                   .catch(err =>
@@ -932,7 +971,7 @@ export class SessionManager {
         'initialize',
         {
           protocolVersion: 1,
-          clientInfo: { name: 'antigravity-claude-agent', version: '0.5.0' },
+          clientInfo: { name: 'antigravity-claude-agent', version: '0.5.1' },
           clientCapabilities: {},
         },
         { timeoutMs: initTimeoutMs },
@@ -1462,7 +1501,9 @@ export class SessionManager {
       session.cancelling = false
       session.readOnlyLock = false
       session.activeTurnReplyToChat = false
-      session.pendingChatReply = undefined
+      session.activeTurnReplyToken = undefined
+      session.activeTurnOwnerClientId = undefined
+      this.clearPendingChatReply(session)
       if (session.status === 'running' && this.client?.isAlive && session.loadedInProcess) {
         this.client.notify('session/cancel', { sessionId })
       }
@@ -1482,7 +1523,7 @@ export class SessionManager {
     sessionId: string,
     promptText: string,
     files: readonly string[] = [],
-    opts: { allowReadOnlyLock?: boolean; replyToChat?: boolean } = {},
+    opts: { allowReadOnlyLock?: boolean; replyToChat?: boolean; replyToken?: string } = {},
   ): Promise<SessionSnapshot> {
     const trimmed = promptText.trim()
     if (!trimmed) throw new Error('Prompt cannot be empty.')
@@ -1510,7 +1551,9 @@ export class SessionManager {
     session.status = 'running'
     session.cancelling = false
     session.activeTurnReplyToChat = Boolean(opts.replyToChat)
-    session.pendingChatReply = undefined
+    session.activeTurnReplyToken = opts.replyToChat ? (opts.replyToken ?? makeId('rtok')) : undefined
+    session.activeTurnOwnerClientId = undefined
+    this.clearPendingChatReply(session)
     session.updatedAt = nowIso()
     session.activeAssistantId = undefined
     session.activeThoughtId = undefined
@@ -1538,14 +1581,23 @@ export class SessionManager {
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         const wasCancelling = session.cancelling
         const shouldReplyToChat = session.activeTurnReplyToChat
+        const replyToken = session.activeTurnReplyToken
+        const ownerClientId = session.activeTurnOwnerClientId
         session.cancelling = false
         session.activeTurnReplyToChat = false
+        session.activeTurnReplyToken = undefined
+        session.activeTurnOwnerClientId = undefined
         this.finalizeStreamingItems(session)
         session.status = 'idle'
         session.updatedAt = nowIso()
         const stopReason = wasCancelling ? 'cancelled' : result?.stopReason ?? 'end_turn'
-        if (shouldReplyToChat && stopReason !== 'cancelled') {
-          this.queuePendingChatReply(session, 'completed')
+        const willQueueReply = shouldReplyToChat && stopReason !== 'cancelled'
+        if (willQueueReply) {
+          this.queuePendingChatReply(session, 'completed', undefined, {
+            replyToken,
+            ownerClientId,
+            flush: false,
+          })
         }
         await this.deps.store
           .upsertSession(toPersisted(session))
@@ -1562,12 +1614,19 @@ export class SessionManager {
           },
           true,
         )
+        if (willQueueReply) {
+          this.flushAllSessionWaiters()
+        }
       } catch (err) {
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         const wasCancelling = session.cancelling
         const shouldReplyToChat = session.activeTurnReplyToChat
+        const replyToken = session.activeTurnReplyToken
+        const ownerClientId = session.activeTurnOwnerClientId
         session.cancelling = false
         session.activeTurnReplyToChat = false
+        session.activeTurnReplyToken = undefined
+        session.activeTurnOwnerClientId = undefined
         this.finalizeStreamingItems(session)
         if (wasCancelling) {
           session.status = 'idle'
@@ -1579,6 +1638,7 @@ export class SessionManager {
             )
           if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
           this.emitMeta(session)
+          this.bumpCatalog()
           this.pushEvent(
             session,
             {
@@ -1600,7 +1660,11 @@ export class SessionManager {
         session.updatedAt = nowIso()
         this.appendSystemItem(session, 'error', msg)
         if (shouldReplyToChat) {
-          this.queuePendingChatReply(session, 'error', msg)
+          this.queuePendingChatReply(session, 'error', msg, {
+            replyToken,
+            ownerClientId,
+            flush: false,
+          })
         }
         await this.deps.store
           .upsertSession(toPersisted(session))
@@ -1609,6 +1673,7 @@ export class SessionManager {
           )
         if (session.turnGen !== myTurnGen || this.sessions.get(session.sessionId) !== session) return
         this.emitMeta(session)
+        this.bumpCatalog()
         this.pushEvent(
           session,
           {
@@ -1619,11 +1684,16 @@ export class SessionManager {
           },
           true,
         )
+        if (shouldReplyToChat) {
+          this.flushAllSessionWaiters()
+        }
       } finally {
         if (session.turnGen === myTurnGen) {
           session.activeTurn = undefined
           session.cancelling = false
           session.activeTurnReplyToChat = false
+          session.activeTurnReplyToken = undefined
+          session.activeTurnOwnerClientId = undefined
         }
       }
     })()
@@ -1638,6 +1708,8 @@ export class SessionManager {
     if (!session) throw new Error(`Unknown session: ${sessionId}`)
 
     session.activeTurnReplyToChat = false
+    session.activeTurnReplyToken = undefined
+    session.activeTurnOwnerClientId = undefined
     const prevTurn = session.activeTurn
     if (prevTurn) {
       session.cancelling = true
@@ -1755,6 +1827,7 @@ export class SessionManager {
     waitMs = DEFAULT_POLL_WAIT_MS,
     clientId?: string,
     afterCatalogVersion?: number,
+    pollOpts?: { canMessage?: boolean; replyTokens?: readonly string[]; workspaceRoots?: readonly string[] },
   ): Promise<{
     sessionId?: string
     events: PollEvent[]
@@ -1768,6 +1841,27 @@ export class SessionManager {
   }> {
     await this.ensureHydrated()
     const normalizedClientId = typeof clientId === 'string' && clientId.trim() ? clientId.trim() : undefined
+    const clientReplyTokens = Array.isArray(pollOpts?.replyTokens)
+      ? pollOpts.replyTokens.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      : undefined
+    const clientWorkspaceRoots = Array.isArray(pollOpts?.workspaceRoots)
+      ? pollOpts.workspaceRoots.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
+      : undefined
+    const replyQueryOpts = {
+      clientId: normalizedClientId,
+      canMessage: pollOpts?.canMessage,
+      replyTokens: clientReplyTokens,
+      workspaceRoots: clientWorkspaceRoots,
+      activeSessionId: sessionId,
+    }
+    if (normalizedClientId) {
+      this.recordPollClient(normalizedClientId, {
+        canMessage: pollOpts?.canMessage,
+        sessionId,
+        replyTokens: clientReplyTokens,
+        workspaceRoots: clientWorkspaceRoots,
+      })
+    }
 
     // Wake only waiters belonging to the same view/clientId so switching sessions in one view is instant
     // without ping-ponging a second open view (e.g., aux_pane + global) polling a different session.
@@ -1799,10 +1893,19 @@ export class SessionManager {
       }
     }
 
+    const collectPending = () => {
+      const refs = this.listPendingReplies(replyQueryOpts)
+      if (normalizedClientId && refs.length > 0) {
+        this.markRepliesNotified(refs, normalizedClientId)
+      }
+      return refs
+    }
+
     if (!sessionId) {
       const hasCatalogDiff = afterCatalogVersion !== undefined && afterCatalogVersion < this.catalogVersion
-      if (hasCatalogDiff || waitMs <= 0) {
-        const pendingReplies = this.listPendingReplies()
+      const hasUnnotifiedReply = this.hasUnnotifiedPendingReplies(replyQueryOpts)
+      if (hasCatalogDiff || hasUnnotifiedReply || waitMs <= 0) {
+        const pendingReplies = collectPending()
         return {
           events: [],
           latestSeq: 0,
@@ -1829,7 +1932,8 @@ export class SessionManager {
         this.catalogWaiters.add(waiter)
       })
 
-      const pendingReplies = this.listPendingReplies()
+      if (normalizedClientId) this.touchPollClient(normalizedClientId)
+      const pendingReplies = collectPending()
       return {
         events: [],
         latestSeq: 0,
@@ -1846,7 +1950,7 @@ export class SessionManager {
     const latestSeq = session.nextSeq - 1
     const oldestSeq = session.events[0]?.seq ?? session.nextSeq
     if (afterSeq > latestSeq || (afterSeq > 0 && afterSeq < oldestSeq - 1)) {
-      const pendingReplies = this.listPendingReplies()
+      const pendingReplies = collectPending()
       return {
         sessionId,
         events: [],
@@ -1861,8 +1965,9 @@ export class SessionManager {
 
     const immediate = session.events.filter(ev => ev.seq > afterSeq)
     const hasCatalogDiff = afterCatalogVersion !== undefined && afterCatalogVersion < this.catalogVersion
-    if (immediate.length > 0 || hasCatalogDiff || waitMs <= 0) {
-      const pendingReplies = this.listPendingReplies()
+    const hasUnnotifiedReply = this.hasUnnotifiedPendingReplies(replyQueryOpts)
+    if (immediate.length > 0 || hasCatalogDiff || hasUnnotifiedReply || waitMs <= 0) {
+      const pendingReplies = collectPending()
       return {
         sessionId,
         events: immediate,
@@ -1891,7 +1996,8 @@ export class SessionManager {
       session.waiters.add(waiter)
     })
 
-    const pendingReplies = this.listPendingReplies()
+    if (normalizedClientId) this.touchPollClient(normalizedClientId)
+    const pendingReplies = collectPending()
     return {
       sessionId,
       events: session.events.filter(ev => ev.seq > afterSeq),
@@ -1959,6 +2065,7 @@ export class SessionManager {
     let targetSessionId = input.sessionId
     const promptText = typeof input.prompt === 'string' ? input.prompt.trim() : ''
     let createdFresh = false
+    let ownedReplyToken: string | undefined
     if (promptText) {
       let session: InternalSession
       if (targetSessionId && this.sessions.has(targetSessionId)) {
@@ -2032,7 +2139,8 @@ export class SessionManager {
         }
       }
       const replyToChat = input.replyToChat ?? true
-      await this.startPrompt(session.sessionId, promptText, [], { replyToChat })
+      ownedReplyToken = replyToChat ? makeId('rtok') : undefined
+      await this.startPrompt(session.sessionId, promptText, [], { replyToChat, replyToken: ownedReplyToken })
       targetSessionId = session.sessionId
     } else if (input.cwd && !targetSessionId) {
       const resolved = await resolveDirectory(input.cwd, workspaceRoots[0] ?? this.deps.defaultCwd)
@@ -2050,6 +2158,9 @@ export class SessionManager {
       sessionId: targetSessionId,
       workspaceRoots,
     })
+    if (ownedReplyToken) {
+      bootstrap.ownedReplyToken = ownedReplyToken
+    }
 
     const replyEnabled = Boolean(promptText) && (input.replyToChat ?? true)
     const active = bootstrap.activeSession
@@ -2268,8 +2379,9 @@ export class SessionManager {
         const session = this.sessions.get(input.sessionId)
         if (!session) return { text: `Unknown session: ${input.sessionId}`, isError: true }
         if (session.status !== 'running' && session.pendingChatReply) {
-          session.pendingChatReply = undefined
+          this.clearPendingChatReply(session)
           this.emitMeta(session)
+          this.bumpCatalog()
         }
         return this.formatSessionInspection(session, false)
       }
@@ -2311,8 +2423,9 @@ export class SessionManager {
         const current = this.sessions.get(input.sessionId)
         if (!current) return { text: `Session ${input.sessionId} was deleted while waiting.`, isError: true }
         if (current.status !== 'running' && current.pendingChatReply) {
-          current.pendingChatReply = undefined
+          this.clearPendingChatReply(current)
           this.emitMeta(current)
+          this.bumpCatalog()
         }
         return this.formatSessionInspection(current, timedOut && current.status === 'running')
       }
@@ -2474,7 +2587,7 @@ export class SessionManager {
         if (!input.sessionId || !input.replyId) {
           return { text: 'sessionId and replyId are required.', isError: true }
         }
-        const claim = this.claimChatReply(input.sessionId, input.replyId, input.clientId)
+        const claim = this.claimChatReply(input.sessionId, input.replyId, input.clientId, input.replyToken)
         return { text: claim.claimed ? 'claimed' : 'unavailable', structuredContent: claim }
       }
       case 'ack_reply': {
@@ -2488,7 +2601,7 @@ export class SessionManager {
         if (!input.sessionId || !input.replyId) {
           return { text: 'sessionId and replyId are required.', isError: true }
         }
-        const released = this.releaseChatReply(input.sessionId, input.replyId, input.clientId)
+        const released = this.releaseChatReply(input.sessionId, input.replyId, input.clientId, input.error)
         return { text: released ? 'released' : 'noop', structuredContent: { released } }
       }
       default:
@@ -2540,7 +2653,11 @@ export class SessionManager {
       typeof input.afterCatalogVersion === 'number' && Number.isFinite(input.afterCatalogVersion)
         ? input.afterCatalogVersion
         : undefined
-    const data = await this.pollEvents(sessionId, afterSeq, input.waitMs, input.clientId, afterCatalogVersion)
+    const data = await this.pollEvents(sessionId, afterSeq, input.waitMs, input.clientId, afterCatalogVersion, {
+      ...(typeof input.canMessage === 'boolean' ? { canMessage: input.canMessage } : {}),
+      ...(Array.isArray(input.replyTokens) ? { replyTokens: input.replyTokens } : {}),
+      ...(Array.isArray(input.workspaceRoots) ? { workspaceRoots: input.workspaceRoots } : {}),
+    })
     return { text: 'ok', structuredContent: data as unknown as Record<string, unknown> }
   }
 
@@ -2947,25 +3064,215 @@ export class SessionManager {
     this.flushCatalogWaiters()
   }
 
-  private queuePendingChatReply(session: InternalSession, status: 'completed' | 'error', errorText?: string): void {
-    session.pendingChatReply = {
+  private clearPendingChatReply(session: InternalSession): void {
+    if (session.pendingChatReply?.graceTimer) {
+      clearTimeout(session.pendingChatReply.graceTimer)
+    }
+    session.pendingChatReply = undefined
+  }
+
+  private pruneStalePollClients(now = Date.now()): void {
+    for (const [id, client] of this.activePollClients.entries()) {
+      if (now - client.lastSeenAt > POLL_CLIENT_TTL_MS) {
+        this.activePollClients.delete(id)
+      }
+    }
+  }
+
+  private isPollClientAlive(clientId: string, now = Date.now()): boolean {
+    const entry = this.activePollClients.get(clientId)
+    return Boolean(entry && now - entry.lastSeenAt <= POLL_CLIENT_TTL_MS)
+  }
+
+  private touchPollClient(clientId: string): void {
+    const entry = this.activePollClients.get(clientId)
+    if (entry) entry.lastSeenAt = Date.now()
+  }
+
+  private recordPollClient(
+    clientId: string,
+    info: { canMessage?: boolean; sessionId?: string; replyTokens?: readonly string[]; workspaceRoots?: readonly string[] },
+  ): void {
+    const now = Date.now()
+    this.pruneStalePollClients(now)
+    const existing = this.activePollClients.get(clientId)
+    const tokens = existing?.replyTokens ?? new Set<string>()
+    if (info.replyTokens) {
+      for (const tok of info.replyTokens) tokens.add(tok)
+    }
+    const canMessage = info.canMessage ?? existing?.canMessage ?? true
+    const workspaceRoots = info.workspaceRoots?.length ? [...info.workspaceRoots] : (existing?.workspaceRoots ?? [])
+    this.activePollClients.set(clientId, {
+      clientId,
+      canMessage,
+      sessionId: info.sessionId,
+      replyTokens: tokens,
+      workspaceRoots,
+      lastSeenAt: now,
+    })
+
+    if (!canMessage || tokens.size === 0) return
+
+    for (const session of this.sessions.values()) {
+      if (session.activeTurnReplyToken && tokens.has(session.activeTurnReplyToken)) {
+        session.activeTurnOwnerClientId = clientId
+      }
+      const pending = session.pendingChatReply
+      if (pending?.replyToken && tokens.has(pending.replyToken)) {
+        pending.ownerClientId = clientId
+        if (pending.graceTimer) {
+          clearTimeout(pending.graceTimer)
+          pending.graceTimer = undefined
+        }
+      }
+    }
+  }
+
+  private queuePendingChatReply(
+    session: InternalSession,
+    status: 'completed' | 'error',
+    errorText?: string,
+    opts: { replyToken?: string; ownerClientId?: string; flush?: boolean } = {},
+  ): void {
+    this.clearPendingChatReply(session)
+    const now = Date.now()
+    const replyToken = opts.replyToken
+    let ownerClientId = opts.ownerClientId
+    if (!ownerClientId && replyToken) {
+      this.pruneStalePollClients(now)
+      for (const client of this.activePollClients.values()) {
+        if (client.canMessage && client.replyTokens.has(replyToken)) {
+          ownerClientId = client.clientId
+          break
+        }
+      }
+    }
+
+    const pending: PendingChatReply = {
       replyId: makeId('reply'),
       turnGen: session.turnGen,
       status,
       createdAt: nowIso(),
+      queuedAtMs: now,
       text: formatChatReplyMessage(session, status, session.activeTurnStartIndex, errorText),
+      ...(replyToken ? { replyToken } : {}),
+      ...(ownerClientId ? { ownerClientId } : {}),
+      notifiedClients: new Set(),
     }
-    this.flushAllSessionWaiters()
+
+    // If no view has announced ownership of this replyToken yet (e.g., an already-open pane that did not receive
+    // a fresh ontoolresult), wake eligible fallback views promptly once the brief owner grace window elapses.
+    if (replyToken && !ownerClientId && this.replyOwnerGraceMs > 0 && !this.disposed) {
+      pending.graceTimer = setTimeout(() => {
+        if (session.pendingChatReply !== pending) return
+        pending.graceTimer = undefined
+        if (!pending.ownerClientId) {
+          pending.notifiedClients.clear()
+          this.flushAllSessionWaiters()
+        }
+      }, this.replyOwnerGraceMs)
+      pending.graceTimer.unref?.()
+    }
+
+    session.pendingChatReply = pending
+    this.deps.log?.(
+      `claude-agent: auto-reply queued (${pending.replyId}, session=${session.sessionId}, status=${status}, owner=${ownerClientId ?? 'unclaimed'})`,
+    )
+    if (opts.flush !== false) {
+      this.flushAllSessionWaiters()
+    }
   }
 
-  private listPendingReplies(): PendingChatReplyRef[] {
+  private matchesWorkspaceRoots(cwd: string, roots: readonly string[] | undefined): boolean {
+    if (!roots || roots.length === 0) return true
+    const normalizedCwd = resolve(cwd)
+    return roots.some(root => {
+      const normalizedRoot = resolve(root)
+      return (
+        normalizedCwd === normalizedRoot ||
+        normalizedCwd.startsWith(`${normalizedRoot}/`) ||
+        normalizedCwd.startsWith(`${normalizedRoot}\\`)
+      )
+    })
+  }
+
+  private isReplyEligibleForClient(
+    session: InternalSession,
+    pending: PendingChatReply,
+    opts?: {
+      clientId?: string
+      canMessage?: boolean
+      replyTokens?: readonly string[]
+      workspaceRoots?: readonly string[]
+      activeSessionId?: string
+    },
+    now = Date.now(),
+  ): boolean {
+    if (opts?.canMessage === false) return false
+    const leaseActive = pending.claimedAt !== undefined && now - pending.claimedAt < REPLY_CLAIM_LEASE_MS
+    if (leaseActive) return false
+    if (!opts?.clientId) return true
+
+    const clientEntry = this.activePollClients.get(opts.clientId)
+    const tokenMatch = Boolean(
+      pending.replyToken &&
+        (opts.replyTokens?.includes(pending.replyToken) || clientEntry?.replyTokens.has(pending.replyToken)),
+    )
+    if (tokenMatch) {
+      pending.ownerClientId = opts.clientId
+      if (pending.graceTimer) {
+        clearTimeout(pending.graceTimer)
+        pending.graceTimer = undefined
+      }
+      return true
+    }
+
+    if (pending.ownerClientId) {
+      if (pending.ownerClientId === opts.clientId) return true
+      if (this.isPollClientAlive(pending.ownerClientId, now)) return false
+      // Previous owner pane closed/went stale; fall back below.
+      pending.ownerClientId = undefined
+    }
+
+    const clientRoots = opts.workspaceRoots?.length ? opts.workspaceRoots : clientEntry?.workspaceRoots
+    if (!this.matchesWorkspaceRoots(session.cwd, clientRoots)) {
+      return false
+    }
+
+    if (pending.replyToken) {
+      this.pruneStalePollClients(now)
+      const messageClients = [...this.activePollClients.values()].filter(
+        c => c.canMessage && this.matchesWorkspaceRoots(session.cwd, c.workspaceRoots),
+      )
+      const graceElapsed = now - pending.queuedAtMs >= this.replyOwnerGraceMs
+      if (!graceElapsed && messageClients.length > 1) {
+        // Wait briefly when multiple compatible panes are open so the one that received claude_open's ontoolresult claims ownership first.
+        return false
+      }
+      // Prefer a canMessage view viewing this exact session when multiple compatible panes exist.
+      const viewersOnSession = messageClients.filter(c => c.sessionId === session.sessionId)
+      if (viewersOnSession.length > 0 && messageClients.length > 1) {
+        return opts.activeSessionId === session.sessionId || viewersOnSession.some(c => c.clientId === opts.clientId)
+      }
+    }
+
+    return true
+  }
+
+  private listPendingReplies(opts?: {
+    clientId?: string
+    canMessage?: boolean
+    replyTokens?: readonly string[]
+    workspaceRoots?: readonly string[]
+    activeSessionId?: string
+  }): PendingChatReplyRef[] {
+    if (opts?.canMessage === false) return []
     const now = Date.now()
     const refs: PendingChatReplyRef[] = []
     for (const session of this.sessions.values()) {
       const pending = session.pendingChatReply
       if (!pending) continue
-      const leaseActive = pending.claimedAt !== undefined && now - pending.claimedAt < REPLY_CLAIM_LEASE_MS
-      if (leaseActive) continue
+      if (!this.isReplyEligibleForClient(session, pending, opts, now)) continue
       refs.push({
         sessionId: session.sessionId,
         replyId: pending.replyId,
@@ -2975,10 +3282,34 @@ export class SessionManager {
     return refs
   }
 
+  private hasUnnotifiedPendingReplies(opts: {
+    clientId?: string
+    canMessage?: boolean
+    replyTokens?: readonly string[]
+    workspaceRoots?: readonly string[]
+    activeSessionId?: string
+  }): boolean {
+    if (opts.canMessage === false) return false
+    const refs = this.listPendingReplies(opts)
+    if (refs.length === 0) return false
+    if (!opts.clientId) return true
+    return refs.some(ref => {
+      const pending = this.sessions.get(ref.sessionId)?.pendingChatReply
+      return Boolean(pending && !pending.notifiedClients.has(opts.clientId!))
+    })
+  }
+
+  private markRepliesNotified(refs: readonly PendingChatReplyRef[], clientId: string): void {
+    for (const ref of refs) {
+      this.sessions.get(ref.sessionId)?.pendingChatReply?.notifiedClients.add(clientId)
+    }
+  }
+
   private claimChatReply(
     sessionId: string,
     replyId: string,
     clientId?: string,
+    replyToken?: string,
   ): { claimed: boolean; replyId: string; text?: string } {
     const session = this.sessions.get(sessionId)
     const pending = session?.pendingChatReply
@@ -2987,12 +3318,23 @@ export class SessionManager {
     }
     const now = Date.now()
     const holder = clientId?.trim() || 'anonymous'
+    const tokenMatch = Boolean(pending.replyToken && replyToken && pending.replyToken === replyToken)
+    if (tokenMatch && clientId?.trim()) {
+      pending.ownerClientId = holder
+      if (pending.graceTimer) {
+        clearTimeout(pending.graceTimer)
+        pending.graceTimer = undefined
+      }
+    } else if (pending.ownerClientId && pending.ownerClientId !== holder && this.isPollClientAlive(pending.ownerClientId, now)) {
+      return { claimed: false, replyId }
+    }
     const leaseActive = pending.claimedAt !== undefined && now - pending.claimedAt < REPLY_CLAIM_LEASE_MS
     if (leaseActive && pending.claimedBy !== holder) {
       return { claimed: false, replyId }
     }
     pending.claimedBy = holder
     pending.claimedAt = now
+    this.deps.log?.(`claude-agent: auto-reply claimed (${replyId}, session=${sessionId}, client=${holder})`)
     return { claimed: true, replyId, text: pending.text }
   }
 
@@ -3002,12 +3344,14 @@ export class SessionManager {
     if (!session || !pending || pending.replyId !== replyId) return false
     const holder = clientId?.trim() || 'anonymous'
     if (pending.claimedBy && pending.claimedBy !== holder) return false
-    session.pendingChatReply = undefined
+    this.clearPendingChatReply(session)
+    this.deps.log?.(`claude-agent: auto-reply acked (${replyId}, session=${sessionId}, client=${holder})`)
     this.emitMeta(session)
+    this.bumpCatalog()
     return true
   }
 
-  private releaseChatReply(sessionId: string, replyId: string, clientId?: string): boolean {
+  private releaseChatReply(sessionId: string, replyId: string, clientId?: string, error?: string): boolean {
     const session = this.sessions.get(sessionId)
     const pending = session?.pendingChatReply
     if (!session || !pending || pending.replyId !== replyId) return false
@@ -3015,6 +3359,16 @@ export class SessionManager {
     if (pending.claimedBy && pending.claimedBy !== holder) return false
     pending.claimedBy = undefined
     pending.claimedAt = undefined
+    // Keep holder in notifiedClients so it drives retries via its own backoff timer without busy-looping pollEvents,
+    // while clearing other clients so another eligible view can take over immediately if available.
+    pending.notifiedClients.clear()
+    if (clientId?.trim()) {
+      pending.notifiedClients.add(holder)
+    }
+    this.deps.log?.(
+      `claude-agent: auto-reply released (${replyId}, session=${sessionId}, client=${holder}${error ? `, reason=${redactSecrets(error)}` : ''})`,
+    )
+    this.flushAllSessionWaiters()
     return true
   }
 
