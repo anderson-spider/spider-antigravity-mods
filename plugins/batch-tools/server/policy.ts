@@ -85,6 +85,13 @@ export interface ResolvedTarget {
 
 export interface PolicyOptions {
   mcpRoots?: readonly string[]
+  /**
+   * Optional explicit `cwd` passed by the tool call. Only used as a strictly
+   * validated per-call project-root jail (Tier 4) when MCP `roots/list` and
+   * `BATCH_TOOLS_WORKSPACE_ROOTS` are unset and `process.cwd()` is unsafe
+   * (e.g. hosts like Desktop Hub that spawn global plugins in the plugin dir).
+   */
+  explicitCwd?: string
   env?: NodeJS.ProcessEnv
   processCwd?: () => string
   pluginRoot?: string
@@ -417,6 +424,216 @@ async function isUnsafeFallbackCwd(
   return null
 }
 
+const PROJECT_WORKSPACE_MARKERS: readonly string[] = [
+  '.git',
+  'package.json',
+  'pnpm-workspace.yaml',
+  'pyproject.toml',
+  'setup.py',
+  'Cargo.toml',
+  'go.mod',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'settings.gradle',
+  'settings.gradle.kts',
+  'Makefile',
+  'CMakeLists.txt',
+  'composer.json',
+  'Gemfile',
+  'pubspec.yaml',
+  'deno.json',
+  'deno.jsonc',
+  'flake.nix',
+  'WORKSPACE',
+  'MODULE.bazel',
+  '.hg',
+  '.svn',
+]
+
+const MAX_MARKER_WALK_DEPTH = 8
+
+const POSIX_EXACT_FORBIDDEN_EXPLICIT_DIRS: readonly string[] = [
+  '/tmp',
+  '/private/tmp',
+  '/var/tmp',
+  '/private/var/tmp',
+  '/Users',
+  '/home',
+  '/Volumes',
+  '/mnt',
+  '/opt',
+  '/var',
+  '/private/var',
+  '/private',
+]
+
+const POSIX_FORBIDDEN_SYSTEM_SUBTREES: readonly string[] = [
+  '/etc',
+  '/private/etc',
+  '/usr',
+  '/bin',
+  '/sbin',
+  '/lib',
+  '/lib64',
+  '/boot',
+  '/dev',
+  '/proc',
+  '/sys',
+  '/run',
+  '/System',
+  '/Library',
+  '/Applications',
+  '/root',
+  '/var/db',
+  '/private/var/db',
+  '/var/root',
+  '/private/var/root',
+  '/var/lib',
+  '/var/log',
+  '/var/run',
+  '/private/var/run',
+  '/var/spool',
+  '/var/backups',
+  '/var/mail',
+  '/var/cache',
+]
+
+const WIN32_FORBIDDEN_SYSTEM_SUBTREES: readonly string[] = [
+  'C:\\Windows',
+  'C:\\Program Files',
+  'C:\\Program Files (x86)',
+  'C:\\ProgramData',
+]
+
+const FORBIDDEN_HOME_SUBDIRS: readonly string[] = [
+  '.ssh',
+  '.aws',
+  '.gnupg',
+  '.kube',
+  '.docker',
+  '.azure',
+  '.gcloud',
+  '.config',
+  '.local',
+  '.t3',
+  '.npm',
+  '.yarn',
+  '.pnpm-store',
+  '.cargo',
+  '.rustup',
+  '.pyenv',
+  '.rbenv',
+  '.nvm',
+  '.asdf',
+  '.mise',
+  '.claude',
+  '.codex',
+  '.cursor',
+  'Library',
+  '.Trash',
+]
+
+function isAbsolutePath(inputPath: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32'
+    ? /^(?:[A-Za-z]:[\\/]|\\\\[^\\])/.test(inputPath)
+    : path.isAbsolute(inputPath)
+}
+
+async function isForbiddenExplicitRoot(
+  canonDir: string,
+  env: NodeJS.ProcessEnv,
+  pluginRoot: string,
+  platform: NodeJS.Platform,
+): Promise<string | null> {
+  const unsafe = await isUnsafeFallbackCwd(canonDir, env, pluginRoot, platform)
+  if (unsafe) return unsafe
+
+  if (isGitInternalPath(canonDir, platform)) {
+    return 'Git internal metadata (.git)'
+  }
+  if (isBuiltinSecretPath(canonDir)) {
+    return 'a secret directory'
+  }
+
+  const tmpCandidates = [os.tmpdir()]
+  for (const tmp of tmpCandidates) {
+    if (!tmp) continue
+    const canonTmp = (await canonicalizeExistingDir(tmp)) ?? path.resolve(tmp)
+    if (isSameDir(canonDir, canonTmp, platform)) {
+      return 'the OS temp root directory'
+    }
+  }
+
+  if (platform === 'win32') {
+    for (const sysDir of WIN32_FORBIDDEN_SYSTEM_SUBTREES) {
+      if (isPathInsideRoot(canonDir, sysDir, platform)) {
+        return 'a system directory'
+      }
+    }
+  } else {
+    for (const exactDir of POSIX_EXACT_FORBIDDEN_EXPLICIT_DIRS) {
+      if (isSameDir(canonDir, exactDir, platform)) {
+        return `a non-workspace parent directory (${exactDir})`
+      }
+    }
+    for (const sysDir of POSIX_FORBIDDEN_SYSTEM_SUBTREES) {
+      if (isPathInsideRoot(canonDir, sysDir, platform)) {
+        return `a system directory (${sysDir})`
+      }
+    }
+  }
+
+  const homes = await collectHomeDirs(env, platform)
+  for (const home of homes) {
+    for (const sub of FORBIDDEN_HOME_SUBDIRS) {
+      const forbidden = path.join(home, sub)
+      if (isPathInsideRoot(canonDir, forbidden, platform)) {
+        return `a sensitive home directory (${sub})`
+      }
+    }
+    // Under ~/.gemini, allow only project worktrees strictly beneath
+    // ~/.gemini/antigravity/worktrees/ and reject config/brain/mcp/builtin.
+    const geminiDir = path.join(home, '.gemini')
+    if (isPathInsideRoot(canonDir, geminiDir, platform)) {
+      const worktreesDir = path.join(geminiDir, 'antigravity', 'worktrees')
+      const inWorktrees =
+        isPathInsideRoot(canonDir, worktreesDir, platform) &&
+        !isSameDir(canonDir, worktreesDir, platform)
+      if (!inWorktrees) {
+        return 'the Antigravity/Gemini configuration directory'
+      }
+    }
+  }
+
+  return null
+}
+
+async function hasProjectWorkspaceMarker(
+  canonDir: string,
+  env: NodeJS.ProcessEnv,
+  pluginRoot: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
+  let current = canonDir
+  for (let depth = 0; depth <= MAX_MARKER_WALK_DEPTH; depth++) {
+    if (depth > 0) {
+      // Never walk into forbidden roots (e.g. $HOME, /, /tmp, ~/.gemini/antigravity/worktrees).
+      const forbidden = await isForbiddenExplicitRoot(current, env, pluginRoot, platform)
+      if (forbidden) return false
+    }
+    for (const marker of PROJECT_WORKSPACE_MARKERS) {
+      if (existsSync(path.join(current, marker))) {
+        return true
+      }
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return false
+}
+
 async function hasSymlinkComponentBelowRoot(
   absPath: string,
   root: string,
@@ -558,33 +775,108 @@ export function createPolicyGuard(options: PolicyOptions = {}): PolicyGuard {
     }
 
     // Tier 3: Safe process.cwd() fallback (fail-closed for /, $HOME, plugin dir)
-    let rawCwd: string
+    let fallbackReason: string | null = null
+    let rawCwd: string | null = null
     try {
       rawCwd = getProcessCwd()
     } catch {
-      return {
-        ok: false,
-        reason: 'no_workspace_roots',
-        error: `Access denied: could not determine workspace root. Set ${ENV_WORKSPACE_ROOTS} or use a host supporting MCP roots/list.`,
+      fallbackReason = 'inaccessible'
+    }
+    if (rawCwd !== null) {
+      const canonCwd = await canonicalizeExistingDir(rawCwd)
+      if (!canonCwd) {
+        fallbackReason = 'not accessible'
+      } else {
+        const unsafePlace = await isUnsafeFallbackCwd(canonCwd, env, pluginRoot, platform)
+        if (!unsafePlace) {
+          return { ok: true, value: [canonCwd] }
+        }
+        fallbackReason = unsafePlace
       }
     }
-    const canonCwd = await canonicalizeExistingDir(rawCwd)
-    if (!canonCwd) {
-      return {
-        ok: false,
-        reason: 'no_workspace_roots',
-        error: `Access denied: server working directory is not accessible. Set ${ENV_WORKSPACE_ROOTS} or use a host supporting MCP roots/list.`,
+
+    // Tier 4: Validated explicit absolute `cwd` as a per-call project-root jail
+    // for hosts that do not advertise MCP `roots/list` (e.g. Desktop Hub).
+    const rawExplicit = options.explicitCwd
+    if (typeof rawExplicit === 'string' && rawExplicit.trim().length > 0) {
+      const trimmedExplicit = rawExplicit.trim()
+      if (hasNullByte(trimmedExplicit)) {
+        return {
+          ok: false,
+          reason: 'invalid_path',
+          error: 'Invalid cwd: path must not contain NUL bytes.',
+        }
       }
-    }
-    const unsafePlace = await isUnsafeFallbackCwd(canonCwd, env, pluginRoot, platform)
-    if (unsafePlace) {
-      return {
-        ok: false,
-        reason: 'no_workspace_roots',
-        error: `Access denied: no workspace roots reported via MCP roots/list and process.cwd() is ${unsafePlace}. Configure ${ENV_WORKSPACE_ROOTS} to allow a workspace.`,
+      if (isTildePath(trimmedExplicit)) {
+        return {
+          ok: false,
+          reason: 'tilde_forbidden',
+          error: 'Access denied: home-directory (~) paths are forbidden.',
+        }
       }
+      if (!isAbsolutePath(trimmedExplicit, platform)) {
+        return {
+          ok: false,
+          reason: 'no_workspace_roots',
+          error: `Access denied: no workspace roots reported via MCP roots/list and process.cwd() is ${fallbackReason ?? 'not a workspace'}. Pass the active project's absolute workspace path in 'cwd', or configure ${ENV_WORKSPACE_ROOTS}.`,
+        }
+      }
+      if (isSecretRelativePath(trimmedExplicit)) {
+        return {
+          ok: false,
+          reason: 'secret_file',
+          error: 'Access denied: explicit cwd matches the secret-file denylist.',
+        }
+      }
+      const canonExplicit = await canonicalizeExistingDir(trimmedExplicit)
+      if (!canonExplicit) {
+        return {
+          ok: false,
+          reason: 'invalid_path',
+          error: 'Invalid cwd: explicit workspace directory does not exist or is not a directory.',
+        }
+      }
+      if (isSecretRelativePath(canonExplicit)) {
+        return {
+          ok: false,
+          reason: 'secret_file',
+          error: 'Access denied: explicit cwd resolves to a path matching the secret-file denylist.',
+        }
+      }
+      const forbiddenReason = await isForbiddenExplicitRoot(
+        canonExplicit,
+        env,
+        pluginRoot,
+        platform,
+      )
+      if (forbiddenReason) {
+        return {
+          ok: false,
+          reason: 'outside_workspace',
+          error: `Access denied: explicit cwd targets ${forbiddenReason}, which cannot be used as a workspace root.`,
+        }
+      }
+      const isProject = await hasProjectWorkspaceMarker(
+        canonExplicit,
+        env,
+        pluginRoot,
+        platform,
+      )
+      if (!isProject) {
+        return {
+          ok: false,
+          reason: 'outside_workspace',
+          error: `Access denied: explicit cwd is not inside a recognized project workspace (no .git or project manifest found). Pass a project directory or configure ${ENV_WORKSPACE_ROOTS}.`,
+        }
+      }
+      return { ok: true, value: [canonExplicit] }
     }
-    return { ok: true, value: [canonCwd] }
+
+    return {
+      ok: false,
+      reason: 'no_workspace_roots',
+      error: `Access denied: no workspace roots reported via MCP roots/list and process.cwd() is ${fallbackReason ?? 'not a workspace'}. Pass the active project's absolute workspace path in 'cwd', or configure ${ENV_WORKSPACE_ROOTS}.`,
+    }
   }
 
   function getRoots(): Promise<PolicyDecision<readonly string[]>> {

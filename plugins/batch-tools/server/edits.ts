@@ -85,7 +85,8 @@ export const APPLY_EDITS_TOOL_SPEC: ToolSpec = {
     properties: {
       cwd: {
         type: 'string',
-        description: 'Optional working directory inside the allowed workspace root.',
+        description:
+          "Optional working directory inside the allowed workspace root. Pass the active project's absolute workspace path on hosts that do not report MCP roots.",
       },
       edits: {
         description:

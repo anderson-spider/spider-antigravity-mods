@@ -664,4 +664,189 @@ describe('mcp.ts', () => {
     )
     assert.equal(folderOf({ roots: [{ uri: pathToFileURL(ws2).href }] }), ws2)
   })
+
+  it('deduplicates concurrent roots/list requests and settles timeouts without re-stalling', async () => {
+    const ws1 = await makeTempDir('bt-mcp-dedup-')
+    const outbound: Array<Record<string, unknown>> = []
+
+    const srv = createMcpServer({
+      tools: [
+        {
+          name: 'demo_tool',
+          description: 'demo',
+          inputSchema: { type: 'object' },
+        },
+      ],
+      rootsTimeoutMs: 40,
+      write: (line) => outbound.push(JSON.parse(line) as Record<string, unknown>),
+      call: async (_name, _input, ctx) => ({
+        text: `root=${ctx.cwd ?? 'none'}`,
+      }),
+    })
+
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: PROTOCOL, capabilities: { roots: {} } },
+      }),
+    )
+    outbound.shift()
+
+    // Two concurrent tools/call requests share one outgoing roots/list request.
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'demo_tool', arguments: {} },
+      }),
+    )
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'demo_tool', arguments: {} },
+      }),
+    )
+
+    const rootsReqs = outbound.filter((m) => m.method === 'roots/list')
+    assert.equal(rootsReqs.length, 1, 'concurrent calls must share one in-flight roots/list')
+
+    // Let roots/list time out (simulating a host that never answers roots/list).
+    await new Promise((r) => setTimeout(r, 80))
+    const callResps = outbound.filter((m) => m.id === 2 || m.id === 3)
+    assert.equal(callResps.length, 2)
+
+    // Subsequent call settles immediately without sending another roots/list.
+    outbound.length = 0
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'demo_tool', arguments: {} },
+      }),
+    )
+    await new Promise((r) => setTimeout(r, 15))
+    assert.equal(outbound.filter((m) => m.method === 'roots/list').length, 0)
+    assert.equal(outbound.filter((m) => m.id === 4).length, 1)
+
+    // notifications/roots/list_changed re-enables roots discovery cleanly.
+    outbound.length = 0
+    await srv.receive(
+      JSON.stringify({ jsonrpc: '2.0', method: 'notifications/roots/list_changed' }),
+    )
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: { name: 'demo_tool', arguments: {} },
+      }),
+    )
+    const reqAfterChange = outbound.find((m) => m.method === 'roots/list') as { id: string } | undefined
+    assert.ok(reqAfterChange)
+    await srv.receive(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: reqAfterChange.id,
+        result: { roots: [{ uri: pathToFileURL(ws1).href }] },
+      }),
+    )
+    await new Promise((r) => setTimeout(r, 15))
+    const resp5 = outbound.find((m) => m.id === 5) as {
+      result: { content: Array<{ text: string }> }
+    }
+    assert.equal(resp5.result.content[0]!.text, `root=${ws1}`)
+  })
+
+  it('enforces Tier 4 validated explicit cwd guardrails when tiers 1-3 are unavailable', async () => {
+    const fakeHome = await makeTempDir('bt-t4-home-')
+    const pluginDir = await makeTempDir('bt-t4-plugin-')
+    await fs.writeFile(path.join(pluginDir, 'plugin.json'), '{}', 'utf8')
+
+    // Real project workspace with .git file (like a git worktree) and nested subdir.
+    const worktreeRoot = path.join(fakeHome, '.gemini', 'antigravity', 'worktrees', 'demo-repo', 'feat-1')
+    const worktreeSub = path.join(worktreeRoot, 'src')
+    await fs.mkdir(worktreeSub, { recursive: true })
+    await fs.writeFile(path.join(worktreeRoot, '.git'), 'gitdir: /tmp/fake\n', 'utf8')
+    await fs.writeFile(path.join(worktreeRoot, 'root-only.txt'), 'parent\n', 'utf8')
+    await fs.writeFile(path.join(worktreeSub, 'index.ts'), 'export const ok = 1\n', 'utf8')
+
+    // Non-project folder (no .git or project manifest).
+    const plainDir = path.join(fakeHome, 'scratch-no-marker')
+    await fs.mkdir(plainDir, { recursive: true })
+
+    // Forbidden directories, even if someone plants a fake package.json inside them!
+    const fakeSsh = path.join(fakeHome, '.ssh')
+    const fakeGeminiCfg = path.join(fakeHome, '.gemini', 'config')
+    const fakeGeminiBrain = path.join(fakeHome, '.gemini', 'antigravity', 'brain', 'conv-1')
+    const fakeT3 = path.join(fakeHome, '.t3')
+    const fakeSecrets = path.join(fakeHome, 'proj', 'secrets')
+    for (const dir of [fakeSsh, fakeGeminiCfg, fakeGeminiBrain, fakeT3, fakeSecrets]) {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, 'package.json'), '{"name":"decoy"}', 'utf8')
+    }
+    await fs.writeFile(path.join(pluginDir, 'package.json'), '{"name":"plugin"}', 'utf8')
+
+    const baseOpts = {
+      env: { HOME: fakeHome },
+      processCwd: () => pluginDir,
+      pluginRoot: pluginDir,
+    }
+
+    // 1. Valid Antigravity worktree project root is allowed and jails strictly to itself.
+    const wtPolicy = createPolicyGuard({ ...baseOpts, explicitCwd: worktreeRoot })
+    const wtRoots = await wtPolicy.getRoots()
+    assert.equal(wtRoots.ok, true)
+    assert.equal((await wtPolicy.authorizeRead('src/index.ts', worktreeRoot)).ok, true)
+    assert.equal((await wtPolicy.authorizeRead('../escape.txt', worktreeRoot)).ok, false)
+
+    // 2. Subdir inside project workspace is allowed, but jailed ONLY to that subdir (no upward widening).
+    const subPolicy = createPolicyGuard({ ...baseOpts, explicitCwd: worktreeSub })
+    assert.equal((await subPolicy.authorizeRead('index.ts', worktreeSub)).ok, true)
+    const parentEscape = await subPolicy.authorizeRead('../root-only.txt', worktreeSub)
+    assert.equal(parentEscape.ok, false)
+    assert.equal(parentEscape.reason, 'outside_workspace')
+
+    // 3. Omitted, relative, tilde, and non-project dirs are denied.
+    assert.equal((await createPolicyGuard(baseOpts).getRoots()).ok, false)
+    assert.equal((await createPolicyGuard({ ...baseOpts, explicitCwd: 'relative/path' }).getRoots()).ok, false)
+    assert.equal((await createPolicyGuard({ ...baseOpts, explicitCwd: '~/work' }).getRoots()).ok, false)
+    const plainRes = await createPolicyGuard({ ...baseOpts, explicitCwd: plainDir }).getRoots()
+    assert.equal(plainRes.ok, false)
+    assert.equal(plainRes.reason, 'outside_workspace')
+
+    // 4. Forbidden directories are ALWAYS denied even with planted package.json.
+    for (const badDir of [
+      '/',
+      fakeHome,
+      os.tmpdir(),
+      pluginDir,
+      fakeSsh,
+      fakeGeminiCfg,
+      fakeGeminiBrain,
+      fakeT3,
+      fakeSecrets,
+      path.join(fakeHome, '.gemini', 'antigravity', 'worktrees'),
+    ]) {
+      const res = await createPolicyGuard({ ...baseOpts, explicitCwd: badDir }).getRoots()
+      assert.equal(res.ok, false, `Expected forbidden explicit cwd to fail: ${badDir}`)
+    }
+
+    // 5. Higher tiers (Tier 1 mcpRoots, Tier 2 env) take precedence and NEVER fall through to Tier 4.
+    const otherRepo = await makeTempDir('bt-t4-other-')
+    await fs.writeFile(path.join(otherRepo, 'package.json'), '{}', 'utf8')
+    const tier2Policy = createPolicyGuard({
+      ...baseOpts,
+      env: { HOME: fakeHome, [ENV_WORKSPACE_ROOTS]: otherRepo },
+      explicitCwd: worktreeRoot,
+    })
+    const tier2Cwd = await tier2Policy.resolveCwd(worktreeRoot)
+    assert.equal(tier2Cwd.ok, false)
+    assert.equal(tier2Cwd.reason, 'outside_workspace')
+  })
 })

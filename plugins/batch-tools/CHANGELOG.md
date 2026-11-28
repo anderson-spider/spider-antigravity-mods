@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - 2026-11-27
+
+- Fix zero-config compatibility on hosts that do not respond to MCP `roots/list` (such as Antigravity Desktop Hub) by adding a strictly validated Tier 4 per-call project-root jail for explicit absolute `cwd` arguments (requiring a recognized project marker such as `.git` or a standard project manifest, rejecting `/`, `$HOME`, system/credential/config directories, and plugin directories, while keeping `~/.gemini/antigravity/worktrees/*` project checkouts allowed and preserving fail-closed behavior for omitted/relative `cwd` and higher-priority tiers).
+- Deduplicate concurrent in-flight `roots/list` requests in `server/mcp.ts`, lower default `rootsTimeoutMs` to 1s, and settle timeout/error responses until `notifications/roots/list_changed` so subsequent tool calls do not re-stall.
+- Document explicit absolute `cwd` usage in tool schemas, `SKILL.md`, and `README.md`.
+
 ## 0.1.0 - 2026-11-27
 
 - Initial standalone Antigravity release of `batch-tools` (`batch-tools` MCP server and `batch-tools` routing skill) with zero runtime dependencies on Node.js 22.18+ native TypeScript.

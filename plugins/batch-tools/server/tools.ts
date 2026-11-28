@@ -24,7 +24,8 @@ export const BATCH_SEARCH_TOOL_SPEC: ToolSpec = {
     properties: {
       cwd: {
         type: 'string',
-        description: 'Optional working directory inside the allowed workspace root.',
+        description:
+          "Optional working directory inside the allowed workspace root. Pass the active project's absolute workspace path on hosts that do not report MCP roots.",
       },
       queries: {
         type: 'array',
@@ -81,7 +82,8 @@ export const QUICK_OUTLINE_TOOL_SPEC: ToolSpec = {
     properties: {
       cwd: {
         type: 'string',
-        description: 'Optional working directory inside the allowed workspace root.',
+        description:
+          "Optional working directory inside the allowed workspace root. Pass the active project's absolute workspace path on hosts that do not report MCP roots.",
       },
       paths: {
         type: 'array',
@@ -112,7 +114,8 @@ export const READ_SLICES_TOOL_SPEC: ToolSpec = {
     properties: {
       cwd: {
         type: 'string',
-        description: 'Optional working directory inside the allowed workspace root.',
+        description:
+          "Optional working directory inside the allowed workspace root. Pass the active project's absolute workspace path on hosts that do not report MCP roots.",
       },
       outlines: {
         type: 'array',
@@ -192,6 +195,7 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
     async call(name, input, context) {
       const policy = createPolicyGuard({
         mcpRoots: context.cwds.length > 0 ? context.cwds : undefined,
+        explicitCwd: typeof input.cwd === 'string' ? input.cwd : undefined,
         env: options.env,
         processCwd: options.processCwd,
         pluginRoot: options.pluginRoot,
