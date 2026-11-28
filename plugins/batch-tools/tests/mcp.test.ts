@@ -271,7 +271,7 @@ describe('MCP stdio E2E (server/main.ts)', () => {
           arguments: {
             queries: [
               { type: 'text', pattern: 'multiply' },
-              { type: 'text', pattern: 'API_SECRET=', glob: '**/*' },
+              { type: 'text', pattern: 'API_SECRET=', glob: '.env*' },
               { type: 'glob', pattern: 'src/*.py' },
               { type: 'fuzzy', pattern: 'mth' },
             ],
