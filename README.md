@@ -6,7 +6,7 @@ Native plugins for [Google Antigravity](https://antigravity.google) by [anderson
 
 | Plugin | Version | Description |
 | :--- | :--- | :--- |
-| [`batch-tools`](./plugins/batch-tools) | `0.1.1` | Hardened, zero-dependency batch code search (`ripgrep` with pure-Node fallback), multi-file symbol outlines and line slices, and atomic multi-file edits with strict workspace confinement and inline byte budgeting. |
+| [`batch-tools`](./plugins/batch-tools) | `0.1.2` | Hardened, zero-dependency batch code search (`ripgrep` with pure-Node fallback), multi-file symbol outlines and line slices, and atomic multi-file edits with strict workspace confinement and inline byte budgeting. |
 | [`claude-agent`](./plugins/claude-agent) | `0.5.0` | Agent-driven Claude Code monitor and Antigravity bridge powered by `@agentclientprotocol/claude-agent-acp`, with streaming responses, grouped tool timelines, diffs, permission approvals, automatic async reply delivery, and scoped session archiving and persistence across sidebar and side pane. |
 | [`gitlab`](./plugins/gitlab) | `0.5.2` | Work on GitLab merge requests, comments, draft notes, pipelines, jobs, and labels with an interactive MR Dashboard (multi-repo tracking, isolated worktree checkout, hierarchical diff file tree, Global sidebar & side pane) across `gitlab.com` and self-hosted GitLab instances. |
 | [`usage-monitor`](./plugins/usage-monitor) | `2.0.0` | Local offline MCP App and CLI `statusLine` monitor for token usage, generation speed (`tok/s`), TTFT, context breakdown, quota pace, and Session Health diagnostics (left sidebar `global`, right side pane `aux_pane`, and inline chat health card). |

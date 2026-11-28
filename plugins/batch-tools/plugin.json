@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "batch-tools",
   "displayName": "Batch Tools",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Hardened, zero-dependency batch search (ripgrep with Node fallback), multi-file symbol outlines and line slices, and atomic multi-file edits with strict workspace confinement and inline byte budgeting.",
   "logo": "assets/logo.svg",
   "author": {
