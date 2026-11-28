@@ -11,6 +11,7 @@ import type {
   SessionSnapshot,
   SessionSummary,
   ToastMessage,
+  UiPreferences,
 } from '../types.ts'
 import { ChatThread } from './ChatThread.tsx'
 import { DiagnosticsPanel } from './DiagnosticsPanel.tsx'
@@ -26,7 +27,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { app, isConnected, error: connectError } = useApp({
-    appInfo: { name: 'claude-agent-ui', version: '0.3.2' },
+    appInfo: { name: 'claude-agent-ui', version: '0.4.0' },
     capabilities: {},
     onAppCreated: instance => {
       instance.ontoolresult = result => {
@@ -86,6 +87,9 @@ export function App() {
   })
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [activeSession, setActiveSession] = useState<SessionSnapshot | null>(null)
+  const [preferences, setPreferences] = useState<UiPreferences | undefined>(undefined)
+  const [truncatedSessionId, setTruncatedSessionId] = useState<string | null>(null)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [diagOpen, setDiagOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -149,11 +153,15 @@ export function App() {
   const applyBootstrap = useCallback((payload: BootstrapPayload) => {
     setDiagnostics(payload.diagnostics)
     setSessions(payload.sessions ?? [])
+    if (payload.preferences) {
+      setPreferences(payload.preferences)
+    }
     if (typeof payload.catalogVersion === 'number') {
       catalogVersionRef.current = Math.max(catalogVersionRef.current, payload.catalogVersion)
     }
     if (payload.activeSession) {
       setActiveSession(payload.activeSession)
+      setTruncatedSessionId(payload.truncatedItems ? payload.activeSession.sessionId : null)
     }
     if (payload.pendingReplies?.length) {
       void deliverPendingReplies(payload.pendingReplies)
@@ -343,6 +351,7 @@ export function App() {
     })
     if (gen !== selectGenRef.current) return
     if (getRes.ok && getRes.data?.session) {
+      setTruncatedSessionId(null)
       updateSessionSnapshot(getRes.data.session)
     } else if (!getRes.ok) {
       setBusy(false)
@@ -444,6 +453,37 @@ export function App() {
       value,
     })
     if (res.ok && res.data?.session) updateSessionSnapshot(res.data.session)
+  }
+
+  const handleSaveDefaults = async (modeId: string, modelId?: string) => {
+    if (!bridge) return
+    const res = await bridge.callTool<{ preferences: UiPreferences }>('claude_ui_fs', {
+      action: 'save_prefs',
+      defaultModeId: modeId,
+      ...(modelId ? { defaultModelId: modelId } : {}),
+    })
+    if (res.ok && res.data?.preferences) {
+      setPreferences(res.data.preferences)
+      pushToast('Default mode & model saved', undefined, 'success')
+    } else if (!res.ok) {
+      pushToast('Could not save defaults', res.text, 'error')
+    }
+  }
+
+  const handleLoadEarlier = async () => {
+    if (!bridge || !activeSession || loadingEarlier) return
+    setLoadingEarlier(true)
+    const res = await bridge.callTool<{ session: SessionSnapshot }>('claude_ui_session', {
+      action: 'get',
+      sessionId: activeSession.sessionId,
+    })
+    setLoadingEarlier(false)
+    if (res.ok && res.data?.session) {
+      setTruncatedSessionId(null)
+      updateSessionSnapshot(res.data.session)
+    } else if (!res.ok) {
+      pushToast('Could not load earlier messages', res.text, 'error')
+    }
   }
 
   const handleResolvePermission = async (requestId: string, outcome: 'selected' | 'cancelled', optionId?: string) => {
@@ -672,10 +712,37 @@ export function App() {
           </div>
         )}
 
+        {(() => {
+          const pendingElsewhere = sessions.filter(
+            s => s.pendingPermissionCount > 0 && s.sessionId !== activeSession?.sessionId,
+          )
+          if (pendingElsewhere.length === 0) return null
+          const first = pendingElsewhere[0]!
+          const extra = pendingElsewhere.length - 1
+          return (
+            <div className="diag-alert-bar perm-alert-bar" role="alert">
+              <span className="truncate">
+                Approval needed in &ldquo;{first.title}&rdquo;
+                {extra > 0 ? ` (+${extra} more)` : ''}
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => void handleSelectSession(first.sessionId)}
+              >
+                Open
+              </button>
+            </div>
+          )
+        })()}
+
         {activeSession ? (
           <>
             <ChatThread
               session={activeSession}
+              hasEarlierItems={truncatedSessionId === activeSession.sessionId}
+              loadingEarlier={loadingEarlier}
+              onLoadEarlier={() => void handleLoadEarlier()}
               onOpenFile={path => void handleOpenFile(path)}
               onOpenLink={url => void bridge?.openLink(url)}
               onResolvePermission={(reqId, outcome, optId) => void handleResolvePermission(reqId, outcome, optId)}
@@ -683,6 +750,7 @@ export function App() {
             />
             <SessionControlBar
               session={activeSession}
+              preferences={preferences}
               busy={busy}
               canMessage={caps.canMessage}
               canUpdateContext={caps.canUpdateContext}
@@ -690,6 +758,7 @@ export function App() {
               onSetMode={modeId => void handleSetMode(modeId)}
               onSetModel={modelId => void handleSetModel(modelId)}
               onSetConfig={(cfgId, val) => void handleSetConfig(cfgId, val)}
+              onSaveDefaults={(modeId, modelId) => void handleSaveDefaults(modeId, modelId)}
               onAttachContext={() => void handleAttachContext()}
               onSendToHostChat={() => void handleSendToHostChat()}
             />

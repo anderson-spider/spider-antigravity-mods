@@ -1057,3 +1057,102 @@ test('pollEvents pushes live catalog updates and focusSessionId across views inc
   assert.equal(woke.focusSessionId, secondSessionId)
   assert.ok(woke.sessions?.some(s => s.sessionId === secondSessionId))
 })
+
+test('permission request/resolve bumps catalogVersion across sessions and finalizes active thought before turn end', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-perm-catalog-'))
+  const manager = createTestManager(dir, dir)
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const sessionA = await manager.createSession({ cwd: dir })
+  const sessionB = await manager.createSession({ cwd: dir })
+
+  const boot = await manager.getBootstrap({ workspaceRoots: [dir], sessionId: sessionB.sessionId })
+  const catalogBefore = boot.catalogVersion
+
+  // View watching session B polls with afterCatalogVersion
+  const pollBWaitReq = manager.pollEvents(sessionB.sessionId, sessionB.latestSeq, 5_000, 'view-b', catalogBefore)
+  await new Promise(r => setTimeout(r, 20))
+
+  // Start permission-triggering prompt on session A (may bump catalog on startPrompt before permission arrives)
+  await manager.startPrompt(sessionA.sessionId, '[trigger:permission] edit src/app.ts')
+
+  // View watching session B should wake promptly via catalogVersion updates until pendingPermissionCount === 1
+  let pollBAfterReq = await pollBWaitReq
+  let summaryA1 = pollBAfterReq.sessions?.find(s => s.sessionId === sessionA.sessionId)
+  for (let attempt = 0; attempt < 5 && (summaryA1?.pendingPermissionCount ?? 0) !== 1; attempt++) {
+    pollBAfterReq = await manager.pollEvents(
+      sessionB.sessionId,
+      pollBAfterReq.latestSeq,
+      2_000,
+      'view-b',
+      pollBAfterReq.catalogVersion,
+    )
+    summaryA1 = pollBAfterReq.sessions?.find(s => s.sessionId === sessionA.sessionId)
+  }
+  assert.ok(pollBAfterReq.catalogVersion > catalogBefore, 'expected catalogVersion bump on permission_request')
+  assert.equal(summaryA1?.pendingPermissionCount, 1)
+
+  // While session A is still paused waiting for permission, its preceding thought item must already be finalized (streaming=false)
+  const midSnap = (await manager.handleUiSession({ action: 'get', sessionId: sessionA.sessionId }, [dir]))
+    .structuredContent as {
+    session: {
+      items: { kind: string; streaming?: boolean }[]
+      pendingPermissions: { requestId: string }[]
+    }
+  }
+  const thoughtItem = midSnap.session.items.find(i => i.kind === 'thought')
+  assert.ok(thoughtItem, 'expected thought item before tool_call')
+  assert.equal(thoughtItem!.streaming, false, 'thought item should finalize as soon as tool_call arrives')
+  const requestId = midSnap.session.pendingPermissions[0]?.requestId
+  assert.ok(requestId, 'expected pending permission on session A')
+
+  // Resolving permission on session A must bump catalogVersion again and clear pendingPermissionCount on view B
+  const pollBWaitRes = manager.pollEvents(
+    sessionB.sessionId,
+    pollBAfterReq.latestSeq,
+    5_000,
+    'view-b',
+    pollBAfterReq.catalogVersion,
+  )
+  await new Promise(r => setTimeout(r, 20))
+
+  await manager.resolvePermission(sessionA.sessionId, requestId!, 'selected', 'allow_once')
+
+  const pollBAfterRes = await pollBWaitRes
+  assert.ok(pollBAfterRes.catalogVersion > pollBAfterReq.catalogVersion, 'expected catalogVersion bump on resolvePermission')
+  const summaryA2 = pollBAfterRes.sessions?.find(s => s.sessionId === sessionA.sessionId)
+  assert.equal(summaryA2?.pendingPermissionCount, 0)
+})
+
+test('save_prefs rejects bypassPermissions as default and applies valid saved defaults to new sessions', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-agent-save-prefs-'))
+  const manager = createTestManager(dir, dir)
+  t.after(async () => {
+    await manager.dispose()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const rejected = await manager.handleUiFs(
+    { action: 'save_prefs', defaultModeId: 'bypassPermissions' },
+    [dir],
+  )
+  assert.equal(rejected.isError, true)
+  assert.ok(rejected.text.includes('bypassPermissions'))
+
+  const saved = await manager.handleUiFs(
+    { action: 'save_prefs', defaultModeId: 'acceptEdits', defaultModelId: 'claude-sonnet-4-5' },
+    [dir],
+  )
+  assert.equal(saved.isError, undefined)
+  const savedPrefs = (saved.structuredContent as { preferences: { defaultModeId?: string; defaultModelId?: string } })
+    .preferences
+  assert.equal(savedPrefs.defaultModeId, 'acceptEdits')
+  assert.equal(savedPrefs.defaultModelId, 'claude-sonnet-4-5')
+
+  const nextSession = await manager.createSession({ cwd: dir })
+  assert.equal(nextSession.modeId, 'acceptEdits')
+  assert.equal(nextSession.modelId, 'claude-sonnet-4-5')
+})
